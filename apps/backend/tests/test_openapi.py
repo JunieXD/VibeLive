@@ -19,6 +19,10 @@ def test_openapi_includes_http_and_realtime_contracts() -> None:
     assert "ClientAudioCommit" in schemas
     assert "IngestAck" in schemas
     assert "IngestRejected" in schemas
+    assert "SessionStartRequest" in schemas
+    assert "SessionStartResponse" in schemas
+    assert "PersonaMemoryRevisionCommitted" in schemas
+    assert "ModeMemeChanged" in schemas
     start_parameters = schema["paths"]["/sessions"]["post"]["parameters"]
     version_header = next(
         parameter
@@ -26,10 +30,10 @@ def test_openapi_includes_http_and_realtime_contracts() -> None:
         if parameter["name"] == "X-ADVX-Protocol-Version"
     )
     assert version_header["required"] is True
-    assert version_header["schema"]["const"] == "1"
+    assert version_header["schema"]["const"] == "2"
     assert schema["x-advx-realtime"] == {
         "path": "/ws",
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "clientMessage": {
             "$ref": "#/components/schemas/ClientMessageEnvelope",
         },

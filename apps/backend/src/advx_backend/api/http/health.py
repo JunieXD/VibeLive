@@ -10,7 +10,7 @@ router = APIRouter(tags=["system"])
 
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
 
 
 @router.get("/health", response_model=HealthResponse)

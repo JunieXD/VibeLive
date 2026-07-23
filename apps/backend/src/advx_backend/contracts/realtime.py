@@ -89,19 +89,19 @@ class ClientMessageEnvelope(RootModel[ClientMessage]):
 
 class BackendReady(RealtimeMessage):
     type: Literal["backend.ready"] = "backend.ready"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     session: SessionSnapshot
 
 
 class BackendPong(RealtimeMessage):
     type: Literal["backend.pong"] = "backend.pong"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     request_id: str
 
 
 class SessionStatusEvent(RealtimeMessage):
     type: Literal["session.status"] = "session.status"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     session: SessionSnapshot
 
 
@@ -109,11 +109,15 @@ class BarrageSnapshot(BaseModel):
     barrage_id: str
     session_id: str
     observation_id: str
+    decision_id: str
     request_id: str
-    audience_id: str
+    viewer_instance_id: str
+    persona_id: str
+    persona_revision: int
+    display_name: str
+    display_color: str
     text: str
-    created_at_ms: int
-    expires_at_ms: int
+    accepted_at_ms: int
 
     @classmethod
     def from_domain(cls, event: BarrageEvent) -> "BarrageSnapshot":
@@ -121,23 +125,48 @@ class BarrageSnapshot(BaseModel):
             barrage_id=event.barrage_id,
             session_id=event.session_id,
             observation_id=event.observation_id,
+            decision_id=event.request_id,
             request_id=event.request_id,
-            audience_id=event.audience_id,
+            viewer_instance_id=event.audience_id,
+            persona_id=event.audience_id,
+            persona_revision=1,
+            display_name=event.audience_id,
+            display_color="#FFFFFF",
             text=event.text,
-            created_at_ms=event.created_at_ms,
-            expires_at_ms=event.expires_at_ms,
+            accepted_at_ms=event.created_at_ms,
         )
 
 
 class BarrageEventMessage(RealtimeMessage):
     type: Literal["barrage.event"] = "barrage.event"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     barrage: BarrageSnapshot
+
+
+class PersonaMemoryRevisionCommitted(RealtimeMessage):
+    type: Literal["persona_memory.revision_committed"] = (
+        "persona_memory.revision_committed"
+    )
+    protocol_version: Literal[2] = PROTOCOL_VERSION
+    persona_id: str = Field(min_length=1, max_length=128)
+    collection_revision: int = Field(ge=1)
+    committed_at_ms: int = Field(ge=0)
+
+
+class ModeMemeChanged(RealtimeMessage):
+    type: Literal["mode_meme.changed"] = "mode_meme.changed"
+    protocol_version: Literal[2] = PROTOCOL_VERSION
+    mode_id: str = Field(min_length=1, max_length=128)
+    mode_namespace_id: str = Field(min_length=1, max_length=128)
+    meme_id: str = Field(min_length=1, max_length=128)
+    revision: int = Field(ge=1)
+    status: str = Field(min_length=1, max_length=32)
+    changed_at_ms: int = Field(ge=0)
 
 
 class RealtimeProtocolError(RealtimeMessage):
     type: Literal["protocol.error"] = "protocol.error"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     code: RealtimeProtocolErrorCode
     message: str = Field(min_length=1, max_length=256)
     supported_version: int | None = None
@@ -145,7 +174,7 @@ class RealtimeProtocolError(RealtimeMessage):
 
 class IngestAck(RealtimeMessage):
     type: Literal["ingest.ack"] = "ingest.ack"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     input_kind: IngestInputKind
@@ -155,7 +184,7 @@ class IngestAck(RealtimeMessage):
 
 class IngestRejected(RealtimeMessage):
     type: Literal["ingest.rejected"] = "ingest.rejected"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     code: IngestRejectionCode
     message: str = Field(min_length=1, max_length=256)
     session_id: str | None = Field(
@@ -176,6 +205,8 @@ ServerMessage = Annotated[
     | BackendPong
     | SessionStatusEvent
     | BarrageEventMessage
+    | PersonaMemoryRevisionCommitted
+    | ModeMemeChanged
     | RealtimeProtocolError
     | IngestAck
     | IngestRejected,

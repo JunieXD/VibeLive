@@ -1,0 +1,118 @@
+{
+  "canonicalization": {
+    "algorithm": "sha256",
+    "encoding": "utf-8",
+    "expected_hash": "4cc933d208e533e3f4da7219f635b3a837aad904018156f6e1f70d8ee50d8831",
+    "json": {
+      "ensure_ascii": false,
+      "separators": [
+        ",",
+        ":"
+      ],
+      "sort_keys": true
+    }
+  },
+  "migration": {
+    "revision": "0002_viewer_runtime",
+    "required_tables": {
+      "mode_memes": [
+        "mode_namespace_id",
+        "mode_id",
+        "source_mode_revision",
+        "revision",
+        "status",
+        "pinned"
+      ],
+      "persona_memory_candidates": [
+        "candidate_id",
+        "persona_id",
+        "expected_head_revision",
+        "source_event_ids",
+        "status"
+      ],
+      "persona_memory_heads": [
+        "persona_id",
+        "collection_revision",
+        "updated_at_ms"
+      ],
+      "session_audience_snapshots": [
+        "session_id",
+        "client_start_request_id",
+        "audience_contract_version",
+        "config_hash",
+        "normalized_config"
+      ],
+      "session_viewer_instances": [
+        "viewer_instance_id",
+        "session_id",
+        "persona_id",
+        "allocation_ordinal",
+        "state"
+      ]
+    }
+  },
+  "session_start": {
+    "client_start_request_id": "start-fixture-001",
+    "config_hash": "4cc933d208e533e3f4da7219f635b3a837aad904018156f6e1f70d8ee50d8831"
+  },
+  "normalized_audience_config": {
+    "audience_contract_version": 1,
+    "mode": {
+      "ambience": "chaotic",
+      "base_activity": {
+        "max": 3,
+        "min": 1
+      },
+      "burst_limit": {
+        "max": 5,
+        "min": 2
+      },
+      "mode_id": "room-6657",
+      "namespace_id": "builtin:room-6657",
+      "persona_ids": [
+        "persona-troll",
+        "persona-meme"
+      ],
+      "persona_overrides": {
+        "persona-meme": {
+          "display_name": "梗王"
+        },
+        "persona-troll": {
+          "display_name": "嘴硬哥"
+        }
+      },
+      "persona_weights": {
+        "persona-meme": 2,
+        "persona-troll": 3
+      },
+      "revision": 1,
+      "viewer_count": 5
+    },
+    "personas": [
+      {
+        "base_content": {
+          "personality": "爱玩梗\n但不攻击用户。",
+          "speaking_style": "短句"
+        },
+        "display_color": "#33AAFF",
+        "display_name": "梗王",
+        "document_version": 1,
+        "enabled": true,
+        "persona_id": "persona-meme",
+        "revision": 1
+      },
+      {
+        "base_content": {
+          "personality": "嘴硬心软",
+          "speaking_style": "简短吐槽"
+        },
+        "display_color": "#FF5533",
+        "display_name": "嘴硬哥",
+        "document_version": 1,
+        "enabled": true,
+        "persona_id": "persona-troll",
+        "revision": 2
+      }
+    ]
+  }
+}

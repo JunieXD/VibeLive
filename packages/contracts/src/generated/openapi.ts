@@ -128,6 +128,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActivityBand */
+        ActivityBand: {
+            /** Min */
+            min: number;
+            /** Max */
+            max: number;
+        };
+        /** AudienceModeConfiguration */
+        AudienceModeConfiguration: {
+            /** Mode Id */
+            mode_id: string;
+            /** Namespace Id */
+            namespace_id: string;
+            /** Revision */
+            revision: number;
+            /** Viewer Count */
+            viewer_count: number;
+            /** Ambience */
+            ambience: string;
+            base_activity: components["schemas"]["ActivityBand"];
+            burst_limit: components["schemas"]["ActivityBand"];
+            /** Persona Ids */
+            persona_ids: string[];
+            /** Persona Weights */
+            persona_weights: {
+                [key: string]: number;
+            };
+            /** Persona Overrides */
+            persona_overrides?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -143,10 +177,39 @@ export interface components {
             status: "ok";
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
+        };
+        /** PersonaAllocation */
+        PersonaAllocation: {
+            /** Persona Id */
+            persona_id: string;
+            /** Viewer Count */
+            viewer_count: number;
+        };
+        /** PersonaTemplate */
+        PersonaTemplate: {
+            /** Persona Id */
+            persona_id: string;
+            /**
+             * Document Version
+             * @constant
+             */
+            document_version: 1;
+            /** Revision */
+            revision: number;
+            /** Display Name */
+            display_name: string;
+            /** Display Color */
+            display_color: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Base Content */
+            base_content: {
+                [key: string]: unknown;
+            };
         };
         /** ProviderConfigurationRequest */
         ProviderConfigurationRequest: {
@@ -181,6 +244,46 @@ export interface components {
             updated_at_ms: number;
             /** Revision */
             revision: number;
+        };
+        /** SessionStartRequest */
+        SessionStartRequest: {
+            /** Client Start Request Id */
+            client_start_request_id: string;
+            /**
+             * Audience Contract Version
+             * @default 1
+             * @constant
+             */
+            audience_contract_version: 1;
+            /** Config Hash */
+            config_hash: string;
+            mode: components["schemas"]["AudienceModeConfiguration"];
+            /** Personas */
+            personas: components["schemas"]["PersonaTemplate"][];
+        };
+        /** SessionStartResponse */
+        SessionStartResponse: {
+            /** Session Id */
+            session_id: string;
+            state: components["schemas"]["SessionState"];
+            /** Started At Ms */
+            started_at_ms: number | null;
+            /** Updated At Ms */
+            updated_at_ms: number;
+            /** Revision */
+            revision: number;
+            /** Snapshot Hash */
+            snapshot_hash: string;
+            /** Mode Id */
+            mode_id: string;
+            /** Mode Namespace Id */
+            mode_namespace_id: string;
+            /** Mode Revision */
+            mode_revision: number;
+            /** Viewer Count */
+            viewer_count: number;
+            /** Allocations */
+            allocations: components["schemas"]["PersonaAllocation"][];
         };
         /**
          * SessionState
@@ -264,10 +367,10 @@ export interface components {
         BackendPong: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -280,10 +383,10 @@ export interface components {
         BackendReady: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -295,10 +398,10 @@ export interface components {
         BarrageEventMessage: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -314,25 +417,33 @@ export interface components {
             session_id: string;
             /** Observation Id */
             observation_id: string;
+            /** Decision Id */
+            decision_id: string;
             /** Request Id */
             request_id: string;
-            /** Audience Id */
-            audience_id: string;
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Persona Id */
+            persona_id: string;
+            /** Persona Revision */
+            persona_revision: number;
+            /** Display Name */
+            display_name: string;
+            /** Display Color */
+            display_color: string;
             /** Text */
             text: string;
-            /** Created At Ms */
-            created_at_ms: number;
-            /** Expires At Ms */
-            expires_at_ms: number;
+            /** Accepted At Ms */
+            accepted_at_ms: number;
         };
         /** IngestAck */
         IngestAck: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -361,10 +472,10 @@ export interface components {
         IngestRejected: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -391,14 +502,60 @@ export interface components {
          * @enum {string}
          */
         IngestRejectionCode: "invalid_input" | "session_not_active" | "duplicate_input" | "unknown_input" | "out_of_order" | "payload_too_large" | "unsupported_format" | "unsupported_binary_version" | "unsupported_media_type" | "malformed_binary_envelope" | "pipeline_unavailable";
+        /** ModeMemeChanged */
+        ModeMemeChanged: {
+            /**
+             * Protocol Version
+             * @default 2
+             * @constant
+             */
+            protocol_version: 2;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "mode_meme.changed";
+            /** Mode Id */
+            mode_id: string;
+            /** Mode Namespace Id */
+            mode_namespace_id: string;
+            /** Meme Id */
+            meme_id: string;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+            /** Changed At Ms */
+            changed_at_ms: number;
+        };
+        /** PersonaMemoryRevisionCommitted */
+        PersonaMemoryRevisionCommitted: {
+            /**
+             * Protocol Version
+             * @default 2
+             * @constant
+             */
+            protocol_version: 2;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "persona_memory.revision_committed";
+            /** Persona Id */
+            persona_id: string;
+            /** Collection Revision */
+            collection_revision: number;
+            /** Committed At Ms */
+            committed_at_ms: number;
+        };
         /** RealtimeProtocolError */
         RealtimeProtocolError: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -422,10 +579,10 @@ export interface components {
         SessionStatusEvent: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -434,7 +591,7 @@ export interface components {
             session: components["schemas"]["SessionSnapshot"];
         };
         /** ServerMessageEnvelope */
-        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["RealtimeProtocolError"] | components["schemas"]["IngestAck"] | components["schemas"]["IngestRejected"];
+        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["PersonaMemoryRevisionCommitted"] | components["schemas"]["ModeMemeChanged"] | components["schemas"]["RealtimeProtocolError"] | components["schemas"]["IngestAck"] | components["schemas"]["IngestRejected"];
         /**
          * BinaryMediaType
          * @enum {string}
@@ -462,6 +619,194 @@ export interface components {
             format: string;
             /** Body Length */
             body_length: number;
+        };
+        /** FrameRef */
+        FrameRef: {
+            /** Frame Id */
+            frame_id: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Mime Type */
+            mime_type: string;
+            /** Data Ref */
+            data_ref: string;
+        };
+        /** MemeCandidate */
+        MemeCandidate: {
+            /** Mode Id */
+            mode_id: string;
+            /** Mode Namespace Id */
+            mode_namespace_id: string;
+            /** Evidence Event Ids */
+            evidence_event_ids?: string[];
+            /** Text */
+            text: string;
+            /** Tags */
+            tags?: string[];
+            /** Created At Ms */
+            created_at_ms: number;
+        };
+        /** Observation */
+        Observation: {
+            /** Session Id */
+            session_id: string;
+            /** Observation Id */
+            observation_id: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Frames */
+            frames?: components["schemas"]["FrameRef"][];
+            /** Room Events */
+            room_events?: components["schemas"]["RoomEvent"][];
+            /** User Context */
+            user_context?: {
+                [key: string]: string;
+            };
+        };
+        /** RoomEvent */
+        RoomEvent: {
+            /** Event Id */
+            event_id: string;
+            /** Session Id */
+            session_id: string;
+            source_type: components["schemas"]["RoomEventSource"];
+            /**
+             * Source Id
+             * @default null
+             */
+            source_id: string | null;
+            /** Created At Ms */
+            created_at_ms: number;
+            /**
+             * Text
+             * @default null
+             */
+            text: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RoomEventSource
+         * @enum {string}
+         */
+        RoomEventSource: "user_text" | "user_voice" | "audience_barrage" | "screen_observation" | "system_event";
+        /** ViewerPoolEntry */
+        ViewerPoolEntry: {
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Persona Id */
+            persona_id: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** DirectorRequest */
+        DirectorRequest: {
+            /** Request Id */
+            request_id: string;
+            observation: components["schemas"]["Observation"];
+            mode: components["schemas"]["AudienceModeConfiguration"];
+            /** Viewer Pool */
+            viewer_pool: components["schemas"]["ViewerPoolEntry"][];
+            /** Recent Room State */
+            recent_room_state?: components["schemas"]["RoomEvent"][];
+            /** Active Memes */
+            active_memes?: components["schemas"]["MemeCandidate"][];
+        };
+        /** CrowdDecision */
+        CrowdDecision: {
+            /** Decision Id */
+            decision_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Observation Id */
+            observation_id: string;
+            /** Selected Viewer Instance Ids */
+            selected_viewer_instance_ids?: string[];
+            /** Intent */
+            intent: string;
+            /** Event Level */
+            event_level: string;
+            /** Silent */
+            silent: boolean;
+            /** Evidence Event Ids */
+            evidence_event_ids?: string[];
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Expires At Ms */
+            expires_at_ms: number;
+            /** Meme Candidates */
+            meme_candidates?: components["schemas"]["MemeCandidate"][];
+        };
+        /** AudienceMemory */
+        AudienceMemory: {
+            /** Memory Id */
+            memory_id: string;
+            /** Audience Id */
+            audience_id: string;
+            /** Content */
+            content: string;
+            /** Source Event Ids */
+            source_event_ids?: string[];
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Updated At Ms */
+            updated_at_ms: number;
+        };
+        /** ViewerGenerationRequest */
+        ViewerGenerationRequest: {
+            /** Request Id */
+            request_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Observation Id */
+            observation_id: string;
+            /** Decision Id */
+            decision_id: string;
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Persona Id */
+            persona_id: string;
+            observation: components["schemas"]["Observation"];
+            compiled_persona: components["schemas"]["PersonaTemplate"];
+            /** Instance State */
+            instance_state?: {
+                [key: string]: unknown;
+            };
+            /** Persona Memory Revision */
+            persona_memory_revision: number;
+            /** Persona Memories */
+            persona_memories?: components["schemas"]["AudienceMemory"][];
+            /** Active Memes */
+            active_memes?: components["schemas"]["MemeCandidate"][];
+        };
+        /** ViewerComment */
+        ViewerComment: {
+            /** Text */
+            text: string;
+        };
+        /** ViewerGenerationResult */
+        ViewerGenerationResult: {
+            /** Request Id */
+            request_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Observation Id */
+            observation_id: string;
+            /** Decision Id */
+            decision_id: string;
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Persona Id */
+            persona_id: string;
+            /** Silent */
+            silent: boolean;
+            /** Comments */
+            comments?: components["schemas"]["ViewerComment"][];
         };
     };
     responses: never;
@@ -496,7 +841,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path?: never;
             cookie?: never;
@@ -527,7 +872,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path?: never;
             cookie?: never;
@@ -562,7 +907,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path?: never;
             cookie?: never;
@@ -593,12 +938,16 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionStartRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
@@ -606,7 +955,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionSnapshot"];
+                    "application/json": components["schemas"]["SessionStartResponse"];
                 };
             };
             /** @description Validation Error */
@@ -624,7 +973,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path: {
                 session_id: string;
@@ -657,7 +1006,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path: {
                 session_id: string;
@@ -690,7 +1039,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path: {
                 session_id: string;

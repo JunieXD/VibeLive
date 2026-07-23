@@ -1,6 +1,13 @@
 from typing import Any
 
 from advx_backend.contracts.binary import BinaryEnvelopeHeader
+from advx_backend.contracts.generation import (
+    CrowdDecision,
+    DirectorRequest,
+    MemeCandidate,
+    ViewerGenerationRequest,
+    ViewerGenerationResult,
+)
 from advx_backend.contracts.protocol import PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER
 from advx_backend.contracts.realtime import ClientMessageEnvelope, ServerMessageEnvelope
 
@@ -9,7 +16,16 @@ def add_realtime_schemas(schema: dict[str, Any]) -> dict[str, Any]:
     components = schema.setdefault("components", {})
     schemas = components.setdefault("schemas", {})
 
-    for model in (ClientMessageEnvelope, ServerMessageEnvelope, BinaryEnvelopeHeader):
+    for model in (
+        ClientMessageEnvelope,
+        ServerMessageEnvelope,
+        BinaryEnvelopeHeader,
+        DirectorRequest,
+        CrowdDecision,
+        MemeCandidate,
+        ViewerGenerationRequest,
+        ViewerGenerationResult,
+    ):
         model_schema = model.model_json_schema(
             ref_template="#/components/schemas/{model}",
         )

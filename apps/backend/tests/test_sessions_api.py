@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -32,11 +33,20 @@ class FailingSessionStore:
 def request_headers(
     *,
     token: str = LOCAL_TOKEN,
-    protocol_version: str = "1",
+    protocol_version: str = "2",
 ) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
         PROTOCOL_VERSION_HEADER: protocol_version,
+    }
+
+
+def session_start_payload() -> dict[str, object]:
+    fixture_path = Path(__file__).parent / "fixtures" / "g002_audience_contract_v1.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    return {
+        **fixture["normalized_audience_config"],
+        **fixture["session_start"],
     }
 
 
@@ -46,15 +56,18 @@ def test_session_api_requires_local_token_and_protocol_version(tmp_path: Path) -
     with TestClient(app) as client:
         missing_token = client.post(
             "/sessions",
-            headers={PROTOCOL_VERSION_HEADER: "1"},
+            headers={PROTOCOL_VERSION_HEADER: "2"},
+            json=session_start_payload(),
         )
         missing_version = client.post(
             "/sessions",
             headers={"Authorization": f"Bearer {LOCAL_TOKEN}"},
+            json=session_start_payload(),
         )
         wrong_version = client.post(
             "/sessions",
-            headers=request_headers(protocol_version="2"),
+            headers=request_headers(protocol_version="1"),
+            json=session_start_payload(),
         )
 
     assert missing_token.status_code == 401
@@ -62,14 +75,18 @@ def test_session_api_requires_local_token_and_protocol_version(tmp_path: Path) -
     assert missing_version.status_code == 426
     assert missing_version.json()["detail"]["code"] == "protocol_version_mismatch"
     assert wrong_version.status_code == 426
-    assert wrong_version.headers[PROTOCOL_VERSION_HEADER] == "1"
+    assert wrong_version.headers[PROTOCOL_VERSION_HEADER] == "2"
 
 
 def test_session_api_runs_complete_lifecycle(tmp_path: Path) -> None:
     app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
-        created = client.post("/sessions", headers=request_headers())
+        created = client.post(
+            "/sessions",
+            headers=request_headers(),
+            json=session_start_payload(),
+        )
         assert created.status_code == 201
         running = created.json()
         session_id = running["session_id"]
@@ -77,7 +94,9 @@ def test_session_api_runs_complete_lifecycle(tmp_path: Path) -> None:
         assert running["revision"] == 2
 
         current = client.get("/sessions/current", headers=request_headers())
-        assert current.json() == running
+        assert current.json()["session_id"] == running["session_id"]
+        assert current.json()["state"] == running["state"]
+        assert current.json()["revision"] == running["revision"]
 
         paused = client.post(
             f"/sessions/{session_id}/pause",
@@ -103,10 +122,18 @@ def test_session_api_distinguishes_conflicts_and_unknown_sessions(tmp_path: Path
     app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
-        created = client.post("/sessions", headers=request_headers())
+        created = client.post(
+            "/sessions",
+            headers=request_headers(),
+            json=session_start_payload(),
+        )
         session_id = created.json()["session_id"]
 
-        duplicate = client.post("/sessions", headers=request_headers())
+        duplicate = client.post(
+            "/sessions",
+            headers=request_headers(),
+            json=session_start_payload(),
+        )
         invalid_state = client.post(
             f"/sessions/{session_id}/resume",
             headers=request_headers(),
@@ -141,7 +168,11 @@ def test_session_api_reports_persistence_unavailable(tmp_path: Path) -> None:
     app = create_app(runtime=runtime)
 
     with TestClient(app) as client:
-        response = client.post("/sessions", headers=request_headers())
+        response = client.post(
+            "/sessions",
+            headers=request_headers(),
+            json=session_start_payload(),
+        )
         current = client.get("/sessions/current", headers=request_headers())
 
     assert response.status_code == 503

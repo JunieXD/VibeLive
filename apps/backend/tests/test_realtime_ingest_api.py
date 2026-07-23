@@ -27,7 +27,7 @@ LOCAL_TOKEN = "test-local-token"
 def hello() -> dict[str, object]:
     return {
         "type": "client.hello",
-        "protocol_version": 1,
+        "protocol_version": 2,
         "token": LOCAL_TOKEN,
     }
 
@@ -107,7 +107,7 @@ def test_realtime_dispatches_text_after_gateway_is_configured(tmp_path: Path) ->
             websocket.send_json(
                 {
                     "type": "client.text.submit",
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "session_id": "session-1",
                     "input_id": "text-1",
                     "created_at_ms": 100,
@@ -117,7 +117,7 @@ def test_realtime_dispatches_text_after_gateway_is_configured(tmp_path: Path) ->
 
             assert websocket.receive_json() == {
                 "type": "ingest.ack",
-                "protocol_version": 1,
+                "protocol_version": 2,
                 "session_id": "session-1",
                 "input_id": "text-1",
                 "input_kind": "text",
@@ -154,7 +154,7 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
             websocket.send_json(
                 {
                     "type": "client.audio.commit",
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "session_id": "session-1",
                     "input_id": "audio-1",
                     "committed_at_ms": 101,
@@ -184,7 +184,7 @@ def test_realtime_rejects_unavailable_and_inactive_ingest(tmp_path: Path) -> Non
     app = create_app(runtime=runtime)
     message = {
         "type": "client.text.submit",
-        "protocol_version": 1,
+        "protocol_version": 2,
         "session_id": "session-1",
         "input_id": "text-1",
         "created_at_ms": 100,
@@ -228,7 +228,7 @@ def test_realtime_rejects_malformed_binary_without_closing_connection(tmp_path: 
             websocket.send_json(
                 {
                     "type": "client.ping",
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "request_id": "after-rejection",
                 }
             )
