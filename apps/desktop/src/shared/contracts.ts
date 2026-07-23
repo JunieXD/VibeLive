@@ -24,6 +24,13 @@ export type ModelConfig = {
   asrApiKey: string
 }
 
+export type ModelConfigStatus = {
+  baseUrl: string | null
+  model: string | null
+  modelApiKeyStored: boolean
+  asrApiKeyStored: boolean
+}
+
 export type SaveModelConfigResult = {
   ok: boolean
   securelyStored: boolean
@@ -134,6 +141,7 @@ export type ControlApi = {
   clearOverlay: () => Promise<void>
   pushBarrage: (event: BarrageEvent) => Promise<void>
   saveModelConfig: (config: ModelConfig) => Promise<SaveModelConfigResult>
+  getModelConfigStatus: () => Promise<ModelConfigStatus>
   getBackendStatus: () => Promise<BackendRuntimeStatus>
   restartBackend: () => Promise<BackendRuntimeStatus>
   startBackendSession: () => Promise<BackendSessionSnapshot>

@@ -46,6 +46,7 @@ import type {
   BarrageEvent,
   DesktopSource,
   MediaAccessStatus,
+  ModelConfigStatus,
   OverlaySettings,
   OverlayTarget,
   SaveAudienceWorkspaceResult
@@ -339,6 +340,7 @@ export function App(): React.JSX.Element {
   const [modelName, setModelName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [asrApiKey, setAsrApiKey] = useState('')
+  const [modelConfigStatus, setModelConfigStatus] = useState<ModelConfigStatus | null>(null)
   const [configNotice, setConfigNotice] = useState<string | null>(null)
   const [backendStatus, setBackendStatus] = useState<BackendRuntimeStatus | null>(null)
   const [backendRetrying, setBackendRetrying] = useState(false)
@@ -551,6 +553,22 @@ export function App(): React.JSX.Element {
       unsubscribe()
     }
   }, [applyBackendStatus])
+
+  useEffect(() => {
+    let active = true
+    void window.advx
+      .getModelConfigStatus()
+      .then((status) => {
+        if (!active) return
+        setModelConfigStatus(status)
+        if (status.baseUrl) setModelBaseUrl(status.baseUrl)
+        if (status.model) setModelName(status.model)
+      })
+      .catch(() => undefined)
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     visualSettingsRef.current = visualSettings
@@ -2078,6 +2096,12 @@ export function App(): React.JSX.Element {
       })
       setApiKey('')
       setAsrApiKey('')
+      setModelConfigStatus({
+        baseUrl: modelBaseUrl.trim(),
+        model: modelName.trim(),
+        modelApiKeyStored: result.securelyStored,
+        asrApiKeyStored: result.securelyStored
+      })
       const status = await window.advx.getBackendStatus()
       applyBackendStatus(status)
       setConfigNotice(
@@ -2857,21 +2881,45 @@ export function App(): React.JSX.Element {
                     />
                   </label>
                   <label>
-                    模型 API Key
+                    <span className="field-label">
+                      模型 API Key
+                      {modelConfigStatus?.modelApiKeyStored && (
+                        <span className="credential-status">已安全保存</span>
+                      )}
+                    </span>
                     <input
                       type="password"
                       value={apiKey}
                       onChange={(event) => setApiKey(event.target.value)}
-                      placeholder="仅由 Electron Main 安全保存"
+                      className={
+                        modelConfigStatus?.modelApiKeyStored ? 'credential-stored' : undefined
+                      }
+                      placeholder={
+                        modelConfigStatus?.modelApiKeyStored
+                          ? '••••••••（已保存，输入新值可替换）'
+                          : '仅由 Electron Main 安全保存'
+                      }
                     />
                   </label>
                   <label>
-                    StepFun ASR API Key
+                    <span className="field-label">
+                      StepFun ASR API Key
+                      {modelConfigStatus?.asrApiKeyStored && (
+                        <span className="credential-status">已安全保存</span>
+                      )}
+                    </span>
                     <input
                       type="password"
                       value={asrApiKey}
                       onChange={(event) => setAsrApiKey(event.target.value)}
-                      placeholder="用于实时语音识别"
+                      className={
+                        modelConfigStatus?.asrApiKeyStored ? 'credential-stored' : undefined
+                      }
+                      placeholder={
+                        modelConfigStatus?.asrApiKeyStored
+                          ? '••••••••（已保存，输入新值可替换）'
+                          : '用于实时语音识别'
+                      }
                     />
                   </label>
                   <div className="form-action">
@@ -2883,13 +2931,16 @@ export function App(): React.JSX.Element {
                         backendStatus?.connection !== 'connected' ||
                         !modelBaseUrl.trim() ||
                         !modelName.trim() ||
-                        !apiKey.trim() ||
-                        !asrApiKey.trim()
+                        (!apiKey.trim() && !modelConfigStatus?.modelApiKeyStored) ||
+                        (!asrApiKey.trim() && !modelConfigStatus?.asrApiKeyStored)
                       }
                       onClick={() => void saveModelConfig()}
                     >
                       <KeyRound size={16} />
-                      保存连接
+                      {modelConfigStatus?.modelApiKeyStored &&
+                      modelConfigStatus.asrApiKeyStored
+                        ? '保存更改'
+                        : '保存连接'}
                     </button>
                   </div>
                 </div>

@@ -170,6 +170,32 @@ try {
     fullPage: true
   })
 
+  await page.waitForFunction(() => document.body.textContent?.includes('后端 · 已连接'))
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('服务地址', { exact: true }).fill('https://smoke.example/v1')
+  await page.getByLabel('模型名称', { exact: true }).fill('smoke-model')
+  await page.getByLabel('模型 API Key', { exact: true }).fill('smoke-model-key')
+  await page.getByLabel('StepFun ASR API Key', { exact: true }).fill('smoke-asr-key')
+  await page.getByRole('button', { name: '保存连接', exact: true }).click()
+  await page.getByText('模型与语音识别配置已安全保存并接入后端', { exact: true }).waitFor()
+
+  const modelApiKeyInput = page.getByLabel(/模型 API Key/)
+  const asrApiKeyInput = page.getByLabel(/StepFun ASR API Key/)
+  assert.equal(await modelApiKeyInput.inputValue(), '')
+  assert.equal(await asrApiKeyInput.inputValue(), '')
+  assert.match((await modelApiKeyInput.getAttribute('placeholder')) ?? '', /已保存/)
+  assert.match((await asrApiKeyInput.getAttribute('placeholder')) ?? '', /已保存/)
+  assert.equal(await page.getByText('已安全保存', { exact: true }).count(), 2)
+
+  const saveChangesButton = page.getByRole('button', { name: '保存更改', exact: true })
+  assert.equal(await saveChangesButton.isEnabled(), true)
+  await saveChangesButton.click()
+  await page.getByText('模型与语音识别配置已安全保存并接入后端', { exact: true }).waitFor()
+  await page.screenshot({
+    path: resolve(artifactDirectory, 'model-config-saved.png'),
+    fullPage: true
+  })
+
   await page.getByRole('button', { name: /AI 观众/ }).click()
   await page.getByRole('heading', { name: 'AI 观众', exact: true }).waitFor()
   const modeSelect = page.getByLabel('观众模式')
@@ -1031,6 +1057,7 @@ try {
     `Monorepo desktop smoke passed: ${sourceCount} sources, six audience modes, 32 personas, live edit policy, meme candidate ingestion/undo, camera denied before explicit enable, ${cameraDevices} camera entries, three visual modes, ${compressedKilobytes} KB composite JPEG, versioned settings restore, microphone meter peak ${microphonePeak}%, and complete pause/stop track cleanup.`
   )
   console.log(`Screenshot: ${resolve(artifactDirectory, 'control-console.png')}`)
+  console.log(`Saved model credentials: ${resolve(artifactDirectory, 'model-config-saved.png')}`)
   console.log(`Camera picture-in-picture: ${resolve(artifactDirectory, 'views-camera-pip.png')}`)
   console.log(
     `Compact camera picture-in-picture: ${resolve(artifactDirectory, 'views-camera-pip-1120.png')}`

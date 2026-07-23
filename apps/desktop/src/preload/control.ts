@@ -24,6 +24,7 @@ const api: ControlApi = {
   clearOverlay: () => ipcRenderer.invoke("overlay:clear"),
   pushBarrage: (event) => ipcRenderer.invoke("overlay:push", event),
   saveModelConfig: (config: ModelConfig) => ipcRenderer.invoke("config:save-model", config),
+  getModelConfigStatus: () => ipcRenderer.invoke("config:get-model-status"),
   getBackendStatus: () => ipcRenderer.invoke("backend:get-status"),
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
   startBackendSession: () => ipcRenderer.invoke("backend:session-start"),

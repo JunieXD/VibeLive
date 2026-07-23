@@ -23,11 +23,13 @@ import type {
   MediaAccessSnapshot,
   MediaAccessStatus,
   ModelConfig,
+  ModelConfigStatus,
   OverlaySettings,
   SaveAudienceWorkspaceResult,
   SaveModelConfigResult
 } from "../../shared/contracts";
 import { BackendClient, BackendClientError } from "../backend/backend-client";
+import { resolveModelConfig } from "../model-config";
 import {
   getOverlaySettings,
   listOverlayTargets,
@@ -78,15 +80,7 @@ async function saveModelConfig(
   config: ModelConfig,
   backendClient: BackendClient
 ): Promise<SaveModelConfigResult> {
-  const normalized: ModelConfig = {
-    baseUrl: config.baseUrl.trim(),
-    model: config.model.trim(),
-    apiKey: config.apiKey.trim(),
-    asrApiKey: config.asrApiKey.trim()
-  };
-  if (!normalized.baseUrl || !normalized.model || !normalized.apiKey || !normalized.asrApiKey) {
-    throw new Error("模型地址、模型名称、模型密钥和语音识别密钥均为必填项。");
-  }
+  const normalized = resolveModelConfig(config, await loadStoredModelConfig());
 
   let backendConfigured = false;
   let restartRequired = false;
@@ -163,6 +157,24 @@ async function loadStoredModelConfig(): Promise<ModelConfig | null> {
   } catch {
     return null;
   }
+}
+
+async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
+  const config = await loadStoredModelConfig();
+  if (!config) {
+    return {
+      baseUrl: null,
+      model: null,
+      modelApiKeyStored: false,
+      asrApiKeyStored: false
+    };
+  }
+  return {
+    baseUrl: config.baseUrl,
+    model: config.model,
+    modelApiKeyStored: true,
+    asrApiKeyStored: true
+  };
 }
 
 export async function configureSavedModelConfig(backendClient: BackendClient): Promise<boolean> {
@@ -602,6 +614,10 @@ export function registerDesktopIpc(
   ipcMain.handle("config:save-model", (event, config: ModelConfig) => {
     assertControlSender(event);
     return saveModelConfig(config, backendClient);
+  });
+  ipcMain.handle("config:get-model-status", (event) => {
+    assertControlSender(event);
+    return getStoredModelConfigStatus();
   });
   ipcMain.handle("backend:get-status", (event) => {
     assertControlSender(event);
