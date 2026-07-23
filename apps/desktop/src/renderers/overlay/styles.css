@@ -21,10 +21,17 @@ body,
 }
 
 .overlay-root {
+  --overlay-font-size: 22px;
+  --overlay-speed: 58;
+  --overlay-opacity: 0.86;
+  --overlay-density: 6;
+  --overlay-region-top: 5%;
+  --overlay-region-bottom: 75%;
+  --travel-duration: 10775ms;
   position: relative;
   width: 100%;
   height: 100%;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .ai-watermark {
@@ -39,9 +46,10 @@ body,
 
 .overlay-barrage {
   --lane: 0;
+  --lane-top: 5%;
   --barrage-color: #65d6b9;
   position: absolute;
-  top: calc(8% + var(--lane) * 9%);
+  top: var(--lane-top);
   left: 100%;
   display: flex;
   align-items: center;
@@ -53,12 +61,13 @@ body,
   border-radius: 4px;
   background: rgb(15 18 17 / 80%);
   color: #ffffff;
-  font-size: clamp(16px, 1.5vw, 24px);
+  font-size: var(--overlay-font-size);
   font-weight: 650;
   line-height: 1.35;
+  opacity: var(--overlay-opacity);
   text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
   box-shadow: 0 4px 16px rgb(0 0 0 / 24%);
-  animation: barrage-travel 9s linear forwards;
+  animation: barrage-travel var(--travel-duration) linear forwards;
 }
 
 .overlay-name {
@@ -74,11 +83,5 @@ body,
   }
   to {
     transform: translateX(calc(-100vw - 100%));
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .overlay-barrage {
-    animation-duration: 14s;
   }
 }

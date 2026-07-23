@@ -15,9 +15,16 @@ import type {
   MediaAccessSnapshot,
   MediaAccessStatus,
   ModelConfig,
+  OverlaySettings,
   SaveModelConfigResult
 } from "../../shared/contracts";
 import {
+  getOverlaySettings,
+  listOverlayTargets,
+  setOverlaySettings
+} from "../overlay-settings";
+import {
+  applyOverlaySettings,
   clearOverlay,
   hideOverlay,
   pushBarrage,
@@ -154,6 +161,34 @@ export function configureMediaAccess(getControlWindow: () => BrowserWindow | nul
   });
 }
 
+function applyOverlayWindowState(
+  getControlWindow: () => BrowserWindow | null,
+  settings: OverlaySettings
+): void {
+  const controlWindow = getControlWindow();
+  applyOverlaySettings(settings);
+
+  if (controlWindow && !controlWindow.isDestroyed()) {
+    controlWindow.setAlwaysOnTop(!settings.clickThrough, "screen-saver");
+    if (!settings.clickThrough) {
+      controlWindow.show();
+      controlWindow.focus();
+      controlWindow.moveTop();
+    }
+  }
+}
+
+export function broadcastOverlaySettings(
+  getControlWindow: () => BrowserWindow | null,
+  settings: OverlaySettings
+): void {
+  applyOverlayWindowState(getControlWindow, settings);
+  const controlWindow = getControlWindow();
+  if (controlWindow && !controlWindow.isDestroyed()) {
+    controlWindow.webContents.send("overlay:settings-changed", settings);
+  }
+}
+
 export function registerDesktopIpc(getControlWindow: () => BrowserWindow | null): void {
   ipcMain.handle("desktop:list-sources", () => listDesktopSources(getControlWindow()));
   ipcMain.handle("desktop:select-source", async (event, sourceId: string) => {
@@ -168,6 +203,13 @@ export function registerDesktopIpc(getControlWindow: () => BrowserWindow | null)
   });
   ipcMain.handle("media:get-access-status", getMediaAccessStatus);
   ipcMain.handle("media:request-microphone", requestMicrophonePermission);
+  ipcMain.handle("overlay:list-targets", listOverlayTargets);
+  ipcMain.handle("overlay:get-settings", getOverlaySettings);
+  ipcMain.handle("overlay:set-settings", async (_event, settings: OverlaySettings) => {
+    const savedSettings = await setOverlaySettings(settings);
+    applyOverlayWindowState(getControlWindow, savedSettings);
+    return savedSettings;
+  });
   ipcMain.handle("overlay:show", showOverlay);
   ipcMain.handle("overlay:hide", hideOverlay);
   ipcMain.handle("overlay:clear", clearOverlay);
