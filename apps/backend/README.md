@@ -1,12 +1,15 @@
 # Local backend
 
-The FastAPI backend is organized by dependency direction:
+The FastAPI backend follows this dependency direction:
 
 ```text
-api -> services -> contracts/domain
-          |
-          v
- providers / infrastructure
+api -> application -> domain
+                \--> application ports
+
+providers -------> application ports
+infrastructure ---> application ports
 ```
 
-Keep provider wire formats inside `providers/`. Audience selection, speaking timing, model-call grouping and memory extraction remain open algorithms and must not be embedded in transport handlers.
+`bootstrap` creates concrete adapters and injects them into the application layer. Keep provider wire formats and SQLAlchemy models inside their adapters. Audience selection, speaking timing, model-call grouping and memory extraction remain replaceable algorithms and must not be embedded in transport handlers.
+
+See [Backend design](../../docs/BACKEND_DESIGN.md) for module responsibilities, the realtime data lifecycle, SQLite schema, transaction boundaries and migration rules.

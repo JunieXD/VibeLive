@@ -125,6 +125,8 @@ Overlay 失效时，用户仍需能够通过控制窗、托盘或快捷键停止
 
 ## 4. FastAPI 模块
 
+本节固定主要业务边界。模块依赖、目标目录、运行时处理流程和 SQLite Schema 的详细设计见 [BACKEND_DESIGN.md](./BACKEND_DESIGN.md)。
+
 ### 4.1 Session Service
 
 Session Service 维护当前会话状态和唯一标识。所有帧、转写、模型请求和弹幕事件都属于一个明确会话。
@@ -364,7 +366,7 @@ ASR 和模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不�
 
 控制界面必须展示当前启用的 ASR 服务，并在开始采集前说明麦克风音频会发送到 StepFun。原始音频默认不持久化，也不得写入日志；弹幕生成模型只接收最终转写文本。
 
-第一版没有账号或云同步。观众档案、关系和长期记忆需要本地持久化；具体使用版本化文件还是 SQLite，在数据规模、迁移和并发需求验证后决定。Electron 和 FastAPI 使用结构化本地日志，通过 `session_id`、`observation_id` 和 `request_id` 关联事件，但不记录原始音频、完整画面或长段转写。
+第一版没有账号或云同步。观众档案、关系、长期记忆、记忆来源和最小会话记录使用 SQLite 持久化，并通过版本化迁移管理 Schema。实时音频、画面、Room Event、Observation、模型请求和待显示弹幕只存在于有界内存中，不写入数据库。详细数据模型和迁移边界见 [BACKEND_DESIGN.md](./BACKEND_DESIGN.md)。Electron 和 FastAPI 使用结构化本地日志，通过 `session_id`、`observation_id` 和 `request_id` 关联事件，但不记录原始音频、完整画面或长段转写。
 
 长期记忆只保存从公开房间事件中提炼的必要事实或关系摘要，并保留来源事件引用。用户删除或修改记忆后，后续上下文不得继续使用旧值。
 
@@ -426,7 +428,7 @@ ASR 和模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不�
 - 屏幕帧在进程间使用何种编码和压缩。
 - 双平台实测后采用哪个成熟弹幕库。
 - 观众发言时机、参与选择、批量/独立调用和彼此接话算法。
-- 长期记忆的提取、合并、遗忘策略及本地存储实现。
+- 长期记忆的提取、合并、冲突和遗忘策略。
 - 遥测、崩溃上报和自动更新方案。
 
 这些事项经过 Spike 或实现验证后，在 [DECISIONS.md](./DECISIONS.md) 中记录决定。

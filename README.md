@@ -43,4 +43,5 @@ pnpm build
 
 - [产品说明](./docs/PRODUCT.md)
 - [系统架构](./docs/ARCHITECTURE.md)
+- [后端详细设计](./docs/BACKEND_DESIGN.md)
 - [决策与开放问题](./docs/DECISIONS.md)

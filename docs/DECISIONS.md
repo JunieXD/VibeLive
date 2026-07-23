@@ -160,6 +160,20 @@
 - 决定：第一版通过独立 `AsrProvider` 调用 StepFun Step Plan 的 `stepaudio-2.5-asr`。Provider 使用 HTTP + SSE 接收增量和最终转写，只把最终文本送入观众上下文。
 - 影响：麦克风音频会发送到用户明确启用的 StepFun 服务，界面必须告知数据去向；凭据使用 `safeStorage` 保存并按会话注入后端。Step Plan 需要一次提交一个有限音频段，具体分段算法与参数通过实测决定。如果延迟不足，可以增加双向流式 ASR Adapter，不改变业务合同。
 
+### D-023：后端采用 Application、Domain、Port 与 Adapter 边界
+
+- 状态：`Accepted`
+- 日期：2026-07-23
+- 决定：FastAPI 后端使用单进程、单活动会话设计。API 只处理协议，Application Service 编排用例，Domain 维护不变量，业务层通过 Port 使用 Repository、ASR 和 Model Provider，SQLite、StepFun 和 OpenAI-compatible 实现属于 Adapter。
+- 影响：接口放在 Application Port，而不是具体 Infrastructure 或 Provider 模块中；WebSocket Handler、SQLAlchemy 模型和供应商 wire format 不能进入业务逻辑。具体模块设计见 [BACKEND_DESIGN.md](./BACKEND_DESIGN.md)。
+
+### D-024：持久状态使用 SQLite，实时上下文只保存在有界内存
+
+- 状态：`Accepted`
+- 日期：2026-07-23
+- 决定：观众档案、关系、长期记忆、记忆来源和最小会话记录使用 SQLite 持久化，并使用版本化迁移。原始音频、画面、完整 Room Event 历史、Observation、模型请求和待显示弹幕不写入数据库。
+- 影响：数据库由 FastAPI 单独拥有，位于 Electron `userData` 数据目录；用户删除的记忆及来源执行物理删除。第一版不提供直播历史、回放、分布式存储或向量数据库。此决定关闭 Q-008，详细 Schema、事务和迁移规则见 [BACKEND_DESIGN.md](./BACKEND_DESIGN.md)。
+
 ## 4. 开放问题
 
 ### Q-001：Electron 与 FastAPI 的媒体编码是什么？
@@ -202,11 +216,6 @@
 - 已定边界：原始音频和连续画面不落盘，会话结束清理短期上下文。
 - 需要回答：哪些公开互动值得形成长期记忆，如何合并、遗忘和处理冲突，以及默认是否启用长期记忆。
 - 约束：长期记忆属于具体观众，保留来源，用户可以查看、修改和删除。
-
-### Q-008：观众状态使用什么本地存储？
-
-- 状态：`Open`
-- 需要回答：使用版本化文件还是 SQLite 保存观众档案、关系和记忆，如何迁移 Schema、备份和执行删除。
 
 ### Q-009：后端冻结和弹幕引擎如何落地？
 
