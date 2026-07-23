@@ -12,6 +12,7 @@ export type SessionAction =
   | { type: 'resume' }
   | { type: 'stop' }
   | { type: 'stopped' }
+  | { type: 'sync'; status: SessionStatus; error?: string | null }
   | { type: 'fail'; error: string }
 
 export const initialSessionState: SessionState = {
@@ -37,6 +38,11 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
         : state
     case 'stopped':
       return { status: 'idle', error: null }
+    case 'sync':
+      return {
+        status: action.status,
+        error: action.status === 'error' ? (action.error ?? '后端 Session 进入错误状态。') : null
+      }
     case 'fail':
       return { status: 'error', error: action.error }
   }

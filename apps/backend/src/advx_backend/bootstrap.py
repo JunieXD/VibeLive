@@ -39,10 +39,16 @@ from advx_backend.infrastructure.persistence.sqlite import (
 )
 from advx_backend.infrastructure.security.local_token import create_local_token
 from advx_backend.infrastructure.system import SystemClock, UuidIdGenerator
+from advx_backend.providers.asr import StepFunAsrConfig, StepFunAsrProvider
+from advx_backend.providers.model import OpenAICompatibleConfig, OpenAICompatibleProvider
 
 BACKEND_VERSION = "0.1.0"
 LOCAL_TOKEN_ENV = "ADVX_LOCAL_TOKEN"
 DATA_DIRECTORY_ENV = "ADVX_DATA_DIR"
+MODEL_BASE_URL_ENV = "ADVX_MODEL_BASE_URL"
+MODEL_NAME_ENV = "ADVX_MODEL_NAME"
+MODEL_API_KEY_ENV = "ADVX_MODEL_API_KEY"
+ASR_API_KEY_ENV = "ADVX_ASR_API_KEY"
 DEFAULT_DATA_DIRECTORY = Path.cwd() / ".advx-data"
 
 
@@ -68,6 +74,34 @@ class PipelineConfig:
     barrage_max_tracked_sessions: int = 2
 
 
+@dataclass(frozen=True)
+class ExternalProviderConfig:
+    model_base_url: str
+    model_name: str
+    model_api_key: str = field(repr=False)
+    asr_api_key: str = field(repr=False)
+    asr_base_url: str = "https://api.stepfun.com/step_plan/v1"
+    asr_model: str = "stepaudio-2.5-asr"
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "model_base_url",
+            "model_name",
+            "model_api_key",
+            "asr_api_key",
+            "asr_base_url",
+            "asr_model",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must not be empty")
+            object.__setattr__(self, field_name, value.strip())
+
+
+class ProviderPipelineAlreadyConfiguredError(RuntimeError):
+    pass
+
+
 @dataclass
 class BackendRuntime:
     session_service: SessionService
@@ -91,6 +125,12 @@ class BackendRuntime:
     local_token: str = field(repr=False)
     ingest_service: IngestService | None = field(default=None, init=False)
     reaction_scheduler: LatestWinsReactionScheduler | None = field(default=None, init=False)
+    external_provider_config: ExternalProviderConfig | None = field(default=None, init=False)
+    _owned_model_provider: OpenAICompatibleProvider | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
     _started: bool = field(default=False, init=False, repr=False)
 
     async def startup(self) -> None:
@@ -105,8 +145,12 @@ class BackendRuntime:
         try:
             await self.session_service.shutdown()
         finally:
-            await self.database.close()
-            self._started = False
+            try:
+                if self._owned_model_provider is not None:
+                    await self._owned_model_provider.aclose()
+            finally:
+                await self.database.close()
+                self._started = False
 
     def build_generation_service(
         self,
@@ -189,6 +233,45 @@ class BackendRuntime:
         self.ingest_gateway.configure(ingest_service)
         self.reaction_scheduler = scheduler
         self.ingest_service = ingest_service
+        return ingest_service
+
+    def configure_external_provider_pipeline(
+        self,
+        config: ExternalProviderConfig,
+    ) -> IngestService:
+        if self.external_provider_config is not None:
+            if self.external_provider_config == config:
+                assert self.ingest_service is not None
+                return self.ingest_service
+            raise ProviderPipelineAlreadyConfiguredError(
+                "a different external provider pipeline is already configured"
+            )
+        if self.ingest_service is not None:
+            raise ProviderPipelineAlreadyConfiguredError(
+                "the ingest pipeline was configured without external provider ownership"
+            )
+
+        model_provider = OpenAICompatibleProvider(
+            OpenAICompatibleConfig(
+                base_url=config.model_base_url,
+                model=config.model_name,
+                api_key=config.model_api_key,
+            ),
+            frame_resolver=self.frame_store,
+        )
+        asr_provider = StepFunAsrProvider(
+            StepFunAsrConfig(
+                api_key=config.asr_api_key,
+                base_url=config.asr_base_url,
+                model=config.asr_model,
+            )
+        )
+        ingest_service = self.configure_ingest_pipeline(
+            asr_provider=asr_provider,
+            model_provider=model_provider,
+        )
+        self.external_provider_config = config
+        self._owned_model_provider = model_provider
         return ingest_service
 
 
@@ -299,7 +382,26 @@ def build_runtime(
 
 
 def build_runtime_from_environment() -> BackendRuntime:
-    return build_runtime(
+    runtime = build_runtime(
         local_token=os.environ.get(LOCAL_TOKEN_ENV),
         data_directory=os.environ.get(DATA_DIRECTORY_ENV),
     )
+    provider_values = {
+        "model_base_url": os.environ.get(MODEL_BASE_URL_ENV),
+        "model_name": os.environ.get(MODEL_NAME_ENV),
+        "model_api_key": os.environ.get(MODEL_API_KEY_ENV),
+        "asr_api_key": os.environ.get(ASR_API_KEY_ENV),
+    }
+    if any(value is not None for value in provider_values.values()):
+        missing = [name for name, value in provider_values.items() if not value]
+        if missing:
+            raise ValueError(f"external provider environment is incomplete: {', '.join(missing)}")
+        runtime.configure_external_provider_pipeline(
+            ExternalProviderConfig(
+                model_base_url=provider_values["model_base_url"] or "",
+                model_name=provider_values["model_name"] or "",
+                model_api_key=provider_values["model_api_key"] or "",
+                asr_api_key=provider_values["asr_api_key"] or "",
+            )
+        )
+    return runtime

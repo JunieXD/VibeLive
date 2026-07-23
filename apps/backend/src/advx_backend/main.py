@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
+from advx_backend.api.http.configuration import create_configuration_router
 from advx_backend.api.http.health import router as health_router
 from advx_backend.api.http.sessions import create_session_router
 from advx_backend.api.ws.realtime import create_realtime_router
@@ -35,6 +36,12 @@ def create_app(*, runtime: BackendRuntime | None = None) -> FastAPI:
     )
     application.state.runtime = active_runtime
     application.include_router(health_router)
+    application.include_router(
+        create_configuration_router(
+            runtime=active_runtime,
+            local_token=active_runtime.local_token,
+        )
+    )
     application.include_router(
         create_session_router(
             session_service=active_runtime.session_service,

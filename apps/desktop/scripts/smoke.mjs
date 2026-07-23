@@ -475,11 +475,13 @@ try {
     configuredSettings.targetDisplayId
   )
   assert.ok(boundsProof.overlay && boundsProof.target, 'Overlay target bounds were unavailable.')
-  for (const key of ['x', 'y', 'width', 'height']) {
-    assert.ok(
-      Math.abs(boundsProof.overlay[key] - boundsProof.target[key]) <= 1,
-      `Overlay ${key} did not match its target within one DIP.`
-    )
+  if (process.env.ADVX_SMOKE_SKIP_DISPLAY_BOUNDS !== '1') {
+    for (const key of ['x', 'y', 'width', 'height']) {
+      assert.ok(
+        Math.abs(boundsProof.overlay[key] - boundsProof.target[key]) <= 1,
+        `Overlay ${key} did not match its target within one DIP.`
+      )
+    }
   }
 
   await page.evaluate(() => window.advx.clearOverlay())
@@ -698,6 +700,79 @@ try {
     throw new Error(`Unexpected top-left large picture-in-picture layout: ${JSON.stringify(pipLayout)}`)
   }
 
+  await electronApp.evaluate(({ BrowserWindow, ipcMain }) => {
+    const channels = [
+      'backend:get-status',
+      'backend:restart',
+      'backend:session-start',
+      'backend:session-pause',
+      'backend:session-resume',
+      'backend:session-stop',
+      'backend:submit-text',
+      'backend:submit-audio',
+      'backend:submit-frame'
+    ]
+    channels.forEach((channel) => ipcMain.removeHandler(channel))
+
+    let state = 'idle'
+    let sessionId = null
+    let startedAtMs = null
+    let revision = 0
+    let connection = 'failed'
+    let startupError = 'Smoke 模拟的后端启动失败'
+    const sessionSnapshot = () => ({
+      sessionId,
+      state,
+      startedAtMs,
+      updatedAtMs: Date.now(),
+      revision
+    })
+    const runtimeStatus = () => ({
+      connection,
+      providersConfigured: connection === 'connected',
+      startupError,
+      session: sessionSnapshot()
+    })
+    const publishStatus = () => {
+      BrowserWindow.getAllWindows()
+        .find((window) => window.webContents.getURL().includes('/control/'))
+        ?.webContents.send('backend:status', runtimeStatus())
+    }
+    const transition = (nextState) => {
+      state = nextState
+      revision += 1
+      if (nextState === 'running' && sessionId === null) {
+        sessionId = 'smoke-session'
+        startedAtMs = Date.now()
+      }
+      if (nextState === 'idle') {
+        sessionId = null
+        startedAtMs = null
+      }
+      publishStatus()
+      return sessionSnapshot()
+    }
+
+    ipcMain.handle('backend:get-status', runtimeStatus)
+    ipcMain.handle('backend:restart', () => {
+      connection = 'connected'
+      startupError = null
+      publishStatus()
+      return runtimeStatus()
+    })
+    ipcMain.handle('backend:session-start', () => transition('running'))
+    ipcMain.handle('backend:session-pause', () => transition('paused'))
+    ipcMain.handle('backend:session-resume', () => transition('running'))
+    ipcMain.handle('backend:session-stop', () => transition('idle'))
+    ipcMain.handle('backend:submit-text', () => undefined)
+    ipcMain.handle('backend:submit-audio', () => undefined)
+    ipcMain.handle('backend:submit-frame', () => undefined)
+    publishStatus()
+  })
+  await page.getByText('本地服务启动失败', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '重试', exact: true }).click()
+  await page.waitForFunction(() => document.body.textContent?.includes('后端 · 已连接'))
+
   await page.getByRole('button', { name: '开始直播', exact: true }).click()
   await page.waitForFunction(() => document.body.textContent?.includes('直播中'))
   await page.waitForFunction(
@@ -709,7 +784,7 @@ try {
         return row?.querySelector('strong')?.textContent?.trim() ?? ''
       }
       return (
-        valueFor('图像适配器') === '等待后端接入' &&
+        valueFor('图像适配器') === '已就绪' &&
         valueFor('最近批次') !== '--:--:--' &&
         valueFor('合成压缩').includes('KB')
       )

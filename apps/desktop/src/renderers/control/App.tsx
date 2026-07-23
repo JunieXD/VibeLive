@@ -35,12 +35,14 @@ import {
   autoIngestMeme,
   compileAudienceWorkspaceSnapshot,
   createInitialAudienceWorkspace,
-  recordMemeUsage,
   type AudienceWorkspaceState,
   type MemeCandidate,
   type RuntimePersona
 } from '../../shared/audience'
 import type {
+  BackendBarrageEvent,
+  BackendConnectionState,
+  BackendRuntimeStatus,
   BarrageEvent,
   DesktopSource,
   MediaAccessStatus,
@@ -48,14 +50,13 @@ import type {
   OverlayTarget,
   SaveAudienceWorkspaceResult
 } from '../../shared/contracts'
-import { demoLines } from '../../shared/demo'
 import { initialSessionState, sessionReducer, type SessionStatus } from '../../shared/session'
 import { AudienceWorkspace } from './AudienceWorkspace'
+import { AUDIO_SEGMENT_SECONDS, encodePcm16Mono } from './audio'
 import { calculateMicrophoneLevel, describeMediaError, stopMediaStream } from './media'
 import {
   COMPRESSION_PROFILES,
   cameraPreviewTransform,
-  createWaitingVisualBatchSink,
   deliverAndReleaseVisualBatch,
   drawCompositeFrame,
   formatFrameKilobytes,
@@ -116,9 +117,23 @@ const pipSizeLabels: Record<PipSize, string> = {
 }
 
 const visualPipelineLabels: Record<VisualPipelineStatus, string> = {
-  'waiting-backend': '等待后端接入',
+  'waiting-backend': '等待后端',
   ready: '已就绪',
   'compression-failed': '压缩失败'
+}
+
+const backendConnectionLabels: Record<BackendConnectionState, string> = {
+  starting: '正在启动',
+  connecting: '连接中',
+  connected: '已连接',
+  disconnected: '正在恢复',
+  failed: '启动失败'
+}
+
+const backendAudiencePresentation: Record<string, { name: string; color: string }> = {
+  'builtin-luna': { name: 'Luna', color: '#e879a9' },
+  'builtin-max': { name: 'Max', color: '#3da9d5' },
+  'builtin-nova': { name: 'Nova', color: '#8f7bd8' }
 }
 
 function formatElapsed(totalSeconds: number): string {
@@ -134,18 +149,22 @@ function formatBatchTime(timestamp: number | null): string {
     : new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false })
 }
 
-function selectWeightedPersona(
-  personas: readonly RuntimePersona[],
-  sequence: number
-): RuntimePersona | undefined {
-  const totalWeight = personas.reduce((total, persona) => total + persona.weight, 0)
-  if (totalWeight <= 0) return personas[0]
-  let cursor = (sequence * 7) % totalWeight
-  for (const persona of personas) {
-    cursor -= persona.weight
-    if (cursor < 0) return persona
-  }
-  return personas.at(-1)
+function describeBackendError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+function backendAudienceFor(
+  audienceId: string,
+  personas: readonly RuntimePersona[]
+): { name: string; color: string } {
+  const localPersona = personas.find((persona) => persona.id === audienceId)
+  if (localPersona) return { name: localPersona.name, color: localPersona.color }
+  return (
+    backendAudiencePresentation[audienceId] ?? {
+      name: `AI 观众 ${audienceId.slice(-6)}`,
+      color: '#5f8f7a'
+    }
+  )
 }
 
 function proposeDemoMemeCandidate(input: {
@@ -311,14 +330,18 @@ export function App(): React.JSX.Element {
       id: 'system-ready',
       source: 'system',
       author: '系统',
-      text: '控制台已就绪，当前使用前端演示模式。'
+      text: '控制台已就绪，正在连接本地后端。'
     }
   ])
   const [message, setMessage] = useState('')
+  const [messageSending, setMessageSending] = useState(false)
   const [modelBaseUrl, setModelBaseUrl] = useState('https://api.openai.com/v1')
   const [modelName, setModelName] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [asrApiKey, setAsrApiKey] = useState('')
   const [configNotice, setConfigNotice] = useState<string | null>(null)
+  const [backendStatus, setBackendStatus] = useState<BackendRuntimeStatus | null>(null)
+  const [backendRetrying, setBackendRetrying] = useState(false)
   const [overlayTargets, setOverlayTargets] = useState<OverlayTarget[]>([])
   const [overlaySettings, setOverlaySettings] = useState<OverlaySettings | null>(null)
   const [overlaySettingsNotice, setOverlaySettingsNotice] = useState<string | null>(null)
@@ -332,10 +355,17 @@ export function App(): React.JSX.Element {
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null)
+  const audioChunksRef = useRef<Float32Array[]>([])
+  const audioSampleCountRef = useRef(0)
+  const audioSampleRateRef = useRef(0)
+  const audioSegmentStartedAtRef = useRef<number | null>(null)
+  const audioSendQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const audioSegmentSequenceRef = useRef(0)
+  const audioIngestErrorReportedRef = useRef(false)
   const meterFrameRef = useRef<number | null>(null)
   const mediaOperationRef = useRef(0)
   const mediaTransitionRef = useRef(false)
-  const barrageSequenceRef = useRef(0)
   const overlaySettingsTimerRef = useRef<number | null>(null)
   const overlaySettingsRevisionRef = useRef(0)
   const overlaySettingsPendingRef = useRef(false)
@@ -356,7 +386,23 @@ export function App(): React.JSX.Element {
   const visualSampleBusyRef = useRef<number | null>(null)
   const visualBatchBusyRef = useRef<number | null>(null)
   const visualFrameSequenceRef = useRef(0)
-  const visualBatchSinkRef = useRef<VisualBatchSink>(createWaitingVisualBatchSink())
+  const visualBatchSinkRef = useRef<VisualBatchSink>({
+    consume: async (batch, signal) => {
+      for (const frame of batch.frames) {
+        if (signal.aborted) throw new DOMException('Visual delivery aborted.', 'AbortError')
+        if (!frame.blob) continue
+        const body = new Uint8Array(await frame.blob.arrayBuffer())
+        if (signal.aborted) throw new DOMException('Visual delivery aborted.', 'AbortError')
+        await window.advx.submitVisualFrame({
+          inputId: frame.frameId,
+          capturedAtMs: frame.capturedAt,
+          mimeType: frame.blob.type || 'image/jpeg',
+          body
+        })
+      }
+      return 'accepted'
+    }
+  })
 
   const audienceRuntime = useMemo(
     () => compileAudienceWorkspaceSnapshot(audienceWorkspace),
@@ -367,6 +413,8 @@ export function App(): React.JSX.Element {
   const requiredSources = requiredVisualSources(visualSettings.mode)
   const canStart =
     session.status === 'idle' &&
+    backendStatus?.connection === 'connected' &&
+    backendStatus.providersConfigured &&
     selectedMicrophoneId !== '' &&
     (!requiredSources.screen || selectedSource !== null) &&
     (!requiredSources.camera || cameraEnabled)
@@ -460,6 +508,49 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     sessionStatusRef.current = session.status
   }, [session.status])
+
+  const applyBackendStatus = useCallback((status: BackendRuntimeStatus): void => {
+    setBackendStatus(status)
+    if (status.connection !== 'connected') return
+    sessionStatusRef.current = status.session.state
+    startedAtRef.current = status.session.startedAtMs
+    dispatch({
+      type: 'sync',
+      status: status.session.state,
+      error: status.session.state === 'error' ? '后端 Session 进入错误状态。' : null
+    })
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const unsubscribe = window.advx.onBackendStatus((status) => {
+      if (active) applyBackendStatus(status)
+    })
+    void window.advx
+      .getBackendStatus()
+      .then((status) => {
+        if (active) applyBackendStatus(status)
+      })
+      .catch(() => {
+        if (!active) return
+        setBackendStatus({
+          connection: 'disconnected',
+          providersConfigured: false,
+          startupError: null,
+          session: {
+            sessionId: null,
+            state: 'idle',
+            startedAtMs: null,
+            updatedAtMs: Date.now(),
+            revision: 0
+          }
+        })
+      })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [applyBackendStatus])
 
   useEffect(() => {
     visualSettingsRef.current = visualSettings
@@ -758,14 +849,74 @@ export function App(): React.JSX.Element {
     setCameraStream(null)
   }, [])
 
+  const flushAudioSegment = useCallback((includePartial = false): Promise<void> => {
+    const sampleRate = audioSampleRateRef.current
+    const sampleCount = audioSampleCountRef.current
+    const minimumSamples = includePartial
+      ? Math.round(sampleRate * 0.25)
+      : Math.round(sampleRate * AUDIO_SEGMENT_SECONDS)
+    if (sampleRate <= 0 || sampleCount < minimumSamples) {
+      if (includePartial) {
+        audioChunksRef.current = []
+        audioSampleCountRef.current = 0
+        audioSegmentStartedAtRef.current = null
+      }
+      return audioSendQueueRef.current
+    }
+
+    const chunks = audioChunksRef.current
+    const capturedAtMs = audioSegmentStartedAtRef.current ?? Date.now()
+    audioChunksRef.current = []
+    audioSampleCountRef.current = 0
+    audioSegmentStartedAtRef.current = null
+    const body = encodePcm16Mono(chunks, sampleRate)
+    const sequence = audioSegmentSequenceRef.current + 1
+    audioSegmentSequenceRef.current = sequence
+    const send = audioSendQueueRef.current.then(() =>
+      window.advx.submitAudioSegment({
+        inputId: `audio-${capturedAtMs}-${sequence}`,
+        capturedAtMs,
+        body
+      })
+    )
+    const observed = send.then(
+      () => {
+        audioIngestErrorReportedRef.current = false
+      },
+      (error: unknown) => {
+        if (!audioIngestErrorReportedRef.current) {
+          audioIngestErrorReportedRef.current = true
+          setActivity((current) => [
+            ...current.slice(-40),
+            {
+              id: crypto.randomUUID(),
+              source: 'system',
+              author: '系统',
+              text: `音频暂未送达后端：${describeBackendError(error, '实时连接异常。')}`
+            }
+          ])
+        }
+      }
+    )
+    audioSendQueueRef.current = observed
+    return observed
+  }, [])
+
   const stopMicrophone = useCallback(async (): Promise<void> => {
     if (meterFrameRef.current !== null) {
       cancelAnimationFrame(meterFrameRef.current)
       meterFrameRef.current = null
     }
+    const processor = audioProcessorRef.current
+    audioProcessorRef.current = null
+    if (processor) {
+      processor.onaudioprocess = null
+      processor.disconnect()
+    }
     const stream = microphoneStreamRef.current
     microphoneStreamRef.current = null
     stopMediaStream(stream)
+    await flushAudioSegment(true)
     const context = audioContextRef.current
     audioContextRef.current = null
     if (context && context.state !== 'closed') {
@@ -773,7 +924,7 @@ export function App(): React.JSX.Element {
     }
     setMicrophoneLevel(0)
     setMicrophoneReady(false)
-  }, [])
+  }, [flushAudioSegment])
 
   useEffect(() => {
     return () => {
@@ -1063,7 +1214,32 @@ export function App(): React.JSX.Element {
         context = new AudioContext()
         const analyser = context.createAnalyser()
         analyser.fftSize = 512
-        context.createMediaStreamSource(stream).connect(analyser)
+        const source = context.createMediaStreamSource(stream)
+        source.connect(analyser)
+        const processor = context.createScriptProcessor(4096, 1, 1)
+        const silentOutput = context.createGain()
+        silentOutput.gain.value = 0
+        source.connect(processor)
+        processor.connect(silentOutput)
+        silentOutput.connect(context.destination)
+        processor.onaudioprocess = (event): void => {
+          if (sessionStatusRef.current !== 'running') return
+          const samples = event.inputBuffer.getChannelData(0)
+          if (samples.length === 0) return
+          if (audioSegmentStartedAtRef.current === null) {
+            audioSegmentStartedAtRef.current = Date.now()
+          }
+          const copy = new Float32Array(samples)
+          audioChunksRef.current.push(copy)
+          audioSampleCountRef.current += copy.length
+          audioSampleRateRef.current = context?.sampleRate ?? event.inputBuffer.sampleRate
+          if (
+            audioSampleCountRef.current >=
+            audioSampleRateRef.current * AUDIO_SEGMENT_SECONDS
+          ) {
+            void flushAudioSegment()
+          }
+        }
         if (context.state === 'suspended') {
           await context.resume()
           assertMediaOperationCurrent(operationId)
@@ -1075,6 +1251,11 @@ export function App(): React.JSX.Element {
 
         microphoneStreamRef.current = stream
         audioContextRef.current = context
+        audioProcessorRef.current = processor
+        audioChunksRef.current = []
+        audioSampleCountRef.current = 0
+        audioSampleRateRef.current = context.sampleRate
+        audioSegmentStartedAtRef.current = null
         setMicrophoneReady(true)
         setMicrophonePermission('granted')
 
@@ -1086,10 +1267,17 @@ export function App(): React.JSX.Element {
             mediaTransitionRef.current = false
             setMediaTransitioning(false)
             microphoneStreamRef.current = null
+            const activeProcessor = audioProcessorRef.current
+            audioProcessorRef.current = null
+            if (activeProcessor) {
+              activeProcessor.onaudioprocess = null
+              activeProcessor.disconnect()
+            }
             if (meterFrameRef.current !== null) {
               cancelAnimationFrame(meterFrameRef.current)
               meterFrameRef.current = null
             }
+            void flushAudioSegment(true)
             void context?.close()
             audioContextRef.current = null
             setMicrophoneLevel(0)
@@ -1126,6 +1314,7 @@ export function App(): React.JSX.Element {
     },
     [
       assertMediaOperationCurrent,
+      flushAudioSegment,
       refreshMicrophones,
       releaseOverlay,
       stopCapture,
@@ -1409,69 +1598,37 @@ export function App(): React.JSX.Element {
     []
   )
 
-  const emitBarrage = useCallback(
-    (text?: string) => {
-      const sequence = barrageSequenceRef.current
-      const member = selectWeightedPersona(activeAudience, sequence)
-      if (!member) return
-      const learnedMeme =
-        text === undefined && audienceRuntime.memes.length > 0 && sequence % 3 === 2
-          ? audienceRuntime.memes[sequence % audienceRuntime.memes.length]
-          : undefined
-
+  useEffect(() => {
+    return window.advx.onBackendBarrage((backendEvent: BackendBarrageEvent) => {
+      const member = backendAudienceFor(backendEvent.audienceId, activeAudience)
       const event: BarrageEvent = {
-        barrageId: `demo-${Date.now()}-${sequence}`,
-        audienceId: member.id,
+        ...backendEvent,
         audienceName: member.name,
-        text: text ?? learnedMeme?.text ?? demoLines[sequence % demoLines.length],
-        color: member.color,
-        createdAt: Date.now()
+        color: member.color
       }
-      barrageSequenceRef.current += 1
       setBarrageTotal((current) => current + 1)
-
       setActivity((current) => [
         ...current.slice(-40),
         {
           id: event.barrageId,
           source: 'audience',
-          author: member.name,
+          author: event.audienceName,
           text: event.text,
-          color: member.color
+          color: event.color
         }
       ])
+      if (overlayVisible) void window.advx.pushBarrage(event)
 
-      if (overlayVisible) {
-        void window.advx.pushBarrage(event)
-      }
-
-      if (learnedMeme) {
-        setAudienceWorkspace((current) => {
-          if (!current.memes.some((meme) => meme.id === learnedMeme.id)) return current
-          return {
-            ...current,
-            memes: recordMemeUsage(current.memes, learnedMeme.id, new Date().toISOString())
-          }
-        })
-      } else if (sequence > 0 && sequence % 4 === 0) {
-        const candidate = proposeDemoMemeCandidate({
-          modeId: audienceRuntime.mode.id,
-          text: event.text,
-          sourceKinds: ['audience_barrage'],
-          evidenceSummary: `${member.name} 在直播互动中形成的房间短句`,
-          personaTags: [member.id]
-        })
-        if (candidate) acceptDirectorMemeCandidate(candidate)
-      }
-    },
-    [activeAudience, acceptDirectorMemeCandidate, audienceRuntime, overlayVisible]
-  )
-
-  useEffect(() => {
-    if (session.status !== 'running') return
-    const timer = window.setInterval(() => emitBarrage(), 5200)
-    return () => window.clearInterval(timer)
-  }, [emitBarrage, session.status])
+      const candidate = proposeDemoMemeCandidate({
+        modeId: audienceRuntime.mode.id,
+        text: event.text,
+        sourceKinds: ['audience_barrage'],
+        evidenceSummary: `${event.audienceName} 在真实直播互动中形成的房间短句`,
+        personaTags: [event.audienceId]
+      })
+      if (candidate) acceptDirectorMemeCandidate(candidate)
+    })
+  }, [activeAudience, acceptDirectorMemeCandidate, audienceRuntime.mode.id, overlayVisible])
 
   useEffect(() => {
     const runId = visualRunRef.current + 1
@@ -1633,6 +1790,7 @@ export function App(): React.JSX.Element {
     let displayStream: MediaStream | null = captureStreamRef.current
     let activeCameraStream: MediaStream | null = cameraStreamRef.current
     let microphoneStream: MediaStream | null = microphoneStreamRef.current
+    let backendSessionStarted = false
     sessionStatusRef.current = 'starting'
     dispatch({ type: 'start' })
     try {
@@ -1669,20 +1827,30 @@ export function App(): React.JSX.Element {
       }
       if (mediaOperationRef.current !== operationId) return
 
+      const backendSession = await window.advx.startBackendSession()
+      backendSessionStarted = backendSession.state === 'running'
+      if (mediaOperationRef.current !== operationId) {
+        if (backendSessionStarted) await window.advx.stopBackendSession().catch(() => undefined)
+        return
+      }
       await window.advx.showOverlay()
       if (mediaOperationRef.current !== operationId) {
         await window.advx.hideOverlay()
+        if (backendSessionStarted) await window.advx.stopBackendSession().catch(() => undefined)
         return
       }
       setOverlayVisible(true)
-      sessionStatusRef.current = 'running'
-      dispatch({ type: 'started' })
-      emitBarrage('直播开始了，先热个场。')
+      sessionStatusRef.current = backendSession.state
+      startedAtRef.current = backendSession.startedAtMs
+      dispatch({ type: 'sync', status: backendSession.state })
     } catch (error) {
       if (mediaOperationRef.current !== operationId) return
       if (captureStreamRef.current === displayStream) stopCapture()
       if (cameraStreamRef.current === activeCameraStream) stopCamera()
       if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
+      if (backendSessionStarted) {
+        await window.advx.stopBackendSession().catch(() => undefined)
+      }
       const overlayError = await releaseOverlay()
       if (mediaOperationRef.current !== operationId) return
       sessionStatusRef.current = 'error'
@@ -1705,34 +1873,44 @@ export function App(): React.JSX.Element {
   const stopSession = useCallback(async () => {
     const operationId = beginMediaOperation(true)
     if (operationId === null) return
+    let stopError: string | null = null
     sessionStatusRef.current = 'stopping'
     dispatch({ type: 'stop' })
     stopCapture()
     stopCamera()
     await stopMicrophone()
     try {
+      if (backendStatus?.session.sessionId) {
+        await window.advx.stopBackendSession()
+      }
+    } catch (error) {
+      stopError = `后端 Session 未能确认停止：${describeBackendError(error, '连接异常。')}`
+    }
+    try {
       const overlayError = await releaseOverlay()
       if (mediaOperationRef.current !== operationId) return
-      if (overlayError) {
+      if (overlayError || stopError) {
         setActivity((current) => [
           ...current,
           {
             id: crypto.randomUUID(),
             source: 'system',
             author: '系统',
-            text: overlayError
+            text: [stopError, overlayError].filter(Boolean).join(' ')
           }
         ])
       }
     } finally {
       if (mediaOperationRef.current === operationId) {
-        sessionStatusRef.current = 'idle'
-        dispatch({ type: 'stopped' })
+        sessionStatusRef.current = stopError ? 'error' : 'idle'
+        if (stopError) dispatch({ type: 'fail', error: stopError })
+        else dispatch({ type: 'stopped' })
       }
       finishMediaOperation(operationId)
     }
   }, [
     beginMediaOperation,
+    backendStatus?.session.sessionId,
     finishMediaOperation,
     releaseOverlay,
     stopCamera,
@@ -1764,6 +1942,15 @@ export function App(): React.JSX.Element {
       stopCamera()
       try {
         await stopMicrophone()
+        const backendSession = await window.advx.pauseBackendSession()
+        sessionStatusRef.current = backendSession.state
+        dispatch({ type: 'sync', status: backendSession.state })
+      } catch (error) {
+        sessionStatusRef.current = 'error'
+        dispatch({
+          type: 'fail',
+          error: `暂停后端 Session 失败：${describeBackendError(error, '连接异常。')}`
+        })
       } finally {
         finishMediaOperation(operationId)
       }
@@ -1792,8 +1979,9 @@ export function App(): React.JSX.Element {
           selectedMicrophoneId || undefined
         )
         if (mediaOperationRef.current !== operationId) return
-        sessionStatusRef.current = 'running'
-        dispatch({ type: 'resume' })
+        const backendSession = await window.advx.resumeBackendSession()
+        sessionStatusRef.current = backendSession.state
+        dispatch({ type: 'sync', status: backendSession.state })
       } catch (error) {
         if (mediaOperationRef.current !== operationId) return
         if (captureStreamRef.current === displayStream) stopCapture()
@@ -1804,7 +1992,11 @@ export function App(): React.JSX.Element {
         sessionStatusRef.current = 'error'
         dispatch({
           type: 'fail',
-          error: `恢复采集失败：${describeMediaError(error, resumeFailureKind)}${
+          error: `恢复采集或后端 Session 失败：${
+            error instanceof DOMException
+              ? describeMediaError(error, resumeFailureKind)
+              : describeBackendError(error, '连接异常。')
+          }${
             overlayError ? ` ${overlayError}` : ''
           }`
         })
@@ -1836,9 +2028,10 @@ export function App(): React.JSX.Element {
     await window.advx.clearOverlay()
   }
 
-  const sendUserMessage = (): void => {
+  const sendUserMessage = async (): Promise<void> => {
     const trimmed = message.trim()
-    if (!trimmed) return
+    if (!trimmed || messageSending || session.status !== 'running') return
+    setMessageSending(true)
     setActivity((current) => [
       ...current.slice(-40),
       {
@@ -1856,8 +2049,21 @@ export function App(): React.JSX.Element {
       evidenceSummary: `用户在房间文字中主动说出：“${trimmed.slice(0, 72)}”`
     })
     if (candidate) acceptDirectorMemeCandidate(candidate)
-    if (session.status === 'running') {
-      window.setTimeout(() => emitBarrage(`听到了。关于“${trimmed.slice(0, 20)}”，我想再看一会儿。`), 550)
+    try {
+      await window.advx.submitUserText(trimmed)
+    } catch (error) {
+      setMessage((current) => current || trimmed)
+      setActivity((current) => [
+        ...current.slice(-40),
+        {
+          id: crypto.randomUUID(),
+          source: 'system',
+          author: '系统',
+          text: `文字未送达后端：${describeBackendError(error, '实时连接异常。')}`
+        }
+      ])
+    } finally {
+      setMessageSending(false)
     }
   }
 
@@ -1867,14 +2073,60 @@ export function App(): React.JSX.Element {
       const result = await window.advx.saveModelConfig({
         baseUrl: modelBaseUrl,
         model: modelName,
-        apiKey
+        apiKey,
+        asrApiKey
       })
       setApiKey('')
-      setConfigNotice(result.securelyStored ? '配置已安全保存' : '普通配置已保存，当前系统无法加密密钥')
-    } catch {
-      setConfigNotice('保存失败')
+      setAsrApiKey('')
+      const status = await window.advx.getBackendStatus()
+      applyBackendStatus(status)
+      setConfigNotice(
+        result.restartRequired
+          ? '配置已保存；后端已使用另一组配置，请重启桌面应用后生效'
+          : result.securelyStored
+            ? '模型与语音识别配置已安全保存并接入后端'
+            : '配置已接入本次运行；当前系统无法加密密钥，因此密钥不会落盘'
+      )
+    } catch (error) {
+      setConfigNotice(`保存失败：${describeBackendError(error, '请检查后端连接和配置内容。')}`)
     }
   }
+
+  const retryBackend = async (): Promise<void> => {
+    if (backendRetrying) return
+    setBackendRetrying(true)
+    try {
+      applyBackendStatus(await window.advx.restartBackend())
+    } catch {
+      // The Main process publishes the actionable startup error through onBackendStatus.
+    } finally {
+      setBackendRetrying(false)
+    }
+  }
+
+  const backendConnection = backendStatus?.connection ?? 'starting'
+  const backendNotice =
+    backendConnection === 'connected'
+      ? null
+      : backendConnection === 'failed'
+        ? {
+            title: '本地服务启动失败',
+            detail: backendStatus?.startupError ?? '请重试，或检查本地后端文件和日志。'
+          }
+        : backendConnection === 'disconnected'
+          ? {
+              title: '本地服务连接中断',
+              detail: '正在自动恢复连接，恢复前不会发送新的音频或画面。'
+            }
+          : backendConnection === 'connecting'
+            ? {
+                title: '正在连接实时管线',
+                detail: '本地服务已经启动，正在建立安全连接。'
+              }
+            : {
+                title: '正在启动本地服务',
+                detail: '通常只需要几秒，完成后即可配置模型或开始直播。'
+              }
 
   return (
     <div className="app-shell">
@@ -1965,6 +2217,28 @@ export function App(): React.JSX.Element {
         </header>
 
         <main className="workspace">
+          {backendNotice && (
+            <section
+              className={`backend-notice ${backendConnection === 'failed' ? 'failed' : ''}`}
+              role={backendConnection === 'failed' ? 'alert' : 'status'}
+            >
+              <div>
+                <strong>{backendNotice.title}</strong>
+                <span>{backendNotice.detail}</span>
+              </div>
+              {backendConnection === 'failed' && (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={backendRetrying}
+                  onClick={() => void retryBackend()}
+                >
+                  <RefreshCw size={15} />
+                  {backendRetrying ? '正在重试' : '重试'}
+                </button>
+              )}
+            </section>
+          )}
           {activeView === 'live' && (
             <div className="live-view">
               {session.error && <div className="error-banner">{session.error}</div>}
@@ -2304,7 +2578,7 @@ export function App(): React.JSX.Element {
                       value={message}
                       onChange={(event) => setMessage(event.target.value)}
                       onKeyDown={(event) => {
-                        if (event.key === 'Enter') sendUserMessage()
+                        if (event.key === 'Enter') void sendUserMessage()
                       }}
                       placeholder={session.status === 'running' ? '说点什么，AI 观众会回应你' : '开始直播后可发送'}
                       disabled={session.status !== 'running'}
@@ -2313,8 +2587,10 @@ export function App(): React.JSX.Element {
                       className="icon-button accent"
                       type="button"
                       title="发送"
-                      disabled={session.status !== 'running' || message.trim() === ''}
-                      onClick={sendUserMessage}
+                      disabled={
+                        session.status !== 'running' || message.trim() === '' || messageSending
+                      }
+                      onClick={() => void sendUserMessage()}
                     >
                       <Send size={16} />
                     </button>
@@ -2384,9 +2660,22 @@ export function App(): React.JSX.Element {
                     <div className="mixer-row">
                       <span>
                         <AudioLines size={14} />
-                        本地 ASR
+                        实时 ASR
                       </span>
-                      <strong>等待后端</strong>
+                      <strong
+                        className={
+                          backendStatus?.connection === 'connected' &&
+                          backendStatus.providersConfigured
+                            ? 'ok'
+                            : ''
+                        }
+                      >
+                        {backendStatus?.connection !== 'connected'
+                          ? '等待后端'
+                          : backendStatus.providersConfigured
+                            ? '已接入'
+                            : '等待配置'}
+                      </strong>
                     </div>
                     <div className="mixer-row">
                       <span>
@@ -2568,7 +2857,7 @@ export function App(): React.JSX.Element {
                     />
                   </label>
                   <label>
-                    API Key
+                    模型 API Key
                     <input
                       type="password"
                       value={apiKey}
@@ -2576,12 +2865,27 @@ export function App(): React.JSX.Element {
                       placeholder="仅由 Electron Main 安全保存"
                     />
                   </label>
+                  <label>
+                    StepFun ASR API Key
+                    <input
+                      type="password"
+                      value={asrApiKey}
+                      onChange={(event) => setAsrApiKey(event.target.value)}
+                      placeholder="用于实时语音识别"
+                    />
+                  </label>
                   <div className="form-action">
                     {configNotice && <span>{configNotice}</span>}
                     <button
                       className="primary-button"
                       type="button"
-                      disabled={!modelBaseUrl.trim() || !modelName.trim()}
+                      disabled={
+                        backendStatus?.connection !== 'connected' ||
+                        !modelBaseUrl.trim() ||
+                        !modelName.trim() ||
+                        !apiKey.trim() ||
+                        !asrApiKey.trim()
+                      }
                       onClick={() => void saveModelConfig()}
                     >
                       <KeyRound size={16} />
@@ -2776,6 +3080,19 @@ export function App(): React.JSX.Element {
         </main>
 
         <footer className="status-bar">
+          <span className="status-item">
+            <i
+              className={`status-dot ${
+                backendConnection === 'connected'
+                  ? 'online'
+                  : backendConnection === 'failed'
+                    ? 'failed'
+                    : 'demo'
+              }`}
+            />
+            后端 ·{' '}
+            {backendConnectionLabels[backendConnection]}
+          </span>
           <span className="status-item">
             <i className={`status-dot ${captureStream ? 'online' : ''}`} />
             屏幕 {captureStatus}

@@ -375,6 +375,42 @@ button:disabled {
   background: var(--bg);
 }
 
+.backend-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px solid rgb(245 184 61 / 35%);
+  border-left: 3px solid var(--amber);
+  border-radius: 8px;
+  background: var(--amber-soft);
+  color: var(--text);
+}
+
+.backend-notice.failed {
+  border-color: rgb(255 95 82 / 40%);
+  border-left-color: var(--danger);
+  background: rgb(255 95 82 / 10%);
+}
+
+.backend-notice > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.backend-notice strong {
+  font-size: 12px;
+}
+
+.backend-notice span {
+  overflow-wrap: anywhere;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
 h1,
 h2,
 p {
@@ -1140,6 +1176,11 @@ h2 {
 
 .status-dot.demo {
   background: var(--amber);
+}
+
+.status-dot.failed {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgb(255 95 82 / 12%);
 }
 
 .settings-columns {

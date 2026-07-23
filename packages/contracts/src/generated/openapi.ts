@@ -21,6 +21,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/configuration/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Provider Status */
+        get: operations["provider_status_configuration_providers_get"];
+        /** Configure Providers */
+        put: operations["configure_providers_configuration_providers_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions/current": {
         parameters: {
             query?: never;
@@ -129,6 +147,28 @@ export interface components {
              * @constant
              */
             protocol_version: 1;
+        };
+        /** ProviderConfigurationRequest */
+        ProviderConfigurationRequest: {
+            /** Model Base Url */
+            model_base_url: string;
+            /** Model Name */
+            model_name: string;
+            /** Model Api Key */
+            model_api_key: string;
+            /** Asr Api Key */
+            asr_api_key: string;
+        };
+        /** ProviderConfigurationStatus */
+        ProviderConfigurationStatus: {
+            /** Configured */
+            configured: boolean;
+            /** Model Base Url */
+            model_base_url?: string | null;
+            /** Model Name */
+            model_name?: string | null;
+            /** Asr Model */
+            asr_model?: string | null;
         };
         /** SessionSnapshot */
         SessionSnapshot: {
@@ -448,6 +488,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    provider_status_configuration_providers_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "1";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderConfigurationStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configure_providers_configuration_providers_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "1";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderConfigurationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderConfigurationStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
