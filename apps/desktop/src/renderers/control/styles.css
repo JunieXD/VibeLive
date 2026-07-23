@@ -86,8 +86,21 @@ button:disabled {
   grid-template-columns: 224px minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
+  padding-top: 32px;
   overflow: hidden;
   background: var(--bg);
+}
+
+.app-shell::before {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 32px;
+  background: var(--bg);
+  content: "";
+  -webkit-app-region: drag;
 }
 
 .sidebar {
