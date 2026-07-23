@@ -1,3 +1,5 @@
+import type { AudienceWorkspaceState } from "./audience";
+
 export type DesktopSource = {
   id: string
   name: string
@@ -26,6 +28,13 @@ export type SaveModelConfigResult = {
   securelyStored: boolean
 }
 
+export type SaveAudienceWorkspaceResult = {
+  ok: boolean
+  savedAt: string
+  personaDocumentsSynced: boolean
+  personaDocumentsError: string | null
+}
+
 export type MediaAccessStatus =
   | 'not-determined'
   | 'granted'
@@ -35,6 +44,7 @@ export type MediaAccessStatus =
 
 export type MediaAccessSnapshot = {
   microphone: MediaAccessStatus
+  camera: MediaAccessStatus
   screen: MediaAccessStatus
 }
 
@@ -43,11 +53,20 @@ export type ControlApi = {
   selectDesktopSource: (sourceId: string) => Promise<boolean>
   getMediaAccessStatus: () => Promise<MediaAccessSnapshot>
   requestMicrophonePermission: () => Promise<MediaAccessStatus>
+  requestCameraPermission: () => Promise<MediaAccessStatus>
+  authorizeCameraCapture: () => Promise<boolean>
+  cancelCameraCaptureAuthorization: () => Promise<void>
   showOverlay: () => Promise<void>
   hideOverlay: () => Promise<void>
   clearOverlay: () => Promise<void>
   pushBarrage: (event: BarrageEvent) => Promise<void>
   saveModelConfig: (config: ModelConfig) => Promise<SaveModelConfigResult>
+  loadAudienceWorkspace: () => Promise<AudienceWorkspaceState | null>
+  saveAudienceWorkspace: (
+    workspace: AudienceWorkspaceState
+  ) => Promise<SaveAudienceWorkspaceResult>
+  confirmCloseAfterAudienceSave: () => Promise<void>
+  onCloseRequested: (listener: () => void) => () => void
   onEmergencyStop: (listener: () => void) => () => void
 }
 
