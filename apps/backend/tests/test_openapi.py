@@ -14,6 +14,11 @@ def test_openapi_includes_http_and_realtime_contracts() -> None:
     assert "ServerMessageEnvelope" in schemas
     assert "BarrageEventMessage" in schemas
     assert "BarrageSnapshot" in schemas
+    assert "BinaryEnvelopeHeader" in schemas
+    assert "ClientTextSubmit" in schemas
+    assert "ClientAudioCommit" in schemas
+    assert "IngestAck" in schemas
+    assert "IngestRejected" in schemas
     start_parameters = schema["paths"]["/sessions"]["post"]["parameters"]
     version_header = next(
         parameter
@@ -30,5 +35,11 @@ def test_openapi_includes_http_and_realtime_contracts() -> None:
         },
         "serverMessage": {
             "$ref": "#/components/schemas/ServerMessageEnvelope",
+        },
+        "binaryInput": {
+            "encoding": "ADVX-BIN/1",
+            "header": {
+                "$ref": "#/components/schemas/BinaryEnvelopeHeader",
+            },
         },
     }

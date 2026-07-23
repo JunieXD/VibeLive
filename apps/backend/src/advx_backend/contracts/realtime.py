@@ -17,6 +17,34 @@ class RealtimeProtocolErrorCode(StrEnum):
     UNEXPECTED_MESSAGE = "unexpected_message"
 
 
+class IngestInputKind(StrEnum):
+    TEXT = "text"
+    AUDIO = "audio"
+    FRAME = "frame"
+
+
+class IngestAckStage(StrEnum):
+    RECEIVED = "received"
+    COMMITTED = "committed"
+
+
+class IngestRejectionCode(StrEnum):
+    INVALID_INPUT = "invalid_input"
+    SESSION_NOT_ACTIVE = "session_not_active"
+    DUPLICATE_INPUT = "duplicate_input"
+    UNKNOWN_INPUT = "unknown_input"
+    OUT_OF_ORDER = "out_of_order"
+    PAYLOAD_TOO_LARGE = "payload_too_large"
+    UNSUPPORTED_FORMAT = "unsupported_format"
+    UNSUPPORTED_BINARY_VERSION = "unsupported_binary_version"
+    UNSUPPORTED_MEDIA_TYPE = "unsupported_media_type"
+    MALFORMED_BINARY_ENVELOPE = "malformed_binary_envelope"
+
+
+MAX_INGEST_IDENTIFIER_LENGTH = 128
+MAX_TEXT_INPUT_LENGTH = 4_000
+
+
 class RealtimeMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -33,7 +61,25 @@ class ClientPing(RealtimeMessage):
     request_id: str = Field(min_length=1, max_length=128)
 
 
-ClientMessage = Annotated[ClientHello | ClientPing, Field(discriminator="type")]
+class ClientTextSubmit(RealtimeMessage):
+    type: Literal["client.text.submit"] = "client.text.submit"
+    session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
+    input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
+    created_at_ms: int = Field(ge=0)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_INPUT_LENGTH, repr=False)
+
+
+class ClientAudioCommit(RealtimeMessage):
+    type: Literal["client.audio.commit"] = "client.audio.commit"
+    session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
+    input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
+    committed_at_ms: int = Field(ge=0)
+
+
+ClientMessage = Annotated[
+    ClientHello | ClientPing | ClientTextSubmit | ClientAudioCommit,
+    Field(discriminator="type"),
+]
 
 
 class ClientMessageEnvelope(RootModel[ClientMessage]):
@@ -96,8 +142,42 @@ class RealtimeProtocolError(RealtimeMessage):
     supported_version: int | None = None
 
 
+class IngestAck(RealtimeMessage):
+    type: Literal["ingest.ack"] = "ingest.ack"
+    protocol_version: Literal[1] = PROTOCOL_VERSION
+    session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
+    input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
+    input_kind: IngestInputKind
+    stage: IngestAckStage
+    accepted_at_ms: int = Field(ge=0)
+
+
+class IngestRejected(RealtimeMessage):
+    type: Literal["ingest.rejected"] = "ingest.rejected"
+    protocol_version: Literal[1] = PROTOCOL_VERSION
+    code: IngestRejectionCode
+    message: str = Field(min_length=1, max_length=256)
+    session_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_INGEST_IDENTIFIER_LENGTH,
+    )
+    input_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_INGEST_IDENTIFIER_LENGTH,
+    )
+    input_kind: IngestInputKind | None = None
+
+
 ServerMessage = Annotated[
-    BackendReady | BackendPong | SessionStatusEvent | BarrageEventMessage | RealtimeProtocolError,
+    BackendReady
+    | BackendPong
+    | SessionStatusEvent
+    | BarrageEventMessage
+    | RealtimeProtocolError
+    | IngestAck
+    | IngestRejected,
     Field(discriminator="type"),
 ]
 

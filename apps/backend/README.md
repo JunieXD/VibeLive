@@ -21,6 +21,8 @@ See [Backend design](../../docs/BACKEND_DESIGN.md) for module responsibilities, 
 - Session HTTP requests require `Authorization: Bearer <local-token>` and `X-ADVX-Protocol-Version: 1`.
 - `/ws` accepts JSON text messages. The first message must be `client.hello` with the same local token and protocol version; the connection then receives ordered session status events.
 
+The additive realtime ingest contract, including binary audio/image envelopes and privacy boundaries, is defined in [Ingest protocol](../../docs/INGEST_PROTOCOL.md). Its Handler and service integration are intentionally deferred.
+
 `scripts/dev.mjs` creates one random token per development launch and injects it into the backend and Electron Main process without printing it. The production launcher must provide the same value through its protected bootstrap channel before building `BackendRuntime`; it must not be written to ordinary configuration or logs.
 
 ## Local persistence

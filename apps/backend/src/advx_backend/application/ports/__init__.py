@@ -11,6 +11,20 @@ from advx_backend.application.ports.generation import (
     GenerationTrigger,
     SessionTaskScope,
 )
+from advx_backend.application.ports.ingest import (
+    AudioCommit,
+    AudioInput,
+    FrameInput,
+    FrameResolver,
+    FrameStore,
+    FrameStoreLimits,
+    IngestInputKind,
+    IngestPort,
+    IngestReceipt,
+    IngestReceiptStage,
+    ResolvedFrame,
+    TextInput,
+)
 from advx_backend.application.ports.model import ModelProvider
 from advx_backend.application.ports.persistence import (
     EntityNotFoundError,
@@ -33,7 +47,9 @@ from advx_backend.application.ports.session import (
 
 __all__ = [
     "AsrProvider",
+    "AudioCommit",
     "AudioChunk",
+    "AudioInput",
     "AudienceRepository",
     "AudienceBatch",
     "AudienceSelector",
@@ -42,7 +58,15 @@ __all__ = [
     "BarragePublisher",
     "Clock",
     "EntityNotFoundError",
+    "FrameInput",
+    "FrameResolver",
+    "FrameStore",
+    "FrameStoreLimits",
     "IdGenerator",
+    "IngestInputKind",
+    "IngestPort",
+    "IngestReceipt",
+    "IngestReceiptStage",
     "GenerationInvocationPlanner",
     "GenerationOutput",
     "GenerationTrigger",
@@ -52,12 +76,14 @@ __all__ = [
     "PersistenceInvariantError",
     "RelationshipRepository",
     "RevisionConflictError",
+    "ResolvedFrame",
     "SessionRecordRepository",
     "SessionRecordStore",
     "SessionResource",
     "SessionTaskScope",
     "SessionStatusPublisher",
     "TranscriptSegment",
+    "TextInput",
     "UnitOfWork",
     "UnitOfWorkFactory",
 ]
