@@ -21,10 +21,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current Session */
+        get: operations["current_session_sessions_current_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Session */
+        post: operations["start_session_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/{session_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Session */
+        post: operations["pause_session_sessions__session_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/{session_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Session */
+        post: operations["resume_session_sessions__session_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/{session_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Session */
+        post: operations["stop_session_sessions__session_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
         /** HealthResponse */
         HealthResponse: {
             /**
@@ -36,9 +126,141 @@ export interface components {
             /**
              * Protocol Version
              * @default 1
+             * @constant
              */
-            protocol_version: number;
+            protocol_version: 1;
         };
+        /** SessionSnapshot */
+        SessionSnapshot: {
+            /** Session Id */
+            session_id: string | null;
+            state: components["schemas"]["SessionState"];
+            /** Started At Ms */
+            started_at_ms: number | null;
+            /** Updated At Ms */
+            updated_at_ms: number;
+            /** Revision */
+            revision: number;
+        };
+        /**
+         * SessionState
+         * @enum {string}
+         */
+        SessionState: "idle" | "starting" | "running" | "paused" | "stopping" | "error";
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
+        };
+        /** ClientHello */
+        ClientHello: {
+            /** Protocol Version */
+            protocol_version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "client.hello";
+            /** Token */
+            token: string;
+        };
+        /** ClientPing */
+        ClientPing: {
+            /** Protocol Version */
+            protocol_version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "client.ping";
+            /** Request Id */
+            request_id: string;
+        };
+        /** ClientMessageEnvelope */
+        ClientMessageEnvelope: components["schemas"]["ClientHello"] | components["schemas"]["ClientPing"];
+        /** BackendPong */
+        BackendPong: {
+            /**
+             * Protocol Version
+             * @default 1
+             * @constant
+             */
+            protocol_version: 1;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "backend.pong";
+            /** Request Id */
+            request_id: string;
+        };
+        /** BackendReady */
+        BackendReady: {
+            /**
+             * Protocol Version
+             * @default 1
+             * @constant
+             */
+            protocol_version: 1;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "backend.ready";
+            session: components["schemas"]["SessionSnapshot"];
+        };
+        /** RealtimeProtocolError */
+        RealtimeProtocolError: {
+            /**
+             * Protocol Version
+             * @default 1
+             * @constant
+             */
+            protocol_version: 1;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "protocol.error";
+            code: components["schemas"]["RealtimeProtocolErrorCode"];
+            /** Message */
+            message: string;
+            /**
+             * Supported Version
+             * @default null
+             */
+            supported_version: number | null;
+        };
+        /**
+         * RealtimeProtocolErrorCode
+         * @enum {string}
+         */
+        RealtimeProtocolErrorCode: "invalid_message" | "authentication_failed" | "version_mismatch" | "handshake_timeout" | "message_too_large" | "unexpected_message";
+        /** SessionStatusEvent */
+        SessionStatusEvent: {
+            /**
+             * Protocol Version
+             * @default 1
+             * @constant
+             */
+            protocol_version: 1;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "session.status";
+            session: components["schemas"]["SessionSnapshot"];
+        };
+        /** ServerMessageEnvelope */
+        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["RealtimeProtocolError"];
     };
     responses: never;
     parameters: never;
@@ -64,6 +286,167 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    current_session_sessions_current_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "1";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_session_sessions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "1";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_session_sessions__session_id__pause_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "1";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_session_sessions__session_id__resume_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "1";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_session_sessions__session_id__stop_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "1";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

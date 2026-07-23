@@ -1,0 +1,32 @@
+from advx_backend.bootstrap import build_runtime
+from advx_backend.main import create_app
+
+
+def test_openapi_includes_http_and_realtime_contracts() -> None:
+    app = create_app(runtime=build_runtime(local_token="test-local-token"))
+
+    schema = app.openapi()
+    schemas = schema["components"]["schemas"]
+
+    assert "/sessions" in schema["paths"]
+    assert "/sessions/{session_id}/pause" in schema["paths"]
+    assert "ClientMessageEnvelope" in schemas
+    assert "ServerMessageEnvelope" in schemas
+    start_parameters = schema["paths"]["/sessions"]["post"]["parameters"]
+    version_header = next(
+        parameter
+        for parameter in start_parameters
+        if parameter["name"] == "X-ADVX-Protocol-Version"
+    )
+    assert version_header["required"] is True
+    assert version_header["schema"]["const"] == "1"
+    assert schema["x-advx-realtime"] == {
+        "path": "/ws",
+        "protocolVersion": 1,
+        "clientMessage": {
+            "$ref": "#/components/schemas/ClientMessageEnvelope",
+        },
+        "serverMessage": {
+            "$ref": "#/components/schemas/ServerMessageEnvelope",
+        },
+    }

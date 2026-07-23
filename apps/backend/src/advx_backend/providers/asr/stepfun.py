@@ -8,7 +8,7 @@ from typing import Final
 
 import httpx
 
-from advx_backend.providers.asr.base import AudioChunk, TranscriptSegment
+from advx_backend.application.ports.asr import AudioChunk, TranscriptSegment
 
 
 class StepFunAsrError(RuntimeError):

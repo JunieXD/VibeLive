@@ -1,6 +1,11 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 
 const useShell = process.platform === "win32";
+const childEnvironment = {
+  ...process.env,
+  ADVX_LOCAL_TOKEN: randomBytes(32).toString("base64url")
+};
 const children = [
   spawn(
     "uv",
@@ -16,11 +21,12 @@ const children = [
       "--port",
       "8765"
     ],
-    { stdio: "inherit", shell: useShell }
+    { stdio: "inherit", shell: useShell, env: childEnvironment }
   ),
   spawn("pnpm", ["--filter", "@advx/desktop", "dev"], {
     stdio: "inherit",
-    shell: useShell
+    shell: useShell,
+    env: childEnvironment
   })
 ];
 
