@@ -13,11 +13,7 @@ from advx_backend.application.session_service import (
     SessionService,
 )
 from advx_backend.contracts.protocol import PROTOCOL_VERSION
-from advx_backend.contracts.session import (
-    SessionSnapshot,
-    SessionStartRequest,
-    SessionStartResponse,
-)
+from advx_backend.contracts.session import SessionSnapshot
 
 SessionId = Annotated[str, Path(min_length=1, max_length=128)]
 
@@ -41,15 +37,15 @@ def create_session_router(
 
     @router.post(
         "",
-        response_model=SessionStartResponse,
+        response_model=SessionSnapshot,
         status_code=http_status.HTTP_201_CREATED,
     )
-    async def start_session(request: SessionStartRequest) -> SessionStartResponse:
+    async def start_session() -> SessionSnapshot:
         try:
             status = await session_service.start()
         except SessionError as error:
             _raise_http_error(error)
-        return SessionStartResponse.from_domain(status, request)
+        return SessionSnapshot.from_domain(status)
 
     @router.post("/{session_id}/pause", response_model=SessionSnapshot)
     async def pause_session(session_id: SessionId) -> SessionSnapshot:

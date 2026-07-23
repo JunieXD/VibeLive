@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -14,7 +13,7 @@ from advx_backend.main import create_app
 LOCAL_TOKEN = "test-local-token"
 
 
-def hello(*, token: str = LOCAL_TOKEN, protocol_version: int = 2) -> dict[str, object]:
+def hello(*, token: str = LOCAL_TOKEN, protocol_version: int = 1) -> dict[str, object]:
     return {
         "type": "client.hello",
         "protocol_version": protocol_version,
@@ -25,21 +24,12 @@ def hello(*, token: str = LOCAL_TOKEN, protocol_version: int = 2) -> dict[str, o
 def request_headers() -> dict[str, str]:
     return {
         "Authorization": f"Bearer {LOCAL_TOKEN}",
-        PROTOCOL_VERSION_HEADER: "2",
-    }
-
-
-def session_start_payload() -> dict[str, object]:
-    fixture_path = Path(__file__).parent / "fixtures" / "g002_audience_contract_v1.json"
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    return {
-        **fixture["normalized_audience_config"],
-        **fixture["session_start"],
+        PROTOCOL_VERSION_HEADER: "1",
     }
 
 
 def test_client_hello_does_not_reveal_local_token() -> None:
-    message = ClientHello(protocol_version=2, token=LOCAL_TOKEN)
+    message = ClientHello(protocol_version=1, token=LOCAL_TOKEN)
 
     assert LOCAL_TOKEN not in repr(message)
 
@@ -52,19 +42,19 @@ def test_realtime_handshake_stays_open_and_answers_ping(tmp_path: Path) -> None:
             websocket.send_json(hello())
             ready = websocket.receive_json()
             assert ready["type"] == "backend.ready"
-            assert ready["protocol_version"] == 2
+            assert ready["protocol_version"] == 1
             assert ready["session"]["state"] == "idle"
 
             websocket.send_json(
                 {
                     "type": "client.ping",
-                    "protocol_version": 2,
+                    "protocol_version": 1,
                     "request_id": "ping-1",
                 }
             )
             assert websocket.receive_json() == {
                 "type": "backend.pong",
-                "protocol_version": 2,
+                "protocol_version": 1,
                 "request_id": "ping-1",
             }
 
@@ -77,11 +67,7 @@ def test_realtime_broadcasts_ordered_http_session_changes(tmp_path: Path) -> Non
             websocket.send_json(hello())
             websocket.receive_json()
 
-            created = client.post(
-                "/sessions",
-                headers=request_headers(),
-                json=session_start_payload(),
-            )
+            created = client.post("/sessions", headers=request_headers())
             assert created.status_code == 201
 
             starting = websocket.receive_json()
@@ -96,7 +82,7 @@ def test_realtime_broadcasts_ordered_http_session_changes(tmp_path: Path) -> Non
     ("payload", "expected_code", "expected_close_code"),
     [
         (hello(token="wrong"), "authentication_failed", 4401),
-        (hello(protocol_version=1), "version_mismatch", 4406),
+        (hello(protocol_version=2), "version_mismatch", 4406),
     ],
 )
 def test_realtime_rejects_invalid_handshakes(
@@ -129,7 +115,7 @@ def test_realtime_rejects_messages_outside_the_schema(tmp_path: Path) -> None:
             websocket.send_json(
                 {
                     "type": "client.unknown",
-                    "protocol_version": 2,
+                    "protocol_version": 1,
                 }
             )
             error = websocket.receive_json()
@@ -150,11 +136,7 @@ def test_realtime_only_forwards_newer_session_revisions(tmp_path: Path) -> None:
             ready = websocket.receive_json()
             initial_revision = ready["session"]["revision"]
 
-            created = client.post(
-                "/sessions",
-                headers=request_headers(),
-                json=session_start_payload(),
-            )
+            created = client.post("/sessions", headers=request_headers())
             assert created.status_code == 201
             first = websocket.receive_json()
             second = websocket.receive_json()
@@ -188,19 +170,15 @@ def test_realtime_forwards_validated_barrage_events(tmp_path: Path) -> None:
 
     assert message == {
         "type": "barrage.event",
-        "protocol_version": 2,
+        "protocol_version": 1,
         "barrage": {
             "barrage_id": "barrage-1",
             "session_id": "session-1",
             "observation_id": "observation-1",
-            "decision_id": "request-1",
             "request_id": "request-1",
-            "viewer_instance_id": "audience-1",
-            "persona_id": "audience-1",
-            "persona_revision": 1,
-            "display_name": "audience-1",
-            "display_color": "#FFFFFF",
+            "audience_id": "audience-1",
             "text": "hello",
-            "accepted_at_ms": 100,
+            "created_at_ms": 100,
+            "expires_at_ms": 200,
         },
     }

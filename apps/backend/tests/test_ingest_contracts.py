@@ -90,21 +90,21 @@ def test_realtime_ingest_messages_are_additive_to_existing_client_messages() -> 
     hello = ClientMessageEnvelope.model_validate(
         {
             "type": "client.hello",
-            "protocol_version": 2,
+            "protocol_version": 1,
             "token": "local-token",
         }
     ).root
     ping = ClientMessageEnvelope.model_validate(
         {
             "type": "client.ping",
-            "protocol_version": 2,
+            "protocol_version": 1,
             "request_id": "ping-1",
         }
     ).root
     text = ClientMessageEnvelope.model_validate(
         {
             "type": "client.text.submit",
-            "protocol_version": 2,
+            "protocol_version": 1,
             "session_id": "session-1",
             "input_id": "text-1",
             "created_at_ms": 100,
@@ -114,7 +114,7 @@ def test_realtime_ingest_messages_are_additive_to_existing_client_messages() -> 
     commit = ClientMessageEnvelope.model_validate(
         {
             "type": "client.audio.commit",
-            "protocol_version": 2,
+            "protocol_version": 1,
             "session_id": "session-1",
             "input_id": "audio-1",
             "committed_at_ms": 200,
@@ -131,14 +131,14 @@ def test_realtime_server_messages_include_ingest_ack_and_rejection_without_chang
     pong = ServerMessageEnvelope.model_validate(
         {
             "type": "backend.pong",
-            "protocol_version": 2,
+            "protocol_version": 1,
             "request_id": "ping-1",
         }
     ).root
     acknowledgement = ServerMessageEnvelope.model_validate(
         {
             "type": "ingest.ack",
-            "protocol_version": 2,
+            "protocol_version": 1,
             "session_id": "session-1",
             "input_id": "audio-1",
             "input_kind": "audio",
@@ -149,7 +149,7 @@ def test_realtime_server_messages_include_ingest_ack_and_rejection_without_chang
     rejected = ServerMessageEnvelope.model_validate(
         {
             "type": "ingest.rejected",
-            "protocol_version": 2,
+            "protocol_version": 1,
             "code": "payload_too_large",
             "message": "The audio payload is too large.",
             "session_id": "session-1",

@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -13,16 +12,7 @@ LOCAL_TOKEN = "test-local-token"
 def headers() -> dict[str, str]:
     return {
         "Authorization": f"Bearer {LOCAL_TOKEN}",
-        PROTOCOL_VERSION_HEADER: "2",
-    }
-
-
-def session_start_payload() -> dict[str, object]:
-    fixture_path = Path(__file__).parent / "fixtures" / "g002_audience_contract_v1.json"
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    return {
-        **fixture["normalized_audience_config"],
-        **fixture["session_start"],
+        PROTOCOL_VERSION_HEADER: "1",
     }
 
 
@@ -91,11 +81,7 @@ def test_provider_configuration_rejects_replacement_and_active_session(
             headers=headers(),
             json=provider_payload(model_name="different-model"),
         )
-        session = client.post(
-            "/sessions",
-            headers=headers(),
-            json=session_start_payload(),
-        ).json()
+        session = client.post("/sessions", headers=headers()).json()
         active = client.put(
             "/configuration/providers",
             headers=headers(),
