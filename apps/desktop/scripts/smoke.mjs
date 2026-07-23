@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { once } from 'node:events'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -34,6 +35,34 @@ function launchApp() {
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
     }
   })
+}
+
+async function closeControlWindowAndWaitForExit(electronApp) {
+  const electronProcess = electronApp.process()
+  const exited =
+    electronProcess.exitCode === null ? once(electronProcess, 'exit') : Promise.resolve()
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    const controlWindow = BrowserWindow.getAllWindows().find((window) =>
+      window.webContents.getURL().includes('/control/')
+    )
+    if (!controlWindow) throw new Error('Control window was not found during shutdown smoke.')
+    controlWindow.close()
+  })
+
+  let timeout
+  try {
+    await Promise.race([
+      exited,
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Electron did not exit after its control window closed.')),
+          8_000
+        )
+      })
+    ])
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 async function setRange(page, label, value) {
@@ -1314,7 +1343,7 @@ try {
     clearCount: 0
   }
 
-  await electronApp.close()
+  await closeControlWindowAndWaitForExit(electronApp)
   electronApp = await launchApp()
   const restartedPage = await electronApp.firstWindow()
   await restartedPage.waitForSelector('h1')
@@ -1329,7 +1358,7 @@ try {
   )
 
   console.log(
-    `Desktop Overlay smoke passed: ${targetOptions} target(s), ${sourceCount} capture source(s), live styles, collision-free density, bounds, clear, persistence, and ${clickThroughProof.skipped ? 'API-only' : 'real Windows'} click-through.`
+    `Desktop Overlay smoke passed: ${targetOptions} target(s), ${sourceCount} capture source(s), live styles, collision-free density, bounds, clear, persistence, main-window quit, and ${clickThroughProof.skipped ? 'API-only' : 'real Windows'} click-through.`
   )
   console.log(`Settings screenshot: ${resolve(artifactDirectory, 'overlay-settings.png')}`)
   console.log(`Overlay screenshot: ${resolve(artifactDirectory, 'overlay-renderer.png')}`)

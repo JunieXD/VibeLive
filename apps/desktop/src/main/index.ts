@@ -35,6 +35,8 @@ let backendProcess: BackendProcessController | null = null;
 let backendInitialization: Promise<BackendRuntimeStatus> | null = null;
 let backendRestartTimer: NodeJS.Timeout | null = null;
 let backendRestartAttempts = 0;
+let appShutdownPromise: Promise<void> | null = null;
+let appShutdownComplete = false;
 const backendBaseUrl = process.env.ADVX_BACKEND_URL ?? "http://127.0.0.1:8765";
 const localToken = process.env.ADVX_LOCAL_TOKEN ?? randomBytes(32).toString("base64url");
 const backendClient = new BackendClient({
@@ -155,12 +157,14 @@ function openControlWindow(): BrowserWindow {
     controlWindowCloseFallback = setTimeout(() => {
       allowControlWindowClose = true;
       window.destroy();
+      app.quit();
     }, 5_000);
   });
   window.on("closed", () => {
     if (controlWindowCloseFallback) clearTimeout(controlWindowCloseFallback);
     controlWindowCloseFallback = null;
     if (controlWindow === window) controlWindow = null;
+    if (quitRequested && !appShutdownPromise) setImmediate(() => app.quit());
   });
   return window;
 }
@@ -172,7 +176,28 @@ function confirmControlWindowClose(): void {
   controlWindowCloseFallback = null;
   allowControlWindowClose = true;
   window.close();
-  if (quitRequested) setImmediate(() => app.quit());
+  setImmediate(() => app.quit());
+}
+
+function prepareApplicationShutdown(): void {
+  quitRequested = true;
+  globalShortcut.unregisterAll();
+  screen.removeListener("display-added", syncOverlayToDisplays);
+  screen.removeListener("display-removed", syncOverlayToDisplays);
+  screen.removeListener("display-metrics-changed", syncOverlayToDisplays);
+  overlaySettingsReady = false;
+  displaySyncPending = false;
+  if (backendRestartTimer) clearTimeout(backendRestartTimer);
+  backendRestartTimer = null;
+}
+
+async function stopApplicationResources(): Promise<void> {
+  await backendClient.stop().catch((error: unknown) =>
+    console.error("Failed to stop the backend client", error)
+  );
+  await backendProcess?.stop().catch((error: unknown) =>
+    console.error("Failed to stop the backend process", error)
+  );
 }
 
 function syncOverlayToDisplays(): void {
@@ -239,6 +264,7 @@ app.whenReady().then(async () => {
   }
 
   app.on("activate", () => {
+    if (quitRequested || appShutdownPromise) return;
     if (BrowserWindow.getAllWindows().length === 0) {
       controlWindow = openControlWindow();
       broadcastOverlaySettings(() => controlWindow, getOverlaySettings());
@@ -247,19 +273,24 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  app.quit();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
   quitRequested = true;
-  globalShortcut.unregisterAll();
-  screen.removeListener("display-added", syncOverlayToDisplays);
-  screen.removeListener("display-removed", syncOverlayToDisplays);
-  screen.removeListener("display-metrics-changed", syncOverlayToDisplays);
-  overlaySettingsReady = false;
-  displaySyncPending = false;
-  if (backendRestartTimer) clearTimeout(backendRestartTimer);
-  backendRestartTimer = null;
-  void backendClient.stop();
-  void backendProcess?.stop();
+  if (appShutdownComplete) return;
+  event.preventDefault();
+  if (appShutdownPromise) return;
+  if (controlWindow && !controlWindow.isDestroyed() && !allowControlWindowClose) {
+    controlWindow.close();
+    return;
+  }
+
+  prepareApplicationShutdown();
+  appShutdownPromise = stopApplicationResources().finally(() => {
+    appShutdownComplete = true;
+    allowControlWindowClose = true;
+    if (controlWindow && !controlWindow.isDestroyed()) controlWindow.destroy();
+    app.quit();
+  });
 });

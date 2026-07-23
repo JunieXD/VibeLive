@@ -4,6 +4,8 @@ import { createServer } from "node:net";
 import { resolve } from "node:path";
 
 const useShell = process.platform === "win32";
+const useProcessGroups = process.platform !== "win32";
+const shutdownGraceMs = 5_000;
 const localToken = process.env.ADVX_LOCAL_TOKEN ?? randomBytes(32).toString("base64url");
 const configuredBackendUrl = process.env.ADVX_BACKEND_URL;
 const backendPort = configuredBackendUrl ? null : await findAvailablePort();
@@ -18,6 +20,7 @@ const childEnvironment = {
 const children = [];
 let shuttingDown = false;
 let backendExited = false;
+let shutdownPromise = null;
 
 if (!configuredBackendUrl) {
   const backend = spawn(
@@ -36,7 +39,12 @@ if (!configuredBackendUrl) {
       "--port",
       String(backendPort)
     ],
-    { stdio: "inherit", shell: useShell, env: childEnvironment }
+    {
+      stdio: "inherit",
+      shell: useShell,
+      detached: useProcessGroups,
+      env: childEnvironment
+    }
   );
   children.push(backend);
   backend.on("exit", () => {
@@ -45,8 +53,8 @@ if (!configuredBackendUrl) {
   observeChild(backend, "Backend");
 }
 
-process.on("SIGINT", () => shutdown(0));
-process.on("SIGTERM", () => shutdown(0));
+process.once("SIGINT", () => void shutdown(0, "SIGINT"));
+process.once("SIGTERM", () => void shutdown(0, "SIGTERM"));
 
 try {
   console.log(`Waiting for ADVX backend at ${backendUrl}...`);
@@ -57,34 +65,90 @@ try {
   const desktop = spawn("pnpm", ["--filter", "@advx/desktop", "dev"], {
     stdio: "inherit",
     shell: useShell,
+    detached: useProcessGroups,
     env: childEnvironment
   });
   children.push(desktop);
   observeChild(desktop, "Desktop");
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
-  shutdown(1);
+  void shutdown(1);
 }
 
 function observeChild(child, label) {
   child.on("error", (error) => {
     console.error(`${label}: ${error.message}`);
-    shutdown(1);
+    void shutdown(1);
   });
   child.on("exit", (code, signal) => {
     if (shuttingDown) return;
     if (signal) console.error(`${label} stopped by ${signal}.`);
-    shutdown(code ?? 1);
+    void shutdown(code ?? 1);
   });
 }
 
-function shutdown(exitCode = 0) {
-  if (shuttingDown) return;
+function shutdown(exitCode = 0, signal = "SIGTERM") {
+  if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
-  for (const child of children) {
-    if (!child.killed) child.kill();
+  shutdownPromise = (async () => {
+    const runningChildren = children.filter(isChildTreeRunning);
+    for (const child of runningChildren) terminateChildTree(child, signal);
+
+    await Promise.race([
+      Promise.all(runningChildren.map(waitForChildTreeExit)),
+      delay(shutdownGraceMs)
+    ]);
+
+    const remainingChildren = runningChildren.filter(isChildTreeRunning);
+    for (const child of remainingChildren) terminateChildTree(child, "SIGKILL");
+    await Promise.race([
+      Promise.all(remainingChildren.map(waitForChildTreeExit)),
+      delay(1_000)
+    ]);
+    process.exitCode = exitCode;
+  })();
+  return shutdownPromise;
+}
+
+function isRunning(child) {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+function isChildTreeRunning(child) {
+  if (!useProcessGroups || child.pid === undefined) return isRunning(child);
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== "ESRCH";
   }
-  process.exitCode = exitCode;
+}
+
+function terminateChildTree(child, signal) {
+  if (!isChildTreeRunning(child) || child.pid === undefined) return;
+  try {
+    if (useProcessGroups) {
+      process.kill(-child.pid, signal);
+      return;
+    }
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+      stdio: "ignore",
+      windowsHide: true
+    });
+    killer.unref();
+  } catch (error) {
+    if (error?.code !== "ESRCH") {
+      console.error(`Failed to stop child process ${child.pid}: ${error}`);
+    }
+  }
+}
+
+async function waitForChildTreeExit(child) {
+  while (isChildTreeRunning(child)) await delay(50);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
 async function findAvailablePort() {
