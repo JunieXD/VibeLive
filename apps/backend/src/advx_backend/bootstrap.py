@@ -2,17 +2,29 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from advx_backend.application.audience_service import AudienceService
 from advx_backend.application.barrage_pipeline import BarragePipeline
 from advx_backend.application.context_builder import ContextBuilder
+from advx_backend.application.frame_store import InMemoryFrameStore
+from advx_backend.application.generation_policies import (
+    DefaultAudienceSelector,
+    DefaultGenerationInvocationPlanner,
+    DefaultGenerationTrigger,
+)
 from advx_backend.application.generation_service import GenerationService
+from advx_backend.application.ingest_gateway import IngestGateway
+from advx_backend.application.ingest_service import IngestService
+from advx_backend.application.ports.asr import AsrProvider
 from advx_backend.application.ports.generation import (
     AudienceSelector,
     AudienceSnapshotProvider,
     GenerationInvocationPlanner,
     GenerationTrigger,
 )
+from advx_backend.application.ports.ingest import FrameStoreLimits
 from advx_backend.application.ports.model import ModelProvider
 from advx_backend.application.ports.persistence import UnitOfWorkFactory
+from advx_backend.application.reaction_scheduler import LatestWinsReactionScheduler
 from advx_backend.application.reaction_service import ReactionService
 from advx_backend.application.realtime_broker import RealtimeBroker
 from advx_backend.application.room_service import RoomService
@@ -42,6 +54,10 @@ class PipelineConfig:
     frame_ttl_ms: int = 10_000
     max_frames_per_observation: int = 3
     max_events_per_observation: int = 64
+    frame_max_bytes: int = 4_194_304
+    frame_total_bytes: int = 16_777_216
+    audience_max_memories: int = 12
+    ingest_max_tracked_input_ids: int = 1_024
     barrage_max_text_length: int = 200
     barrage_ttl_ms: int = 15_000
     barrage_blocked_words: frozenset[str] = frozenset()
@@ -63,9 +79,18 @@ class BackendRuntime:
     id_generator: UuidIdGenerator
     room_service: RoomService
     context_builder: ContextBuilder
+    audience_service: AudienceService
+    frame_store: InMemoryFrameStore
+    generation_trigger: DefaultGenerationTrigger
+    audience_selector: DefaultAudienceSelector
+    invocation_planner: DefaultGenerationInvocationPlanner
     barrage_pipeline: BarragePipeline
     session_resources: SessionResources
+    ingest_gateway: IngestGateway
+    pipeline_config: PipelineConfig
     local_token: str = field(repr=False)
+    ingest_service: IngestService | None = field(default=None, init=False)
+    reaction_scheduler: LatestWinsReactionScheduler | None = field(default=None, init=False)
     _started: bool = field(default=False, init=False, repr=False)
 
     async def startup(self) -> None:
@@ -73,6 +98,7 @@ class BackendRuntime:
             return
         await self.database.start()
         await self.session_record_store.recover_interrupted(ended_at_ms=self.clock.now_ms())
+        await self.audience_service.initialize_builtin_audiences()
         self._started = True
 
     async def shutdown(self) -> None:
@@ -85,18 +111,20 @@ class BackendRuntime:
     def build_generation_service(
         self,
         *,
-        snapshots: AudienceSnapshotProvider,
-        trigger: GenerationTrigger,
-        selector: AudienceSelector,
-        invocation_planner: GenerationInvocationPlanner,
         model_provider: ModelProvider,
+        snapshots: AudienceSnapshotProvider | None = None,
+        trigger: GenerationTrigger | None = None,
+        selector: AudienceSelector | None = None,
+        invocation_planner: GenerationInvocationPlanner | None = None,
         max_concurrency: int = 4,
     ) -> GenerationService:
         return GenerationService(
-            snapshots=snapshots,
-            trigger=trigger,
-            selector=selector,
-            invocation_planner=invocation_planner,
+            snapshots=self.audience_service if snapshots is None else snapshots,
+            trigger=self.generation_trigger if trigger is None else trigger,
+            selector=self.audience_selector if selector is None else selector,
+            invocation_planner=(
+                self.invocation_planner if invocation_planner is None else invocation_planner
+            ),
             model_provider=model_provider,
             session_tasks=self.session_service,
             id_generator=self.id_generator,
@@ -106,11 +134,11 @@ class BackendRuntime:
     def build_reaction_service(
         self,
         *,
-        snapshots: AudienceSnapshotProvider,
-        trigger: GenerationTrigger,
-        selector: AudienceSelector,
-        invocation_planner: GenerationInvocationPlanner,
         model_provider: ModelProvider,
+        snapshots: AudienceSnapshotProvider | None = None,
+        trigger: GenerationTrigger | None = None,
+        selector: AudienceSelector | None = None,
+        invocation_planner: GenerationInvocationPlanner | None = None,
         max_concurrency: int = 4,
     ) -> ReactionService:
         generation_service = self.build_generation_service(
@@ -128,6 +156,40 @@ class BackendRuntime:
             session_tasks=self.session_service,
             publisher=self.realtime_broker,
         )
+
+    def configure_ingest_pipeline(
+        self,
+        *,
+        asr_provider: AsrProvider,
+        model_provider: ModelProvider,
+        max_concurrency: int = 4,
+    ) -> IngestService:
+        if self.ingest_service is not None:
+            raise RuntimeError("the ingest pipeline is already configured")
+        reaction_service = self.build_reaction_service(
+            model_provider=model_provider,
+            max_concurrency=max_concurrency,
+        )
+        scheduler = LatestWinsReactionScheduler(
+            executor=reaction_service,
+            session_tasks=self.session_service,
+            clock=self.clock,
+        )
+        ingest_service = IngestService(
+            room_service=self.room_service,
+            context_builder=self.context_builder,
+            frame_store=self.frame_store,
+            asr_provider=asr_provider,
+            scheduler=scheduler,
+            session_tasks=self.session_service,
+            clock=self.clock,
+            max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
+        )
+        self.session_resources.add_resource(ingest_service)
+        self.ingest_gateway.configure(ingest_service)
+        self.reaction_scheduler = scheduler
+        self.ingest_service = ingest_service
+        return ingest_service
 
 
 def build_runtime(
@@ -167,6 +229,22 @@ def build_runtime(
         max_frames_per_observation=active_pipeline_config.max_frames_per_observation,
         max_events_per_observation=active_pipeline_config.max_events_per_observation,
     )
+    audience_service = AudienceService(
+        unit_of_work_factory=unit_of_work_factory,
+        clock=clock,
+        max_memories_per_audience=active_pipeline_config.audience_max_memories,
+    )
+    frame_store = InMemoryFrameStore(
+        limits=FrameStoreLimits(
+            max_frames=active_pipeline_config.frame_capacity,
+            max_frame_bytes=active_pipeline_config.frame_max_bytes,
+            max_total_bytes=active_pipeline_config.frame_total_bytes,
+        ),
+        id_generator=id_generator,
+    )
+    generation_trigger = DefaultGenerationTrigger(clock=clock)
+    audience_selector = DefaultAudienceSelector()
+    invocation_planner = DefaultGenerationInvocationPlanner()
     barrage_pipeline = BarragePipeline(
         policy=BarragePolicy(
             max_text_length=active_pipeline_config.barrage_max_text_length,
@@ -186,7 +264,9 @@ def build_runtime(
     session_resources = SessionResources(
         context_builder=context_builder,
         barrage_pipeline=barrage_pipeline,
+        resources=(audience_service,),
     )
+    ingest_gateway = IngestGateway()
     session_service = SessionService(
         clock=clock,
         id_generator=id_generator,
@@ -205,8 +285,15 @@ def build_runtime(
         id_generator=id_generator,
         room_service=room_service,
         context_builder=context_builder,
+        audience_service=audience_service,
+        frame_store=frame_store,
+        generation_trigger=generation_trigger,
+        audience_selector=audience_selector,
+        invocation_planner=invocation_planner,
         barrage_pipeline=barrage_pipeline,
         session_resources=session_resources,
+        ingest_gateway=ingest_gateway,
+        pipeline_config=active_pipeline_config,
         local_token=token,
     )
 

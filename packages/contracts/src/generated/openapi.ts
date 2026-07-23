@@ -350,7 +350,7 @@ export interface components {
          * IngestRejectionCode
          * @enum {string}
          */
-        IngestRejectionCode: "invalid_input" | "session_not_active" | "duplicate_input" | "unknown_input" | "out_of_order" | "payload_too_large" | "unsupported_format" | "unsupported_binary_version" | "unsupported_media_type" | "malformed_binary_envelope";
+        IngestRejectionCode: "invalid_input" | "session_not_active" | "duplicate_input" | "unknown_input" | "out_of_order" | "payload_too_large" | "unsupported_format" | "unsupported_binary_version" | "unsupported_media_type" | "malformed_binary_envelope" | "pipeline_unavailable";
         /** RealtimeProtocolError */
         RealtimeProtocolError: {
             /**

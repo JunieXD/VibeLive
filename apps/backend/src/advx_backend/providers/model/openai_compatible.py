@@ -1,18 +1,21 @@
 import asyncio
+import base64
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Final, Protocol
+from typing import Final, cast
 from urllib.parse import quote, urlsplit
 
 import httpx
 
+from advx_backend.application.ports.ingest import FrameResolver
 from advx_backend.contracts.generation import (
     BarrageCandidate,
     FrameRef,
     GenerationRequest,
     GenerationResult,
 )
+from advx_backend.domain.observation import FrameRef as DomainFrameRef
 
 
 class OpenAICompatibleProviderError(RuntimeError):
@@ -41,12 +44,6 @@ class OpenAICompatibleHttpError(OpenAICompatibleProviderError):
 
 class OpenAICompatibleProtocolError(OpenAICompatibleProviderError):
     """Raised when a response does not follow the expected Chat Completions shape."""
-
-
-class FrameResolver(Protocol):
-    """Resolves an in-memory frame reference to an image URL for one request."""
-
-    async def resolve(self, frame: FrameRef) -> str | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +225,10 @@ class OpenAICompatibleProvider:
             ) from None
 
         content: str | list[dict[str, object]] = context_text
-        image_parts = await self._image_parts(request.observation.frames)
+        image_parts = await self._image_parts(
+            request.observation.session_id,
+            request.observation.frames,
+        )
         if image_parts:
             content = [{"type": "text", "text": context_text}, *image_parts]
 
@@ -250,22 +250,35 @@ class OpenAICompatibleProvider:
             },
         }
 
-    async def _image_parts(self, frames: list[FrameRef]) -> list[dict[str, object]]:
+    async def _image_parts(
+        self,
+        session_id: str,
+        frames: list[FrameRef],
+    ) -> list[dict[str, object]]:
         if self._frame_resolver is None:
             return []
 
         image_parts: list[dict[str, object]] = []
         for frame in frames:
             try:
-                image_url = await self._frame_resolver.resolve(frame)
+                resolved = await self._frame_resolver.resolve(
+                    session_id=session_id,
+                    frame=cast(DomainFrameRef, frame),
+                )
             except asyncio.CancelledError:
                 raise
             except Exception:
                 raise OpenAICompatibleProtocolError("frame resolution failed") from None
-            if image_url is None:
+            if resolved is None:
                 continue
-            if not isinstance(image_url, str) or not image_url:
-                raise OpenAICompatibleProtocolError("frame resolver returned an invalid image URL")
+            if resolved.session_id != session_id or resolved.frame_id != frame.frame_id:
+                raise OpenAICompatibleProtocolError("frame resolver returned a mismatched frame")
+            if resolved.mime_type not in {"image/jpeg", "image/png", "image/webp"}:
+                raise OpenAICompatibleProtocolError(
+                    "frame resolver returned an unsupported image type"
+                )
+            encoded = base64.b64encode(resolved.body).decode("ascii")
+            image_url = f"data:{resolved.mime_type};base64,{encoded}"
             image_parts.append({"type": "image_url", "image_url": {"url": image_url}})
         return image_parts
 

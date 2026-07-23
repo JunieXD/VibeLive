@@ -77,6 +77,9 @@ class StepFunAsrProvider:
     async def start(self) -> None:
         if self._started:
             return
+        self._segments = asyncio.Queue()
+        self._results = asyncio.Queue()
+        self._buffer.clear()
         if self._client is None:
             self._client = httpx.AsyncClient()
         self._started = True

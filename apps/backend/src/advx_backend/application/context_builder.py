@@ -67,17 +67,19 @@ class ContextBuilder:
         mime_type: str,
         data_ref: str,
     ) -> FrameRef:
+        frame = FrameRef(
+            frame_id=self._id_generator.new_id(),
+            created_at_ms=self._clock.now_ms(),
+            mime_type=mime_type,
+            data_ref=data_ref,
+        )
+        return await self.append_frame_ref(session_id, frame)
+
+    async def append_frame_ref(self, session_id: str, frame: FrameRef) -> FrameRef:
         await self._room_service.require_active_session(session_id)
         async with self._lock:
             self._require_active_session(session_id)
-            now = self._clock.now_ms()
-            self._evict_expired(now)
-            frame = FrameRef(
-                frame_id=self._id_generator.new_id(),
-                created_at_ms=now,
-                mime_type=mime_type,
-                data_ref=data_ref,
-            )
+            self._evict_expired(self._clock.now_ms())
             self._frames.append(frame)
 
         try:

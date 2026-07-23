@@ -4,6 +4,7 @@ import json
 import httpx
 import pytest
 
+from advx_backend.application.ports.ingest import ResolvedFrame
 from advx_backend.contracts.audience import AudienceMember
 from advx_backend.contracts.generation import (
     AudienceContext,
@@ -277,9 +278,21 @@ async def test_frame_resolver_adds_image_parts_without_sending_data_references()
         def __init__(self) -> None:
             self.frame_ids: list[str] = []
 
-        async def resolve(self, frame: FrameRef) -> str | None:
+        async def resolve(
+            self,
+            *,
+            session_id: str,
+            frame: FrameRef,
+        ) -> ResolvedFrame | None:
             self.frame_ids.append(frame.frame_id)
-            return "data:image/png;base64,AA=="
+            return ResolvedFrame(
+                session_id=session_id,
+                frame_id=frame.frame_id,
+                input_id="frame-input-1",
+                captured_at_ms=frame.created_at_ms,
+                mime_type=frame.mime_type,
+                body=b"\x00",
+            )
 
     resolver = RecordingFrameResolver()
 

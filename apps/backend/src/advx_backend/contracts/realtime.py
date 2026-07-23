@@ -39,6 +39,7 @@ class IngestRejectionCode(StrEnum):
     UNSUPPORTED_BINARY_VERSION = "unsupported_binary_version"
     UNSUPPORTED_MEDIA_TYPE = "unsupported_media_type"
     MALFORMED_BINARY_ENVELOPE = "malformed_binary_envelope"
+    PIPELINE_UNAVAILABLE = "pipeline_unavailable"
 
 
 MAX_INGEST_IDENTIFIER_LENGTH = 128

@@ -45,6 +45,7 @@ def create_app(*, runtime: BackendRuntime | None = None) -> FastAPI:
         create_realtime_router(
             session_service=active_runtime.session_service,
             broker=active_runtime.realtime_broker,
+            ingest_gateway=active_runtime.ingest_gateway,
             local_token=active_runtime.local_token,
         )
     )

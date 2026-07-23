@@ -19,9 +19,9 @@ See [Backend design](../../docs/BACKEND_DESIGN.md) for module responsibilities, 
 - `GET /health` is public so Electron Main can supervise the process.
 - Session control uses `POST /sessions`, `GET /sessions/current`, and the `pause`, `resume`, and `stop` commands under `/sessions/{session_id}`.
 - Session HTTP requests require `Authorization: Bearer <local-token>` and `X-ADVX-Protocol-Version: 1`.
-- `/ws` accepts JSON text messages. The first message must be `client.hello` with the same local token and protocol version; the connection then receives ordered session status events.
+- `/ws` accepts JSON control/ingest messages and versioned binary audio/image envelopes. The first message must be `client.hello` with the same local token and protocol version; the connection then receives ordered session status, barrage and ingest acknowledgement/rejection events.
 
-The additive realtime ingest contract, including binary audio/image envelopes and privacy boundaries, is defined in [Ingest protocol](../../docs/INGEST_PROTOCOL.md). Its Handler and service integration are intentionally deferred.
+The realtime ingest contract, including binary audio/image envelopes and privacy boundaries, is defined in [Ingest protocol](../../docs/INGEST_PROTOCOL.md). `BackendRuntime.configure_ingest_pipeline` injects the real ASR and model providers before a Session starts; the stable gateway allows this configuration after the FastAPI app has been created.
 
 `scripts/dev.mjs` creates one random token per development launch and injects it into the backend and Electron Main process without printing it. The production launcher must provide the same value through its protected bootstrap channel before building `BackendRuntime`; it must not be written to ordinary configuration or logs.
 
@@ -33,4 +33,4 @@ SQLite runs with foreign keys, WAL and a bounded busy timeout enabled. Repositor
 
 ## Bounded reaction pipeline
 
-`BackendRuntime` owns the active Room buffer, Context Builder and Barrage Pipeline so their bounded state starts and stops with the session. A configured caller supplies the audience snapshot, trigger, selection, invocation-planning and model-provider Ports to `build_reaction_service`. The resulting path maps immutable Domain observations into provider contracts, preserves request ownership through generation, validates barrage candidates locally, writes accepted output back to Room and publishes `barrage.event` over the realtime connection.
+`BackendRuntime` owns the active Room buffer, Context Builder, Audience snapshot, Frame Store and Barrage Pipeline so their bounded state starts and stops with the session. Runtime startup initializes missing built-in audiences idempotently. Default trigger, audience-selection and invocation-planning policies are used unless callers explicitly replace them. The resulting path maps immutable Domain observations into provider contracts, resolves frame bytes only inside the model adapter, preserves request ownership through generation, validates barrage candidates locally, writes accepted output back to Room and publishes `barrage.event` over the realtime connection.

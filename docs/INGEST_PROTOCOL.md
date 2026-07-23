@@ -1,9 +1,9 @@
 # 实时 Ingest 数据面协议
 
-> 状态：Contract Baseline
+> 状态：Implemented
 >
-> 本文定义 Electron 与本地后端之间的实时输入合同。它不实现
-> `IngestService` 或 WebSocket Handler；当前 `/ws` 仍只处理既有的握手和心跳。
+> 本文定义 Electron 与本地后端之间的实时输入合同。`IngestService` 与
+> WebSocket Handler 已按此合同接入，`/ws` 同时承载控制消息和实时输入。
 
 ## 1. 范围与兼容性
 
@@ -15,9 +15,9 @@
 - `client.ping` / `backend.pong`
 - `session.status`、`barrage.event`、`protocol.error`
 
-后续接入 Handler 时，所有输入必须先校验会话、重复 `input_id`、消息大小和顺序，
-再调用 Application 的 `IngestPort`。拒绝一个输入不能关闭一个已完成握手的连接，除非
-它同时违反现有 WebSocket 协议规则。
+Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调用 Application 的
+`IngestPort`。拒绝一个输入不会关闭已完成握手的连接，除非它同时违反现有 WebSocket
+协议规则。
 
 ## 2. JSON 消息
 
@@ -32,7 +32,8 @@
 `invalid_input`、`session_not_active`、`duplicate_input`、`unknown_input`、
 `out_of_order`、`payload_too_large`、`unsupported_format`、
 `unsupported_binary_version`、`unsupported_media_type` 或
-`malformed_binary_envelope`。
+`malformed_binary_envelope`。运行时尚未注入 Ingest Pipeline 或其容量暂不可用时返回
+`pipeline_unavailable`。
 
 音频顺序为：发送一条 `audio` binary envelope，收到 `received` ACK 后发送
 `client.audio.commit`，再收到 `committed` ACK。一个 binary envelope 对应一个
@@ -75,7 +76,8 @@
 | 完整 binary envelope | 4,194,712 bytes |
 
 长度、magic、版本、类型或 UTF-8 不合法时，不得尝试把正文交给 ASR 或 FrameStore。
-应用层将错误映射为 `ingest.rejected`；是否还需要关闭连接由 WebSocket 协议错误规则决定。
+应用层将错误映射为 `ingest.rejected` 并保持连接；只有同时违反 WebSocket 协议规则时
+才会关闭连接。
 
 ## 4. 帧所有权与隐私
 

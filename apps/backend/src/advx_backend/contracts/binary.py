@@ -38,6 +38,18 @@ class BinaryEnvelopeError(ValueError):
     """Raised when a binary envelope is malformed or outside its limits."""
 
 
+class BinaryPayloadTooLargeError(BinaryEnvelopeError):
+    pass
+
+
+class UnsupportedBinaryVersionError(BinaryEnvelopeError):
+    pass
+
+
+class UnsupportedBinaryMediaTypeError(BinaryEnvelopeError):
+    pass
+
+
 def max_body_bytes(media_type: BinaryMediaType) -> int:
     if media_type is BinaryMediaType.AUDIO:
         return MAX_AUDIO_BODY_BYTES
@@ -111,7 +123,7 @@ def encode_binary_envelope(envelope: BinaryInputEnvelope) -> bytes:
     )
     limit = max_body_bytes(header.media_type)
     if len(envelope.body) > limit:
-        raise BinaryEnvelopeError(
+        raise BinaryPayloadTooLargeError(
             f"binary {header.media_type.value} body exceeds the limit of {limit} bytes"
         )
 
@@ -143,7 +155,7 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
     if len(payload) < BINARY_FIXED_HEADER_BYTES:
         raise BinaryEnvelopeError("binary envelope is shorter than its fixed header")
     if len(payload) > MAX_BINARY_ENVELOPE_BYTES:
-        raise BinaryEnvelopeError("binary envelope exceeds the maximum allowed size")
+        raise BinaryPayloadTooLargeError("binary envelope exceeds the maximum allowed size")
 
     (
         magic,
@@ -158,11 +170,13 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
     if magic != BINARY_ENVELOPE_MAGIC:
         raise BinaryEnvelopeError("binary envelope has an invalid magic value")
     if version != BINARY_ENVELOPE_VERSION:
-        raise BinaryEnvelopeError("binary envelope version is not supported")
+        raise UnsupportedBinaryVersionError("binary envelope version is not supported")
     try:
         media_type = _CODE_TO_MEDIA_TYPE[media_type_code]
     except KeyError as error:
-        raise BinaryEnvelopeError("binary envelope has an unsupported media type") from error
+        raise UnsupportedBinaryMediaTypeError(
+            "binary envelope has an unsupported media type"
+        ) from error
 
     _validate_wire_length(session_id_length, "session_id", MAX_SESSION_ID_BYTES)
     _validate_wire_length(input_id_length, "input_id", MAX_INPUT_ID_BYTES)
@@ -171,7 +185,7 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
     if body_length < 1:
         raise BinaryEnvelopeError("binary envelope body length must be at least one")
     if body_length > body_limit:
-        raise BinaryEnvelopeError(
+        raise BinaryPayloadTooLargeError(
             f"binary {media_type.value} body exceeds the limit of {body_limit} bytes"
         )
 
