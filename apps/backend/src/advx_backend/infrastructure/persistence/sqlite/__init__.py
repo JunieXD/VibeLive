@@ -1,14 +1,16 @@
-from advx_backend.infrastructure.persistence.audience_repository import AudienceRepository
-from advx_backend.infrastructure.persistence.sqlite import (
+from advx_backend.infrastructure.persistence.sqlite.database import (
     DatabaseConfig,
     SQLiteDatabase,
+)
+from advx_backend.infrastructure.persistence.sqlite.session_store import (
     SQLiteSessionRecordStore,
+)
+from advx_backend.infrastructure.persistence.sqlite.unit_of_work import (
     SQLiteUnitOfWork,
     SQLiteUnitOfWorkFactory,
 )
 
 __all__ = [
-    "AudienceRepository",
     "DatabaseConfig",
     "SQLiteDatabase",
     "SQLiteSessionRecordStore",

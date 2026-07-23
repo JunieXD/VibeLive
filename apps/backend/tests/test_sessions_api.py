@@ -1,10 +1,32 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+from advx_backend.application.session_service import SessionService
 from advx_backend.bootstrap import build_runtime
 from advx_backend.contracts.protocol import PROTOCOL_VERSION_HEADER
+from advx_backend.domain.session import SessionOutcome, SessionRecord
+from advx_backend.infrastructure.system import UuidIdGenerator
 from advx_backend.main import create_app
 
 LOCAL_TOKEN = "test-local-token"
+
+
+class FailingSessionStore:
+    async def record_started(self, record: SessionRecord) -> None:
+        raise OSError("database unavailable")
+
+    async def record_finished(
+        self,
+        session_id: str,
+        *,
+        ended_at_ms: int,
+        outcome: SessionOutcome,
+    ) -> None:
+        return None
+
+    async def recover_interrupted(self, *, ended_at_ms: int) -> int:
+        return 0
 
 
 def request_headers(
@@ -18,8 +40,8 @@ def request_headers(
     }
 
 
-def test_session_api_requires_local_token_and_protocol_version() -> None:
-    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN))
+def test_session_api_requires_local_token_and_protocol_version(tmp_path: Path) -> None:
+    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
         missing_token = client.post(
@@ -43,8 +65,8 @@ def test_session_api_requires_local_token_and_protocol_version() -> None:
     assert wrong_version.headers[PROTOCOL_VERSION_HEADER] == "1"
 
 
-def test_session_api_runs_complete_lifecycle() -> None:
-    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN))
+def test_session_api_runs_complete_lifecycle(tmp_path: Path) -> None:
+    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
         created = client.post("/sessions", headers=request_headers())
@@ -77,8 +99,8 @@ def test_session_api_runs_complete_lifecycle() -> None:
         assert stopped.json()["revision"] == 6
 
 
-def test_session_api_distinguishes_conflicts_and_unknown_sessions() -> None:
-    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN))
+def test_session_api_distinguishes_conflicts_and_unknown_sessions(tmp_path: Path) -> None:
+    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
         created = client.post("/sessions", headers=request_headers())
@@ -106,3 +128,23 @@ def test_session_api_distinguishes_conflicts_and_unknown_sessions() -> None:
     }
     assert missing.status_code == 404
     assert missing.json()["detail"]["code"] == "session_not_found"
+
+
+def test_session_api_reports_persistence_unavailable(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
+    runtime.session_service = SessionService(
+        clock=runtime.clock,
+        id_generator=UuidIdGenerator(),
+        publisher=runtime.realtime_broker,
+        session_records=FailingSessionStore(),
+    )
+    app = create_app(runtime=runtime)
+
+    with TestClient(app) as client:
+        response = client.post("/sessions", headers=request_headers())
+        current = client.get("/sessions/current", headers=request_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "persistence_unavailable"
+    assert current.json()["state"] == "idle"
+    assert current.json()["session_id"] is None

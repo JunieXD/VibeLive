@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { resolve } from "node:path";
 
 const useShell = process.platform === "win32";
 const childEnvironment = {
   ...process.env,
+  ADVX_DATA_DIR: resolve(".advx-data"),
   ADVX_LOCAL_TOKEN: randomBytes(32).toString("base64url")
 };
 const children = [

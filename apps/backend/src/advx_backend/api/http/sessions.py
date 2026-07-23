@@ -9,6 +9,7 @@ from advx_backend.application.session_service import (
     SessionAlreadyActiveError,
     SessionError,
     SessionNotFoundError,
+    SessionPersistenceError,
     SessionService,
 )
 from advx_backend.contracts.protocol import PROTOCOL_VERSION
@@ -102,6 +103,14 @@ def _raise_http_error(error: SessionError) -> NoReturn:
                 "session_id": error.status.session_id,
                 "state": error.status.state,
                 "allowed_states": sorted(state.value for state in error.allowed_states),
+            },
+        ) from error
+    if isinstance(error, SessionPersistenceError):
+        raise HTTPException(
+            status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "persistence_unavailable",
+                "message": "Local persistence is unavailable.",
             },
         ) from error
     raise HTTPException(

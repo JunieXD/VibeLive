@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -31,8 +33,8 @@ def test_client_hello_does_not_reveal_local_token() -> None:
     assert LOCAL_TOKEN not in repr(message)
 
 
-def test_realtime_handshake_stays_open_and_answers_ping() -> None:
-    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN))
+def test_realtime_handshake_stays_open_and_answers_ping(tmp_path: Path) -> None:
+    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as websocket:
@@ -56,8 +58,8 @@ def test_realtime_handshake_stays_open_and_answers_ping() -> None:
             }
 
 
-def test_realtime_broadcasts_ordered_http_session_changes() -> None:
-    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN))
+def test_realtime_broadcasts_ordered_http_session_changes(tmp_path: Path) -> None:
+    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as websocket:
@@ -86,8 +88,9 @@ def test_realtime_rejects_invalid_handshakes(
     payload: dict[str, object],
     expected_code: str,
     expected_close_code: int,
+    tmp_path: Path,
 ) -> None:
-    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN))
+    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as websocket:
@@ -101,8 +104,8 @@ def test_realtime_rejects_invalid_handshakes(
     assert disconnect.value.code == expected_close_code
 
 
-def test_realtime_rejects_messages_outside_the_schema() -> None:
-    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN))
+def test_realtime_rejects_messages_outside_the_schema(tmp_path: Path) -> None:
+    app = create_app(runtime=build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path))
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as websocket:
@@ -122,8 +125,8 @@ def test_realtime_rejects_messages_outside_the_schema() -> None:
     assert disconnect.value.code == 4400
 
 
-def test_realtime_only_forwards_newer_session_revisions() -> None:
-    runtime = build_runtime(local_token=LOCAL_TOKEN)
+def test_realtime_only_forwards_newer_session_revisions(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
     app = create_app(runtime=runtime)
 
     with TestClient(app) as client:

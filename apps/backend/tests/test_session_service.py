@@ -6,9 +6,15 @@ from advx_backend.application.session_service import (
     InvalidSessionStateError,
     SessionAlreadyActiveError,
     SessionNotFoundError,
+    SessionPersistenceError,
     SessionService,
 )
-from advx_backend.domain.session import SessionState, SessionStatus
+from advx_backend.domain.session import (
+    SessionOutcome,
+    SessionRecord,
+    SessionState,
+    SessionStatus,
+)
 
 
 class IncrementingClock:
@@ -47,6 +53,33 @@ class BlockingStoppingPublisher(RecordingPublisher):
         if status.state is SessionState.STOPPING:
             self.stopping_started.set()
             await asyncio.Event().wait()
+
+
+class RecordingSessionStore:
+    def __init__(self, *, fail_start: bool = False, fail_finish: bool = False) -> None:
+        self.fail_start = fail_start
+        self.fail_finish = fail_finish
+        self.started: list[SessionRecord] = []
+        self.finished: list[tuple[str, int, SessionOutcome]] = []
+
+    async def record_started(self, record: SessionRecord) -> None:
+        if self.fail_start:
+            raise RuntimeError("database unavailable")
+        self.started.append(record)
+
+    async def record_finished(
+        self,
+        session_id: str,
+        *,
+        ended_at_ms: int,
+        outcome: SessionOutcome,
+    ) -> None:
+        if self.fail_finish:
+            raise RuntimeError("database unavailable")
+        self.finished.append((session_id, ended_at_ms, outcome))
+
+    async def recover_interrupted(self, *, ended_at_ms: int) -> int:
+        return 0
 
 
 def create_service() -> tuple[SessionService, RecordingPublisher]:
@@ -189,3 +222,64 @@ async def test_cancelled_stop_request_still_finishes_cleanup() -> None:
     status = await service.status()
     assert status.state is SessionState.IDLE
     assert status.session_id is None
+
+
+@pytest.mark.asyncio
+async def test_session_lifecycle_records_minimal_metadata() -> None:
+    publisher = RecordingPublisher()
+    session_store = RecordingSessionStore()
+    service = SessionService(
+        clock=IncrementingClock(),
+        id_generator=SequenceIdGenerator(),
+        publisher=publisher,
+        session_records=session_store,
+        app_version="test-version",
+    )
+
+    running = await service.start()
+    assert running.session_id is not None
+    await service.stop(running.session_id)
+
+    assert len(session_store.started) == 1
+    assert session_store.started[0].session_id == running.session_id
+    assert session_store.started[0].app_version == "test-version"
+    assert len(session_store.finished) == 1
+    assert session_store.finished[0][0] == running.session_id
+    assert session_store.finished[0][2] is SessionOutcome.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_session_start_failure_does_not_activate_session() -> None:
+    publisher = RecordingPublisher()
+    service = SessionService(
+        clock=IncrementingClock(),
+        id_generator=SequenceIdGenerator(),
+        publisher=publisher,
+        session_records=RecordingSessionStore(fail_start=True),
+    )
+
+    with pytest.raises(SessionPersistenceError):
+        await service.start()
+
+    status = await service.status()
+    assert status.state is SessionState.IDLE
+    assert status.session_id is None
+    assert publisher.statuses == []
+
+
+@pytest.mark.asyncio
+async def test_session_finish_failure_does_not_block_cleanup() -> None:
+    publisher = RecordingPublisher()
+    service = SessionService(
+        clock=IncrementingClock(),
+        id_generator=SequenceIdGenerator(),
+        publisher=publisher,
+        session_records=RecordingSessionStore(fail_finish=True),
+    )
+    running = await service.start()
+    assert running.session_id is not None
+
+    stopped = await service.stop(running.session_id)
+
+    assert stopped.state is SessionState.IDLE
+    assert stopped.session_id is None

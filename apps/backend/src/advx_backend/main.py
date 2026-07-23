@@ -8,7 +8,12 @@ from fastapi.openapi.utils import get_openapi
 from advx_backend.api.http.health import router as health_router
 from advx_backend.api.http.sessions import create_session_router
 from advx_backend.api.ws.realtime import create_realtime_router
-from advx_backend.bootstrap import BackendRuntime, build_runtime, build_runtime_from_environment
+from advx_backend.bootstrap import (
+    BACKEND_VERSION,
+    BackendRuntime,
+    build_runtime,
+    build_runtime_from_environment,
+)
 from advx_backend.contracts.openapi import add_realtime_schemas
 
 
@@ -18,13 +23,14 @@ def create_app(*, runtime: BackendRuntime | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         try:
+            await active_runtime.startup()
             yield
         finally:
             await active_runtime.shutdown()
 
     application = FastAPI(
         title="ADVX Live Backend",
-        version="0.1.0",
+        version=BACKEND_VERSION,
         lifespan=lifespan,
     )
     application.state.runtime = active_runtime

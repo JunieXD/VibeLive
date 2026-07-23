@@ -3,8 +3,15 @@ import logging
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
+from advx_backend.application.ports.persistence import SessionRecordStore
 from advx_backend.application.ports.session import Clock, IdGenerator, SessionStatusPublisher
-from advx_backend.domain.session import SessionState, SessionStatus, can_stop_session
+from advx_backend.domain.session import (
+    SessionOutcome,
+    SessionRecord,
+    SessionState,
+    SessionStatus,
+    can_stop_session,
+)
 
 T = TypeVar("T")
 logger = logging.getLogger(__name__)
@@ -24,6 +31,11 @@ class SessionNotFoundError(SessionError):
     def __init__(self, session_id: str) -> None:
         self.session_id = session_id
         super().__init__(f"session {session_id} is not active")
+
+
+class SessionPersistenceError(SessionError):
+    def __init__(self) -> None:
+        super().__init__("session persistence is unavailable")
 
 
 class InvalidSessionStateError(SessionError):
@@ -48,10 +60,14 @@ class SessionService:
         clock: Clock,
         id_generator: IdGenerator,
         publisher: SessionStatusPublisher,
+        session_records: SessionRecordStore | None = None,
+        app_version: str = "0.1.0",
     ) -> None:
         self._clock = clock
         self._id_generator = id_generator
         self._publisher = publisher
+        self._session_records = session_records
+        self._app_version = app_version
         self._lock = asyncio.Lock()
         self._state = SessionState.IDLE
         self._session_id: str | None = None
@@ -72,8 +88,24 @@ class SessionService:
                 raise SessionAlreadyActiveError(self._snapshot())
 
             now = self._clock.now_ms()
+            session_id = self._id_generator.new_id()
+            if self._session_records is not None:
+                try:
+                    await self._session_records.record_started(
+                        SessionRecord(
+                            session_id=session_id,
+                            started_at_ms=now,
+                            app_version=self._app_version,
+                        )
+                    )
+                except Exception as error:
+                    logger.exception(
+                        "failed to start session record",
+                        extra={"session_id": session_id},
+                    )
+                    raise SessionPersistenceError from error
             self._idle.clear()
-            self._session_id = self._id_generator.new_id()
+            self._session_id = session_id
             self._started_at_ms = now
             starting = self._transition(SessionState.STARTING, now=now)
             running = self._transition(SessionState.RUNNING)
@@ -129,11 +161,16 @@ class SessionService:
                 )
             stopping = self._transition(SessionState.STOPPING)
             tasks = self._detach_tasks()
+            outcome = (
+                SessionOutcome.ERROR
+                if current.state is SessionState.ERROR
+                else SessionOutcome.COMPLETED
+            )
 
         try:
             await self._publisher.publish_session_status(stopping)
         finally:
-            idle = await asyncio.shield(self._complete_stop(session_id, tasks))
+            idle = await asyncio.shield(self._complete_stop(session_id, tasks, outcome=outcome))
         return idle
 
     async def mark_error(self, session_id: str) -> SessionStatus:
@@ -242,8 +279,23 @@ class SessionService:
         self,
         session_id: str,
         tasks: tuple[asyncio.Task[Any], ...],
+        *,
+        outcome: SessionOutcome,
     ) -> SessionStatus:
         await self._cancel_tasks(tasks)
+        ended_at_ms = max(self._started_at_ms or 0, self._clock.now_ms())
+        if self._session_records is not None:
+            try:
+                await self._session_records.record_finished(
+                    session_id,
+                    ended_at_ms=ended_at_ms,
+                    outcome=outcome,
+                )
+            except Exception:
+                logger.exception(
+                    "failed to finish session record",
+                    extra={"session_id": session_id},
+                )
         async with self._lock:
             if self._session_id != session_id or self._state is not SessionState.STOPPING:
                 raise SessionNotFoundError(session_id)
