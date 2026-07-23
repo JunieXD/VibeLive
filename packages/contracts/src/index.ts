@@ -8,3 +8,7 @@ export type RealtimeClientMessage =
   components["schemas"]["ClientMessageEnvelope"];
 export type RealtimeServerMessage =
   components["schemas"]["ServerMessageEnvelope"];
+export type RealtimeBinaryInputHeader =
+  components["schemas"]["BinaryEnvelopeHeader"];
+export type RealtimeIngestAck = components["schemas"]["IngestAck"];
+export type RealtimeIngestRejected = components["schemas"]["IngestRejected"];

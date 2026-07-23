@@ -160,6 +160,22 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** ClientAudioCommit */
+        ClientAudioCommit: {
+            /** Protocol Version */
+            protocol_version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "client.audio.commit";
+            /** Session Id */
+            session_id: string;
+            /** Input Id */
+            input_id: string;
+            /** Committed At Ms */
+            committed_at_ms: number;
+        };
         /** ClientHello */
         ClientHello: {
             /** Protocol Version */
@@ -184,8 +200,26 @@ export interface components {
             /** Request Id */
             request_id: string;
         };
+        /** ClientTextSubmit */
+        ClientTextSubmit: {
+            /** Protocol Version */
+            protocol_version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "client.text.submit";
+            /** Session Id */
+            session_id: string;
+            /** Input Id */
+            input_id: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Text */
+            text: string;
+        };
         /** ClientMessageEnvelope */
-        ClientMessageEnvelope: components["schemas"]["ClientHello"] | components["schemas"]["ClientPing"];
+        ClientMessageEnvelope: components["schemas"]["ClientHello"] | components["schemas"]["ClientPing"] | components["schemas"]["ClientTextSubmit"] | components["schemas"]["ClientAudioCommit"];
         /** BackendPong */
         BackendPong: {
             /**
@@ -251,6 +285,72 @@ export interface components {
             /** Expires At Ms */
             expires_at_ms: number;
         };
+        /** IngestAck */
+        IngestAck: {
+            /**
+             * Protocol Version
+             * @default 1
+             * @constant
+             */
+            protocol_version: 1;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "ingest.ack";
+            /** Session Id */
+            session_id: string;
+            /** Input Id */
+            input_id: string;
+            input_kind: components["schemas"]["IngestInputKind"];
+            stage: components["schemas"]["IngestAckStage"];
+            /** Accepted At Ms */
+            accepted_at_ms: number;
+        };
+        /**
+         * IngestAckStage
+         * @enum {string}
+         */
+        IngestAckStage: "received" | "committed";
+        /**
+         * IngestInputKind
+         * @enum {string}
+         */
+        IngestInputKind: "text" | "audio" | "frame";
+        /** IngestRejected */
+        IngestRejected: {
+            /**
+             * Protocol Version
+             * @default 1
+             * @constant
+             */
+            protocol_version: 1;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "ingest.rejected";
+            code: components["schemas"]["IngestRejectionCode"];
+            /** Message */
+            message: string;
+            /**
+             * Session Id
+             * @default null
+             */
+            session_id: string | null;
+            /**
+             * Input Id
+             * @default null
+             */
+            input_id: string | null;
+            /** @default null */
+            input_kind: components["schemas"]["IngestInputKind"] | null;
+        };
+        /**
+         * IngestRejectionCode
+         * @enum {string}
+         */
+        IngestRejectionCode: "invalid_input" | "session_not_active" | "duplicate_input" | "unknown_input" | "out_of_order" | "payload_too_large" | "unsupported_format" | "unsupported_binary_version" | "unsupported_media_type" | "malformed_binary_envelope";
         /** RealtimeProtocolError */
         RealtimeProtocolError: {
             /**
@@ -294,7 +394,35 @@ export interface components {
             session: components["schemas"]["SessionSnapshot"];
         };
         /** ServerMessageEnvelope */
-        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["RealtimeProtocolError"];
+        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["RealtimeProtocolError"] | components["schemas"]["IngestAck"] | components["schemas"]["IngestRejected"];
+        /**
+         * BinaryMediaType
+         * @enum {string}
+         */
+        BinaryMediaType: "audio" | "image";
+        /**
+         * BinaryEnvelopeHeader
+         * @description Metadata encoded in every binary envelope; it intentionally has no body field.
+         */
+        BinaryEnvelopeHeader: {
+            /**
+             * Version
+             * @default 1
+             * @constant
+             */
+            version: 1;
+            media_type: components["schemas"]["BinaryMediaType"];
+            /** Session Id */
+            session_id: string;
+            /** Input Id */
+            input_id: string;
+            /** Captured At Ms */
+            captured_at_ms: number;
+            /** Format */
+            format: string;
+            /** Body Length */
+            body_length: number;
+        };
     };
     responses: never;
     parameters: never;

@@ -1,5 +1,6 @@
 from typing import Any
 
+from advx_backend.contracts.binary import BinaryEnvelopeHeader
 from advx_backend.contracts.protocol import PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER
 from advx_backend.contracts.realtime import ClientMessageEnvelope, ServerMessageEnvelope
 
@@ -8,7 +9,7 @@ def add_realtime_schemas(schema: dict[str, Any]) -> dict[str, Any]:
     components = schema.setdefault("components", {})
     schemas = components.setdefault("schemas", {})
 
-    for model in (ClientMessageEnvelope, ServerMessageEnvelope):
+    for model in (ClientMessageEnvelope, ServerMessageEnvelope, BinaryEnvelopeHeader):
         model_schema = model.model_json_schema(
             ref_template="#/components/schemas/{model}",
         )
@@ -25,6 +26,12 @@ def add_realtime_schemas(schema: dict[str, Any]) -> dict[str, Any]:
         },
         "serverMessage": {
             "$ref": "#/components/schemas/ServerMessageEnvelope",
+        },
+        "binaryInput": {
+            "encoding": "ADVX-BIN/1",
+            "header": {
+                "$ref": "#/components/schemas/BinaryEnvelopeHeader",
+            },
         },
     }
     _mark_protocol_headers_required(schema)
