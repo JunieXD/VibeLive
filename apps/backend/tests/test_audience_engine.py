@@ -18,9 +18,7 @@ def test_unknown_audience_is_dropped() -> None:
             created_at_ms=1,
         ),
         audiences=[
-            AudienceContext(
-                member=AudienceMember(audience_id="known", display_name="Known")
-            )
+            AudienceContext(member=AudienceMember(audience_id="known", display_name="Known"))
         ],
     )
     result = GenerationResult(

@@ -22,10 +22,17 @@ import type {
   MediaAccessSnapshot,
   MediaAccessStatus,
   ModelConfig,
+  OverlaySettings,
   SaveAudienceWorkspaceResult,
   SaveModelConfigResult
 } from "../../shared/contracts";
 import {
+  getOverlaySettings,
+  listOverlayTargets,
+  setOverlaySettings
+} from "../overlay-settings";
+import {
+  applyOverlaySettings,
   clearOverlay,
   hideOverlay,
   pushBarrage,
@@ -418,13 +425,41 @@ export function configureMediaAccess(getControlWindow: () => BrowserWindow | nul
   });
 }
 
+function applyOverlayWindowState(
+  getControlWindow: () => BrowserWindow | null,
+  settings: OverlaySettings
+): void {
+  const controlWindow = getControlWindow();
+  applyOverlaySettings(settings);
+
+  if (controlWindow && !controlWindow.isDestroyed()) {
+    controlWindow.setAlwaysOnTop(!settings.clickThrough, "screen-saver");
+    if (!settings.clickThrough) {
+      controlWindow.show();
+      controlWindow.focus();
+      controlWindow.moveTop();
+    }
+  }
+}
+
+export function broadcastOverlaySettings(
+  getControlWindow: () => BrowserWindow | null,
+  settings: OverlaySettings
+): void {
+  applyOverlayWindowState(getControlWindow, settings);
+  const controlWindow = getControlWindow();
+  if (controlWindow && !controlWindow.isDestroyed()) {
+    controlWindow.webContents.send("overlay:settings-changed", settings);
+  }
+}
+
 export function registerDesktopIpc(
   getControlWindow: () => BrowserWindow | null,
   confirmControlWindowClose: () => void
 ): void {
   const assertControlSender = (event: Electron.IpcMainInvokeEvent): void => {
     if (event.sender.id !== getControlWindow()?.webContents.id) {
-      throw new Error("Audience configuration is only available to the control window.");
+      throw new Error("This API is only available to the control window.");
     }
   };
 
@@ -460,6 +495,13 @@ export function registerDesktopIpc(
     if (cameraCaptureAuthorization?.webContentsId === event.sender.id) {
       cameraCaptureAuthorization = null;
     }
+  });
+  ipcMain.handle("overlay:list-targets", listOverlayTargets);
+  ipcMain.handle("overlay:get-settings", getOverlaySettings);
+  ipcMain.handle("overlay:set-settings", async (_event, settings: OverlaySettings) => {
+    const savedSettings = await setOverlaySettings(settings);
+    applyOverlayWindowState(getControlWindow, savedSettings);
+    return savedSettings;
   });
   ipcMain.handle("overlay:show", showOverlay);
   ipcMain.handle("overlay:hide", hideOverlay);

@@ -44,6 +44,8 @@ import type {
   BarrageEvent,
   DesktopSource,
   MediaAccessStatus,
+  OverlaySettings,
+  OverlayTarget,
   SaveAudienceWorkspaceResult
 } from '../../shared/contracts'
 import { demoLines } from '../../shared/demo'
@@ -317,8 +319,9 @@ export function App(): React.JSX.Element {
   const [modelName, setModelName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [configNotice, setConfigNotice] = useState<string | null>(null)
-  const [barrageOpacity, setBarrageOpacity] = useState(86)
-  const [barrageSpeed, setBarrageSpeed] = useState(58)
+  const [overlayTargets, setOverlayTargets] = useState<OverlayTarget[]>([])
+  const [overlaySettings, setOverlaySettings] = useState<OverlaySettings | null>(null)
+  const [overlaySettingsNotice, setOverlaySettingsNotice] = useState<string | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [barrageTotal, setBarrageTotal] = useState(0)
 
@@ -333,6 +336,9 @@ export function App(): React.JSX.Element {
   const mediaOperationRef = useRef(0)
   const mediaTransitionRef = useRef(false)
   const barrageSequenceRef = useRef(0)
+  const overlaySettingsTimerRef = useRef<number | null>(null)
+  const overlaySettingsRevisionRef = useRef(0)
+  const overlaySettingsPendingRef = useRef(false)
   const sessionStatusRef = useRef(session.status)
   const startedAtRef = useRef<number | null>(null)
   const chatListRef = useRef<HTMLDivElement>(null)
@@ -663,6 +669,71 @@ export function App(): React.JSX.Element {
       list.scrollTop = list.scrollHeight
     }
   }, [activity])
+
+  useEffect(() => {
+    let active = true
+
+    const unsubscribe = window.advx.onOverlaySettingsChanged((settings) => {
+      if (!active) return
+      void window.advx
+        .listOverlayTargets()
+        .then((targets) => {
+          if (active) setOverlayTargets(targets)
+        })
+        .catch(() => undefined)
+      if (overlaySettingsPendingRef.current) return
+      overlaySettingsRevisionRef.current += 1
+      setOverlaySettings(settings)
+      setOverlaySettingsNotice('已同步')
+    })
+
+    void Promise.all([window.advx.listOverlayTargets(), window.advx.getOverlaySettings()])
+      .then(([targets, settings]) => {
+        if (!active) return
+        setOverlayTargets(targets)
+        setOverlaySettings(settings)
+      })
+      .catch(() => {
+        if (active) setOverlaySettingsNotice('加载失败')
+      })
+
+    return () => {
+      active = false
+      unsubscribe()
+      if (overlaySettingsTimerRef.current !== null) {
+        window.clearTimeout(overlaySettingsTimerRef.current)
+      }
+    }
+  }, [])
+
+  const updateOverlaySettings = (settings: OverlaySettings): void => {
+    const revision = overlaySettingsRevisionRef.current + 1
+    overlaySettingsRevisionRef.current = revision
+    overlaySettingsPendingRef.current = true
+    setOverlaySettings(settings)
+    setOverlaySettingsNotice('正在同步')
+
+    if (overlaySettingsTimerRef.current !== null) {
+      window.clearTimeout(overlaySettingsTimerRef.current)
+    }
+    overlaySettingsTimerRef.current = window.setTimeout(() => {
+      overlaySettingsTimerRef.current = null
+      void window.advx
+        .setOverlaySettings(settings)
+        .then((normalizedSettings) => {
+          if (overlaySettingsRevisionRef.current !== revision) return
+          overlaySettingsPendingRef.current = false
+          setOverlaySettings(normalizedSettings)
+          setOverlaySettingsNotice('已同步')
+        })
+        .catch(() => {
+          if (overlaySettingsRevisionRef.current === revision) {
+            overlaySettingsPendingRef.current = false
+            setOverlaySettingsNotice('同步失败')
+          }
+        })
+    }, 150)
+  }
 
   const stopCapture = useCallback(() => {
     const stream = captureStreamRef.current
@@ -2201,7 +2272,7 @@ export function App(): React.JSX.Element {
                     <button
                       className="command-button"
                       type="button"
-                      disabled={!isSessionActive}
+                      disabled={!overlayVisible && barrageTotal === 0}
                       onClick={() => void clearBarrage()}
                       title="清空弹幕"
                     >
@@ -2524,36 +2595,181 @@ export function App(): React.JSX.Element {
                 <div className="section-intro">
                   <div>
                     <p className="eyebrow">弹幕显示</p>
-                    <h2>覆盖层偏好</h2>
+                    <h2>弹幕覆盖层</h2>
                   </div>
                   <SlidersHorizontal size={24} />
                 </div>
-                <div className="slider-stack">
-                  <label>
-                    <span>
-                      不透明度<strong>{barrageOpacity}%</strong>
-                    </span>
-                    <input
-                      type="range"
-                      min="30"
-                      max="100"
-                      value={barrageOpacity}
-                      onChange={(event) => setBarrageOpacity(Number(event.target.value))}
-                    />
-                  </label>
-                  <label>
-                    <span>
-                      移动速度<strong>{barrageSpeed}</strong>
-                    </span>
-                    <input
-                      type="range"
-                      min="20"
-                      max="100"
-                      value={barrageSpeed}
-                      onChange={(event) => setBarrageSpeed(Number(event.target.value))}
-                    />
-                  </label>
-                </div>
+                {!overlaySettings ? (
+                  <div className="overlay-settings-loading">
+                    {overlaySettingsNotice ?? '正在读取覆盖层设置...'}
+                  </div>
+                ) : (
+                  <div className="overlay-settings-form">
+                    <label className="overlay-target-field">
+                      <span>弹幕目标</span>
+                      <select
+                        aria-label="弹幕目标"
+                        value={overlaySettings.targetDisplayId}
+                        onChange={(event) =>
+                          updateOverlaySettings({
+                            ...overlaySettings,
+                            targetDisplayId: Number(event.target.value)
+                          })
+                        }
+                      >
+                        {overlayTargets.map((target) => (
+                          <option key={target.id} value={target.id}>
+                            {target.isPrimary ? '主屏 · ' : ''}
+                            {target.name} · {target.bounds.width} × {target.bounds.height}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="slider-stack">
+                      <label>
+                        <span>
+                          字号<strong>{overlaySettings.fontSizePx}px</strong>
+                        </span>
+                        <input
+                          aria-label="字号"
+                          type="range"
+                          min="14"
+                          max="36"
+                          value={overlaySettings.fontSizePx}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              fontSizePx: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          移动速度<strong>{overlaySettings.speed}</strong>
+                        </span>
+                        <input
+                          aria-label="移动速度"
+                          type="range"
+                          min="20"
+                          max="100"
+                          value={overlaySettings.speed}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              speed: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          透明度<strong>{overlaySettings.opacity}%</strong>
+                        </span>
+                        <input
+                          aria-label="透明度"
+                          type="range"
+                          min="30"
+                          max="100"
+                          value={overlaySettings.opacity}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              opacity: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          密度<strong>{overlaySettings.density}</strong>
+                        </span>
+                        <input
+                          aria-label="密度"
+                          type="range"
+                          min="1"
+                          max="10"
+                          value={overlaySettings.density}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              density: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          显示区域顶部<strong>{overlaySettings.region.topPercent}%</strong>
+                        </span>
+                        <input
+                          aria-label="显示区域顶部"
+                          type="range"
+                          min="0"
+                          max={overlaySettings.region.bottomPercent - 20}
+                          value={overlaySettings.region.topPercent}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              region: {
+                                ...overlaySettings.region,
+                                topPercent: Number(event.target.value)
+                              }
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          显示区域底部<strong>{overlaySettings.region.bottomPercent}%</strong>
+                        </span>
+                        <input
+                          aria-label="显示区域底部"
+                          type="range"
+                          min={overlaySettings.region.topPercent + 20}
+                          max="100"
+                          value={overlaySettings.region.bottomPercent}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              region: {
+                                ...overlaySettings.region,
+                                bottomPercent: Number(event.target.value)
+                              }
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    <div className="overlay-toggle-row">
+                      <span>
+                        点击穿透
+                        {overlaySettingsNotice && (
+                          <small role="status" aria-live="polite">
+                            {overlaySettingsNotice}
+                          </small>
+                        )}
+                      </span>
+                      <label className="switch">
+                        <input
+                          aria-label="点击穿透"
+                          type="checkbox"
+                          checked={overlaySettings.clickThrough}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              clickThrough: event.target.checked
+                            })
+                          }
+                        />
+                        <span aria-hidden="true" />
+                        <em>{overlaySettings.clickThrough ? '开启' : '关闭'}</em>
+                      </label>
+                    </div>
+                  </div>
+                )}
               </section>
             </div>
           )}

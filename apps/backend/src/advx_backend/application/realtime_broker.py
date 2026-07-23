@@ -1,6 +1,10 @@
 import asyncio
+from typing import TypeVar
 
+from advx_backend.domain.barrage import BarrageEvent
 from advx_backend.domain.session import SessionStatus
+
+T = TypeVar("T")
 
 
 class RealtimeBroker:
@@ -11,6 +15,7 @@ class RealtimeBroker:
             raise ValueError("subscriber_capacity must be at least one")
         self._subscriber_capacity = subscriber_capacity
         self._subscribers: set[asyncio.Queue[SessionStatus]] = set()
+        self._barrage_subscribers: set[asyncio.Queue[BarrageEvent]] = set()
         self._lock = asyncio.Lock()
 
     async def subscribe(self) -> asyncio.Queue[SessionStatus]:
@@ -23,11 +28,32 @@ class RealtimeBroker:
         async with self._lock:
             self._subscribers.discard(queue)
 
+    async def subscribe_barrages(self) -> asyncio.Queue[BarrageEvent]:
+        queue: asyncio.Queue[BarrageEvent] = asyncio.Queue(maxsize=self._subscriber_capacity)
+        async with self._lock:
+            self._barrage_subscribers.add(queue)
+        return queue
+
+    async def unsubscribe_barrages(self, queue: asyncio.Queue[BarrageEvent]) -> None:
+        async with self._lock:
+            self._barrage_subscribers.discard(queue)
+
     async def publish_session_status(self, status: SessionStatus) -> None:
         async with self._lock:
             subscribers = tuple(self._subscribers)
 
         for queue in subscribers:
-            if queue.full():
-                queue.get_nowait()
-            queue.put_nowait(status)
+            self._put_latest(queue, status)
+
+    async def publish_barrage(self, event: BarrageEvent) -> None:
+        async with self._lock:
+            subscribers = tuple(self._barrage_subscribers)
+
+        for queue in subscribers:
+            self._put_latest(queue, event)
+
+    @staticmethod
+    def _put_latest(queue: asyncio.Queue[T], item: T) -> None:
+        if queue.full():
+            queue.get_nowait()
+        queue.put_nowait(item)

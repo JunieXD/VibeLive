@@ -4,9 +4,12 @@ version = "0.1.0"
 description = "Local FastAPI backend for ADVX Live"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    "aiosqlite>=0.21,<1",
+    "alembic>=1.16,<2",
     "fastapi>=0.116,<1",
     "httpx>=0.28,<1",
     "pydantic>=2.11,<3",
+    "sqlalchemy[asyncio]>=2.0,<3",
     "uvicorn[standard]>=0.35,<1",
 ]
 

@@ -1,6 +1,7 @@
 import pytest
 
 from advx_backend.application.realtime_broker import RealtimeBroker
+from advx_backend.domain.barrage import BarrageEvent
 from advx_backend.domain.session import SessionState, SessionStatus
 
 
@@ -11,6 +12,19 @@ def session_status(revision: int) -> SessionStatus:
         started_at_ms=1,
         updated_at_ms=revision,
         revision=revision,
+    )
+
+
+def barrage_event(index: int) -> BarrageEvent:
+    return BarrageEvent(
+        barrage_id=f"barrage-{index}",
+        session_id="session-1",
+        observation_id="observation-1",
+        request_id="request-1",
+        audience_id="audience-1",
+        text=f"message {index}",
+        created_at_ms=index,
+        expires_at_ms=index + 100,
     )
 
 
@@ -27,3 +41,22 @@ async def test_realtime_broker_drops_oldest_status_when_subscriber_is_slow() -> 
     assert (await subscription.get()).revision == 3
 
     await broker.unsubscribe(subscription)
+
+
+@pytest.mark.asyncio
+async def test_realtime_broker_bounds_barrage_stream_independently() -> None:
+    broker = RealtimeBroker(subscriber_capacity=2)
+    status_subscription = await broker.subscribe()
+    barrage_subscription = await broker.subscribe_barrages()
+
+    await broker.publish_session_status(session_status(1))
+    await broker.publish_barrage(barrage_event(1))
+    await broker.publish_barrage(barrage_event(2))
+    await broker.publish_barrage(barrage_event(3))
+
+    assert (await status_subscription.get()).revision == 1
+    assert (await barrage_subscription.get()).barrage_id == "barrage-2"
+    assert (await barrage_subscription.get()).barrage_id == "barrage-3"
+
+    await broker.unsubscribe(status_subscription)
+    await broker.unsubscribe_barrages(barrage_subscription)

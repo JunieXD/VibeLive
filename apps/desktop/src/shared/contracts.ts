@@ -48,6 +48,34 @@ export type MediaAccessSnapshot = {
   screen: MediaAccessStatus
 }
 
+export type OverlayTarget = {
+  id: number
+  name: string
+  bounds: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
+  scaleFactor: number
+  isPrimary: boolean
+}
+
+export type OverlayRegion = {
+  topPercent: number
+  bottomPercent: number
+}
+
+export type OverlaySettings = {
+  targetDisplayId: number
+  fontSizePx: number
+  speed: number
+  opacity: number
+  density: number
+  region: OverlayRegion
+  clickThrough: boolean
+}
+
 export type ControlApi = {
   listDesktopSources: () => Promise<DesktopSource[]>
   selectDesktopSource: (sourceId: string) => Promise<boolean>
@@ -56,6 +84,9 @@ export type ControlApi = {
   requestCameraPermission: () => Promise<MediaAccessStatus>
   authorizeCameraCapture: () => Promise<boolean>
   cancelCameraCaptureAuthorization: () => Promise<void>
+  listOverlayTargets: () => Promise<OverlayTarget[]>
+  getOverlaySettings: () => Promise<OverlaySettings>
+  setOverlaySettings: (settings: OverlaySettings) => Promise<OverlaySettings>
   showOverlay: () => Promise<void>
   hideOverlay: () => Promise<void>
   clearOverlay: () => Promise<void>
@@ -68,9 +99,11 @@ export type ControlApi = {
   confirmCloseAfterAudienceSave: () => Promise<void>
   onCloseRequested: (listener: () => void) => () => void
   onEmergencyStop: (listener: () => void) => () => void
+  onOverlaySettingsChanged: (listener: (settings: OverlaySettings) => void) => () => void
 }
 
 export type OverlayApi = {
   onBarrage: (listener: (event: BarrageEvent) => void) => () => void
   onClear: (listener: () => void) => () => void
+  onSettingsChanged: (listener: (settings: OverlaySettings) => void) => () => void
 }

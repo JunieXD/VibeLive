@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ControlApi, ModelConfig } from "../shared/contracts";
+import type { ControlApi, ModelConfig, OverlaySettings } from "../shared/contracts";
 
 const api: ControlApi = {
   listDesktopSources: () => ipcRenderer.invoke("desktop:list-sources"),
@@ -10,6 +10,9 @@ const api: ControlApi = {
   authorizeCameraCapture: () => ipcRenderer.invoke("media:authorize-camera-capture"),
   cancelCameraCaptureAuthorization: () =>
     ipcRenderer.invoke("media:cancel-camera-capture-authorization"),
+  listOverlayTargets: () => ipcRenderer.invoke("overlay:list-targets"),
+  getOverlaySettings: () => ipcRenderer.invoke("overlay:get-settings"),
+  setOverlaySettings: (settings) => ipcRenderer.invoke("overlay:set-settings", settings),
   showOverlay: () => ipcRenderer.invoke("overlay:show"),
   hideOverlay: () => ipcRenderer.invoke("overlay:hide"),
   clearOverlay: () => ipcRenderer.invoke("overlay:clear"),
@@ -28,6 +31,12 @@ const api: ControlApi = {
     const handler = (): void => listener();
     ipcRenderer.on("session:emergency-stop", handler);
     return () => ipcRenderer.removeListener("session:emergency-stop", handler);
+  },
+  onOverlaySettingsChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, settings: OverlaySettings): void =>
+      listener(settings);
+    ipcRenderer.on("overlay:settings-changed", handler);
+    return () => ipcRenderer.removeListener("overlay:settings-changed", handler);
   }
 };
 

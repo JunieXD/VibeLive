@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from advx_backend.contracts.protocol import PROTOCOL_VERSION
 from advx_backend.contracts.session import SessionSnapshot
+from advx_backend.domain.barrage import BarrageEvent
 
 
 class RealtimeProtocolErrorCode(StrEnum):
@@ -57,6 +58,36 @@ class SessionStatusEvent(RealtimeMessage):
     session: SessionSnapshot
 
 
+class BarrageSnapshot(BaseModel):
+    barrage_id: str
+    session_id: str
+    observation_id: str
+    request_id: str
+    audience_id: str
+    text: str
+    created_at_ms: int
+    expires_at_ms: int
+
+    @classmethod
+    def from_domain(cls, event: BarrageEvent) -> "BarrageSnapshot":
+        return cls(
+            barrage_id=event.barrage_id,
+            session_id=event.session_id,
+            observation_id=event.observation_id,
+            request_id=event.request_id,
+            audience_id=event.audience_id,
+            text=event.text,
+            created_at_ms=event.created_at_ms,
+            expires_at_ms=event.expires_at_ms,
+        )
+
+
+class BarrageEventMessage(RealtimeMessage):
+    type: Literal["barrage.event"] = "barrage.event"
+    protocol_version: Literal[1] = PROTOCOL_VERSION
+    barrage: BarrageSnapshot
+
+
 class RealtimeProtocolError(RealtimeMessage):
     type: Literal["protocol.error"] = "protocol.error"
     protocol_version: Literal[1] = PROTOCOL_VERSION
@@ -66,7 +97,7 @@ class RealtimeProtocolError(RealtimeMessage):
 
 
 ServerMessage = Annotated[
-    BackendReady | BackendPong | SessionStatusEvent | RealtimeProtocolError,
+    BackendReady | BackendPong | SessionStatusEvent | BarrageEventMessage | RealtimeProtocolError,
     Field(discriminator="type"),
 ]
 
