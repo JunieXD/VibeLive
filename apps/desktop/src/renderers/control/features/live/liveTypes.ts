@@ -33,6 +33,7 @@ export type LiveStageProps = {
   barrageTotal: number
   microphoneLevel: number
   message: string
+  messageSending: boolean
   pipPreviewStyle: CSSProperties
   videoRef: RefObject<HTMLVideoElement | null>
   cameraVideoRef: RefObject<HTMLVideoElement | null>
@@ -58,6 +59,8 @@ export type LiveMixerProps = {
   captureStatus: string
   cameraStatus: string
   microphoneLevel: number
+  asrReady: boolean
+  asrStatus: string
   visualSettings: VisualSettings
   lastFrameBytes: number | null
   lastFrameOverTarget: boolean

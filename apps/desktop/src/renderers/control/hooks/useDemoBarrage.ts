@@ -7,7 +7,11 @@ import {
   type MemeCandidate,
   type RuntimePersona
 } from '../../../shared/audience'
-import type { BarrageEvent, BarrageMode } from '../../../shared/contracts'
+import type {
+  BackendBarrageEvent,
+  BarrageEvent,
+  BarrageMode
+} from '../../../shared/contracts'
 import { demoLines } from '../../../shared/demo'
 import type { SessionStatus } from '../../../shared/session'
 import type { ActivityItem } from './useActivityFeed'
@@ -25,6 +29,30 @@ const BARRAGE_PREVIEW_TEXT: Record<BarrageMode, string> = {
   scroll: '这是一条滚动弹幕',
   top: '这是一条顶端固定弹幕',
   bottom: '这是一条底端固定弹幕'
+}
+
+const BACKEND_AUDIENCE_PRESENTATION: Record<string, { name: string; color: string }> = {
+  'builtin-luna': { name: 'Luna', color: '#e879a9' },
+  'builtin-max': { name: 'Max', color: '#3da9d5' },
+  'builtin-nova': { name: 'Nova', color: '#8f7bd8' }
+}
+
+function backendAudienceFor(
+  audienceId: string,
+  personas: readonly RuntimePersona[]
+): { name: string; color: string } {
+  const localPersona = personas.find((persona) => persona.id === audienceId)
+  if (localPersona) return { name: localPersona.name, color: localPersona.color }
+  return (
+    BACKEND_AUDIENCE_PRESENTATION[audienceId] ?? {
+      name: `AI 观众 ${audienceId.slice(-6)}`,
+      color: '#5f8f7a'
+    }
+  )
+}
+
+function describeBackendError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
 }
 
 function selectWeightedPersona(
@@ -82,7 +110,9 @@ type UseDemoBarrageOptions = {
   setMessage: Dispatch<SetStateAction<string>>
   appendAudienceActivity: (item: Omit<ActivityItem, 'source'>) => void
   appendUserActivity: (text: string) => void
+  appendSystemActivity?: (text: string) => void
   clearAudienceActivity: () => void
+  backendConnected?: boolean
 }
 
 export function useDemoBarrage({
@@ -95,9 +125,13 @@ export function useDemoBarrage({
   setMessage,
   appendAudienceActivity,
   appendUserActivity,
+  appendSystemActivity,
+  backendConnected = true,
   clearAudienceActivity
 }: UseDemoBarrageOptions) {
   const [barrageTotal, setBarrageTotal] = useState(0)
+  const [messageSending, setMessageSending] = useState(false)
+  const [messageError, setMessageError] = useState<string | null>(null)
   const sequenceRef = useRef(0)
   const runtime = useMemo(() => compileAudienceWorkspaceSnapshot(workspace), [workspace])
   const activeAudience = runtime.personas
@@ -131,7 +165,9 @@ export function useDemoBarrage({
       const event: BarrageEvent = {
         barrageId: `demo-${Date.now()}-${sequence}`,
         audienceId: member.id,
+        audienceName: member.name,
         text: text ?? learnedMeme?.text ?? demoLines[sequence % demoLines.length],
+        color: member.color,
         createdAt: Date.now(),
         mode
       }
@@ -176,10 +212,45 @@ export function useDemoBarrage({
   )
 
   useEffect(() => {
-    if (sessionStatus !== 'running') return
+    if (sessionStatus !== 'running' || backendConnected) return
     const timer = window.setInterval(() => emitBarrage(), 5200)
     return () => window.clearInterval(timer)
-  }, [emitBarrage, sessionStatus])
+  }, [backendConnected, emitBarrage, sessionStatus])
+
+  useEffect(() => {
+    return window.advx.onBackendBarrage((backendEvent: BackendBarrageEvent) => {
+      const member = backendAudienceFor(backendEvent.audienceId, activeAudience)
+      const event: BarrageEvent = {
+        ...backendEvent,
+        audienceName: member.name,
+        color: member.color,
+        mode: 'scroll'
+      }
+      setBarrageTotal((current) => current + 1)
+      appendAudienceActivity({
+        id: event.barrageId,
+        author: member.name,
+        text: event.text,
+        color: member.color
+      })
+      if (overlayVisible) void window.advx.pushBarrage(event)
+
+      const candidate = proposeDemoMemeCandidate({
+        modeId: runtime.mode.id,
+        text: event.text,
+        sourceKinds: ['audience_barrage'],
+        evidenceSummary: `${member.name} 在真实直播互动中形成的房间短句`,
+        personaTags: [event.audienceId]
+      })
+      if (candidate) acceptDirectorMemeCandidate(candidate)
+    })
+  }, [
+    acceptDirectorMemeCandidate,
+    activeAudience,
+    appendAudienceActivity,
+    overlayVisible,
+    runtime.mode.id
+  ])
 
   const previewBarrage = useCallback(
     async (mode: BarrageMode): Promise<void> => {
@@ -194,9 +265,11 @@ export function useDemoBarrage({
     await window.advx.clearOverlay()
   }, [clearAudienceActivity])
 
-  const sendUserMessage = useCallback((): void => {
+  const sendUserMessage = useCallback(async (): Promise<void> => {
     const trimmed = message.trim()
-    if (!trimmed) return
+    if (!trimmed || messageSending || sessionStatus !== 'running') return
+    setMessageSending(true)
+    setMessageError(null)
     appendUserActivity(trimmed)
     setMessage('')
     const candidate = proposeDemoMemeCandidate({
@@ -206,17 +279,22 @@ export function useDemoBarrage({
       evidenceSummary: `用户在房间文字中主动说出：“${trimmed.slice(0, 72)}”`
     })
     if (candidate) acceptDirectorMemeCandidate(candidate)
-    if (sessionStatus === 'running') {
-      window.setTimeout(
-        () => emitBarrage(`听到了。关于“${trimmed.slice(0, 20)}”，我想再看一会儿。`),
-        550
-      )
+    try {
+      await window.advx.submitUserText(trimmed)
+    } catch (error) {
+      const errorMessage = `文字未送达后端：${describeBackendError(error, '实时连接异常。')}`
+      setMessage((current) => current || trimmed)
+      setMessageError(errorMessage)
+      appendSystemActivity?.(errorMessage)
+    } finally {
+      setMessageSending(false)
     }
   }, [
     acceptDirectorMemeCandidate,
+    appendSystemActivity,
     appendUserActivity,
-    emitBarrage,
     message,
+    messageSending,
     runtime.mode.id,
     sessionStatus,
     setMessage
@@ -229,6 +307,8 @@ export function useDemoBarrage({
     emitBarrage,
     previewBarrage,
     clearBarrage,
-    sendUserMessage
+    sendUserMessage,
+    messageSending,
+    messageError
   }
 }

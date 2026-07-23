@@ -3,7 +3,11 @@ import type {
   MutableRefObject,
   SetStateAction
 } from 'react'
-import type { DesktopSource, MediaAccessStatus } from '../../../shared/contracts'
+import type {
+  BackendSessionSnapshot,
+  DesktopSource,
+  MediaAccessStatus
+} from '../../../shared/contracts'
 import type { SessionAction, SessionStatus } from '../../../shared/session'
 import type { VisualMode, VisualSettings } from '../visual'
 
@@ -12,6 +16,10 @@ export type UseMediaControllerOptions = {
   dispatchSession: Dispatch<SessionAction>
   onSystemActivity: (text: string) => void
   onSessionStarted: () => void
+  backendConnected?: boolean
+  providersConfigured?: boolean
+  backendSessionId?: string | null
+  onBackendSessionSnapshot?: (snapshot: BackendSessionSnapshot) => void
 }
 
 export type FatalMediaKind = 'display' | 'camera' | 'microphone'

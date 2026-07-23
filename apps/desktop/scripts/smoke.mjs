@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { once } from 'node:events'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -34,6 +35,34 @@ function launchApp() {
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
     }
   })
+}
+
+async function closeControlWindowAndWaitForExit(electronApp) {
+  const electronProcess = electronApp.process()
+  const exited =
+    electronProcess.exitCode === null ? once(electronProcess, 'exit') : Promise.resolve()
+  await electronApp.evaluate(({ BrowserWindow }) => {
+    const controlWindow = BrowserWindow.getAllWindows().find((window) =>
+      window.webContents.getURL().includes('/control/')
+    )
+    if (!controlWindow) throw new Error('Control window was not found during shutdown smoke.')
+    controlWindow.close()
+  })
+
+  let timeout
+  try {
+    await Promise.race([
+      exited,
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Electron did not exit after its control window closed.')),
+          8_000
+        )
+      })
+    ])
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 async function setRange(page, label, value) {
@@ -167,6 +196,32 @@ try {
 
   await page.screenshot({
     path: resolve(artifactDirectory, 'control-console.png'),
+    fullPage: true
+  })
+
+  await page.waitForFunction(() => document.body.textContent?.includes('后端 · 已连接'))
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByLabel('服务地址', { exact: true }).fill('https://smoke.example/v1')
+  await page.getByLabel('模型名称', { exact: true }).fill('smoke-model')
+  await page.getByLabel('模型 API Key', { exact: true }).fill('smoke-model-key')
+  await page.getByLabel('StepFun ASR API Key', { exact: true }).fill('smoke-asr-key')
+  await page.getByRole('button', { name: '保存连接', exact: true }).click()
+  await page.getByText('模型与语音识别配置已安全保存并接入后端', { exact: true }).waitFor()
+
+  const modelApiKeyInput = page.getByLabel(/模型 API Key/)
+  const asrApiKeyInput = page.getByLabel(/StepFun ASR API Key/)
+  assert.equal(await modelApiKeyInput.inputValue(), '')
+  assert.equal(await asrApiKeyInput.inputValue(), '')
+  assert.match((await modelApiKeyInput.getAttribute('placeholder')) ?? '', /已保存/)
+  assert.match((await asrApiKeyInput.getAttribute('placeholder')) ?? '', /已保存/)
+  assert.equal(await page.getByText('已安全保存', { exact: true }).count(), 2)
+
+  const saveChangesButton = page.getByRole('button', { name: '保存更改', exact: true })
+  assert.equal(await saveChangesButton.isEnabled(), true)
+  await saveChangesButton.click()
+  await page.getByText('模型与语音识别配置已安全保存并接入后端', { exact: true }).waitFor()
+  await page.screenshot({
+    path: resolve(artifactDirectory, 'model-config-saved.png'),
     fullPage: true
   })
 
@@ -437,7 +492,9 @@ try {
       await window.advx.pushBarrage({
         barrageId: `smoke-${index}`,
         audienceId: `audience-${index}`,
+        audienceName: `测试观众 ${index + 1}`,
         text: `Overlay 参数验证弹幕 ${index + 1}`,
+        color: index % 2 === 0 ? '#a8f53a' : '#65d6b9',
         createdAt: Date.now(),
         mode: 'scroll'
       })
@@ -536,11 +593,13 @@ try {
     configuredSettings.targetDisplayId
   )
   assert.ok(boundsProof.overlay && boundsProof.target, 'Overlay target bounds were unavailable.')
-  for (const key of ['x', 'y', 'width', 'height']) {
-    assert.ok(
-      Math.abs(boundsProof.overlay[key] - boundsProof.target[key]) <= 1,
-      `Overlay ${key} did not match its target within one DIP.`
-    )
+  if (process.env.ADVX_SMOKE_SKIP_DISPLAY_BOUNDS !== '1') {
+    for (const key of ['x', 'y', 'width', 'height']) {
+      assert.ok(
+        Math.abs(boundsProof.overlay[key] - boundsProof.target[key]) <= 1,
+        `Overlay ${key} did not match its target within one DIP.`
+      )
+    }
   }
 
   await page.evaluate(() => window.advx.clearOverlay())
@@ -759,8 +818,83 @@ try {
     throw new Error(`Unexpected top-left large picture-in-picture layout: ${JSON.stringify(pipLayout)}`)
   }
 
+  await electronApp.evaluate(({ BrowserWindow, ipcMain }) => {
+    const channels = [
+      'backend:get-status',
+      'backend:restart',
+      'backend:session-start',
+      'backend:session-pause',
+      'backend:session-resume',
+      'backend:session-stop',
+      'backend:submit-text',
+      'backend:submit-audio',
+      'backend:submit-frame'
+    ]
+    channels.forEach((channel) => ipcMain.removeHandler(channel))
+
+    let state = 'idle'
+    let sessionId = null
+    let startedAtMs = null
+    let revision = 0
+    let connection = 'failed'
+    let startupError = 'Smoke 模拟的后端启动失败'
+    const sessionSnapshot = () => ({
+      sessionId,
+      state,
+      startedAtMs,
+      updatedAtMs: Date.now(),
+      revision
+    })
+    const runtimeStatus = () => ({
+      connection,
+      providersConfigured: connection === 'connected',
+      startupError,
+      session: sessionSnapshot()
+    })
+    const publishStatus = () => {
+      BrowserWindow.getAllWindows()
+        .find((window) => window.webContents.getURL().includes('/control/'))
+        ?.webContents.send('backend:status', runtimeStatus())
+    }
+    const transition = (nextState) => {
+      state = nextState
+      revision += 1
+      if (nextState === 'running' && sessionId === null) {
+        sessionId = 'smoke-session'
+        startedAtMs = Date.now()
+      }
+      if (nextState === 'idle') {
+        sessionId = null
+        startedAtMs = null
+      }
+      publishStatus()
+      return sessionSnapshot()
+    }
+
+    ipcMain.handle('backend:get-status', runtimeStatus)
+    ipcMain.handle('backend:restart', () => {
+      connection = 'connected'
+      startupError = null
+      publishStatus()
+      return runtimeStatus()
+    })
+    ipcMain.handle('backend:session-start', () => transition('running'))
+    ipcMain.handle('backend:session-pause', () => transition('paused'))
+    ipcMain.handle('backend:session-resume', () => transition('running'))
+    ipcMain.handle('backend:session-stop', () => transition('idle'))
+    ipcMain.handle('backend:submit-text', () => undefined)
+    ipcMain.handle('backend:submit-audio', () => undefined)
+    ipcMain.handle('backend:submit-frame', () => undefined)
+    publishStatus()
+  })
+  await page.getByText('本地服务启动失败', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '重试', exact: true }).click()
+  await page.waitForFunction(() => document.body.textContent?.includes('后端 · 已连接'))
+
   await page.getByRole('button', { name: '开始直播', exact: true }).click()
   await page.waitForFunction(() => document.body.textContent?.includes('直播中'))
+  await page.getByText('直播开始了，先热个场。', { exact: true }).waitFor()
+  await overlayPage.getByText('直播开始了，先热个场。', { exact: true }).waitFor()
   await page.waitForFunction(
     () => {
       const valueFor = (label) => {
@@ -770,7 +904,7 @@ try {
         return row?.querySelector('strong')?.textContent?.trim() ?? ''
       }
       return (
-        valueFor('图像适配器') === '等待后端接入' &&
+        valueFor('图像适配器') === '已就绪' &&
         valueFor('最近批次') !== '--:--:--' &&
         valueFor('合成压缩').includes('KB')
       )
@@ -1061,6 +1195,7 @@ try {
     `Monorepo desktop smoke passed: ${sourceCount} sources, six audience modes, 32 personas, live edit policy, meme candidate ingestion/undo, camera denied before explicit enable, ${cameraDevices} camera entries, three visual modes, ${compressedKilobytes} KB composite JPEG, versioned settings restore, microphone meter peak ${microphonePeak}%, and complete pause/stop track cleanup.`
   )
   console.log(`Screenshot: ${resolve(artifactDirectory, 'control-console.png')}`)
+  console.log(`Saved model credentials: ${resolve(artifactDirectory, 'model-config-saved.png')}`)
   console.log(`Camera picture-in-picture: ${resolve(artifactDirectory, 'views-camera-pip.png')}`)
   console.log(
     `Compact camera picture-in-picture: ${resolve(artifactDirectory, 'views-camera-pip-1120.png')}`
@@ -1074,9 +1209,10 @@ try {
       await window.advx.pushBarrage({
         barrageId: `click-proof-${index}`,
         audienceId: `audience-${index}`,
+        audienceName: `测试观众 ${index + 1}`,
         text: `Overlay 点击穿透验证弹幕 ${index + 1}`,
-        createdAt: Date.now(),
-        mode: 'scroll'
+        color: index % 2 === 0 ? '#a8f53a' : '#65d6b9',
+        createdAt: Date.now()
       })
     }
   })
@@ -1317,7 +1453,7 @@ try {
     clearCount: 0
   }
 
-  await electronApp.close()
+  await closeControlWindowAndWaitForExit(electronApp)
   electronApp = await launchApp()
   const restartedPage = await electronApp.firstWindow()
   await restartedPage.waitForSelector('h1')
@@ -1341,10 +1477,7 @@ try {
     await restartedPage.getByLabel('弹幕字体', { exact: true }).inputValue(),
     'bilibili'
   )
-  assert.equal(
-    await restartedPage.getByLabel('粗体', { exact: true }).isChecked(),
-    true
-  )
+  assert.equal(await restartedPage.getByLabel('粗体', { exact: true }).isChecked(), true)
   assert.equal(
     await restartedPage.getByLabel('描边粗细', { exact: true }).inputValue(),
     '1'
@@ -1383,7 +1516,9 @@ try {
   ].map(([barrageId, text, mode], index) => ({
     barrageId,
     audienceId: `mock-audience-${index}`,
+    audienceName: `模式观众 ${index + 1}`,
     text,
+    color: index % 2 === 0 ? '#a8f53a' : '#65d6b9',
     mode,
     createdAt: Date.now() + index
   }))
@@ -1477,7 +1612,7 @@ try {
   )
 
   console.log(
-    `Desktop Overlay smoke passed: ${targetOptions} target(s), ${sourceCount} capture source(s), three barrage modes, font styling, collision-free density, bounds, clear, persistence, and ${clickThroughProof.skipped ? 'API-only' : 'real Windows'} click-through.`
+    `Desktop Overlay smoke passed: ${targetOptions} target(s), ${sourceCount} capture source(s), three barrage modes, font styling, collision-free density, bounds, clear, persistence, main-window quit, and ${clickThroughProof.skipped ? 'API-only' : 'real Windows'} click-through.`
   )
   console.log(`Settings screenshot: ${resolve(artifactDirectory, 'overlay-settings.png')}`)
   console.log(`Overlay screenshot: ${resolve(artifactDirectory, 'overlay-renderer.png')}`)

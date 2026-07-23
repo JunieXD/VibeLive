@@ -28,4 +28,17 @@ describe('desktop sessionReducer', () => {
     expect(failed.status).toBe('error')
     expect(sessionReducer(failed, { type: 'stop' }).status).toBe('stopping')
   })
+
+  it('synchronizes authoritative backend session state', () => {
+    expect(
+      sessionReducer(initialSessionState, { type: 'sync', status: 'running' })
+    ).toEqual({ status: 'running', error: null })
+    expect(
+      sessionReducer(initialSessionState, {
+        type: 'sync',
+        status: 'error',
+        error: '后端异常'
+      })
+    ).toEqual({ status: 'error', error: '后端异常' })
+  })
 })

@@ -6,12 +6,22 @@ import {
   SlidersHorizontal,
   Sparkles
 } from 'lucide-react'
-import type { BarrageMode, OverlaySettings, OverlayTarget } from '../../../../shared/contracts'
+import type {
+  BarrageMode,
+  ModelConfigStatus,
+  OverlaySettings,
+  OverlayTarget
+} from '../../../../shared/contracts'
 
 export type SettingsViewProps = {
   modelBaseUrl: string
   modelName: string
   apiKey: string
+  asrApiKey: string
+  modelConfigStatus: ModelConfigStatus | null
+  modelConfigLoading: boolean
+  modelConfigSaving: boolean
+  canSaveModelConfig: boolean
   configNotice: string | null
   overlaySettings: OverlaySettings | null
   overlayTargets: readonly OverlayTarget[]
@@ -19,6 +29,7 @@ export type SettingsViewProps = {
   onModelBaseUrlChange: (value: string) => void
   onModelNameChange: (value: string) => void
   onApiKeyChange: (value: string) => void
+  onAsrApiKeyChange: (value: string) => void
   onSaveModelConfig: () => void
   onOverlaySettingsChange: (settings: OverlaySettings) => void
   onPreviewBarrage: (mode: BarrageMode) => void
@@ -122,6 +133,11 @@ export function SettingsView({
   modelBaseUrl,
   modelName,
   apiKey,
+  asrApiKey,
+  modelConfigStatus,
+  modelConfigLoading,
+  modelConfigSaving,
+  canSaveModelConfig,
   configNotice,
   overlaySettings,
   overlayTargets,
@@ -129,11 +145,13 @@ export function SettingsView({
   onModelBaseUrlChange,
   onModelNameChange,
   onApiKeyChange,
+  onAsrApiKeyChange,
   onSaveModelConfig,
   onOverlaySettingsChange,
   onPreviewBarrage
 }: SettingsViewProps): React.JSX.Element {
-  const canSaveModelConfig = modelBaseUrl.trim().length > 0 && modelName.trim().length > 0
+  const credentialsStored =
+    modelConfigStatus?.modelApiKeyStored === true && modelConfigStatus.asrApiKeyStored === true
 
   return (
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
@@ -165,13 +183,41 @@ export function SettingsView({
             />
           </label>
           <label className={labelClassName}>
-            API Key
+            <span className="flex items-center justify-between gap-3">
+              模型 API Key
+              {modelConfigStatus?.modelApiKeyStored && (
+                <small className="font-normal text-[var(--accent)]">已安全保存</small>
+              )}
+            </span>
             <input
               className={controlClassName}
               type="password"
               value={apiKey}
               onChange={(event) => onApiKeyChange(event.target.value)}
-              placeholder="仅由 Electron Main 安全保存"
+              placeholder={
+                modelConfigStatus?.modelApiKeyStored
+                  ? '••••••••（已保存，输入新值可替换）'
+                  : '仅由 Electron Main 安全保存'
+              }
+            />
+          </label>
+          <label className={labelClassName}>
+            <span className="flex items-center justify-between gap-3">
+              StepFun ASR API Key
+              {modelConfigStatus?.asrApiKeyStored && (
+                <small className="font-normal text-[var(--accent)]">已安全保存</small>
+              )}
+            </span>
+            <input
+              className={controlClassName}
+              type="password"
+              value={asrApiKey}
+              onChange={(event) => onAsrApiKeyChange(event.target.value)}
+              placeholder={
+                modelConfigStatus?.asrApiKeyStored
+                  ? '••••••••（已保存，输入新值可替换）'
+                  : '用于实时语音识别'
+              }
             />
           </label>
           <div className="flex min-h-9 flex-wrap items-center justify-end gap-3">
@@ -187,7 +233,13 @@ export function SettingsView({
               onClick={onSaveModelConfig}
             >
               <KeyRound size={16} aria-hidden="true" />
-              保存连接
+              {modelConfigSaving
+                ? '正在保存'
+                : modelConfigLoading
+                  ? '正在读取'
+                  : credentialsStored
+                    ? '保存更改'
+                    : '保存连接'}
             </button>
           </div>
         </div>

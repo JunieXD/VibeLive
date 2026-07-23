@@ -1,17 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SessionStatus } from '../../../shared/session'
 
-export function useElapsedTime(sessionStatus: SessionStatus): number {
+export function useElapsedTime(
+  sessionStatus: SessionStatus,
+  backendStartedAtMs: number | null = null
+): number {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const startedAtRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (sessionStatus === 'running' || sessionStatus === 'paused') {
-      if (startedAtRef.current === null) {
-        startedAtRef.current = Date.now() - elapsedSeconds * 1000
+      startedAtRef.current = backendStartedAtMs ?? startedAtRef.current ?? Date.now()
+      const updateElapsed = (): void => {
+        setElapsedSeconds(
+          Math.max(0, Math.floor((Date.now() - (startedAtRef.current ?? Date.now())) / 1000))
+        )
       }
+      updateElapsed()
       const timer = window.setInterval(() => {
-        setElapsedSeconds(Math.floor((Date.now() - (startedAtRef.current ?? Date.now())) / 1000))
+        updateElapsed()
       }, 1000)
       return () => window.clearInterval(timer)
     }
@@ -19,7 +26,7 @@ export function useElapsedTime(sessionStatus: SessionStatus): number {
       startedAtRef.current = null
       setElapsedSeconds(0)
     }
-  }, [elapsedSeconds, sessionStatus])
+  }, [backendStartedAtMs, sessionStatus])
 
   return elapsedSeconds
 }

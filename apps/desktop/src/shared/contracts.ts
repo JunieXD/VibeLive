@@ -13,20 +13,71 @@ export type BarrageMode = 'scroll' | 'top' | 'bottom'
 export type BarrageEvent = {
   barrageId: string
   audienceId: string
+  audienceName?: string
   text: string
+  color?: string
   createdAt: number
-  mode: BarrageMode
+  mode?: BarrageMode
 }
 
 export type ModelConfig = {
   baseUrl: string
   model: string
   apiKey: string
+  asrApiKey: string
+}
+
+export type ModelConfigStatus = {
+  baseUrl: string | null
+  model: string | null
+  modelApiKeyStored: boolean
+  asrApiKeyStored: boolean
 }
 
 export type SaveModelConfigResult = {
   ok: boolean
   securelyStored: boolean
+  backendConfigured: boolean
+  restartRequired: boolean
+}
+
+export type BackendConnectionState =
+  | 'starting'
+  | 'connecting'
+  | 'connected'
+  | 'disconnected'
+  | 'failed'
+
+export type BackendSessionSnapshot = {
+  sessionId: string | null
+  state: 'idle' | 'starting' | 'running' | 'paused' | 'stopping' | 'error'
+  startedAtMs: number | null
+  updatedAtMs: number
+  revision: number
+}
+
+export type BackendRuntimeStatus = {
+  connection: BackendConnectionState
+  providersConfigured: boolean
+  startupError: string | null
+  session: BackendSessionSnapshot
+}
+
+export type BackendBarrageEvent = {
+  barrageId: string
+  audienceId: string
+  text: string
+  createdAt: number
+}
+
+export type RealtimeMediaInput = {
+  inputId: string
+  capturedAtMs: number
+  body: Uint8Array
+}
+
+export type RealtimeFrameInput = RealtimeMediaInput & {
+  mimeType: string
 }
 
 export type SaveAudienceWorkspaceResult = {
@@ -98,6 +149,16 @@ export type ControlApi = {
   clearOverlay: () => Promise<void>
   pushBarrage: (event: BarrageEvent) => Promise<void>
   saveModelConfig: (config: ModelConfig) => Promise<SaveModelConfigResult>
+  getModelConfigStatus: () => Promise<ModelConfigStatus>
+  getBackendStatus: () => Promise<BackendRuntimeStatus>
+  restartBackend: () => Promise<BackendRuntimeStatus>
+  startBackendSession: () => Promise<BackendSessionSnapshot>
+  pauseBackendSession: () => Promise<BackendSessionSnapshot>
+  resumeBackendSession: () => Promise<BackendSessionSnapshot>
+  stopBackendSession: () => Promise<BackendSessionSnapshot>
+  submitUserText: (text: string) => Promise<void>
+  submitAudioSegment: (input: RealtimeMediaInput) => Promise<void>
+  submitVisualFrame: (input: RealtimeFrameInput) => Promise<void>
   loadAudienceWorkspace: () => Promise<AudienceWorkspaceState | null>
   saveAudienceWorkspace: (
     workspace: AudienceWorkspaceState
@@ -106,6 +167,8 @@ export type ControlApi = {
   onCloseRequested: (listener: () => void) => () => void
   onEmergencyStop: (listener: () => void) => () => void
   onOverlaySettingsChanged: (listener: (settings: OverlaySettings) => void) => () => void
+  onBackendStatus: (listener: (status: BackendRuntimeStatus) => void) => () => void
+  onBackendBarrage: (listener: (event: BackendBarrageEvent) => void) => () => void
 }
 
 export type OverlayApi = {

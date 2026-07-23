@@ -10,6 +10,8 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
     captureStatus,
     cameraStatus,
     microphoneLevel,
+    asrReady,
+    asrStatus,
     visualSettings,
     lastFrameBytes,
     lastFrameOverTarget,
@@ -51,7 +53,7 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
           <AudioLines size={14} />
           本地 ASR
         </span>
-        <strong>等待后端</strong>
+        <strong className={asrReady ? 'ok' : ''}>{asrStatus}</strong>
       </div>
       <div className="mixer-row">
         <span>

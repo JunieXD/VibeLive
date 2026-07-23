@@ -31,7 +31,7 @@
 - 麦克风原始音频会发送给用户明确启用的 StepFun 服务；弹幕生成模型只接收最终文本。
 - 第一版接入 OpenAI-compatible 多模态协议，并保留统一 Model Provider 接口。
 - Electron Main 管理本地 FastAPI 子进程；HTTP 处理控制面，WebSocket 处理实时数据。
-- 屏幕和麦克风由 Electron 统一采集，音频通过 AudioWorklet 分块送入 FastAPI。
+- 屏幕和麦克风由 Electron 统一采集，音频通过 Web Audio 分块送入 FastAPI。
 - 模型结合近期画面、用户文字、近期语音文本和公开房间对话生成弹幕。
 - 每个 AI 观众都是具有稳定 ID、人格、偏好、说话方式、关系状态和独立记忆的逻辑实体。
 - 内置模式可以复制为自定义模式；人格覆盖只在所属模式内生效，完整编辑结果使用版本化 `personality.md` 表示。
@@ -44,7 +44,7 @@
 - 界面必须明确说明观众是 AI，不能伪装成真人或真实在线人数。
 - 用户可以随时暂停、清屏和停止；停止后不得继续采集或补发旧弹幕。
 
-当前实现迭代先交付 Electron/React 桌面前端和共享 TypeScript 产品合同。FastAPI、SQLite、真实导演模型和 Provider 链路仍是后续目标，不能从前端状态或模拟数据推断这些后端能力已经完成。
+当前实现已具备 Electron/React 桌面端、FastAPI、SQLite、StepFun ASR、OpenAI-compatible 模型 Provider 和实时弹幕管线。桌面端已接入真实 Session、音频、画面、文字和 Overlay 链路；前端的模式与人格工作区和后端内置观众目录仍是两套数据源，后续需要统一。
 
 ## 仍未确定
 

@@ -3,6 +3,7 @@ import {
   Clock,
   LayoutDashboard,
   MessageSquareText,
+  RefreshCw,
   Settings,
   Users
 } from 'lucide-react'
@@ -11,13 +12,25 @@ import type { SessionStatus } from '../../../shared/session'
 
 export type AppShellView = 'live' | 'audience' | 'settings'
 
-export type AppShellStatusTone = 'offline' | 'online' | 'warning'
+export type AppShellStatusTone = 'offline' | 'online' | 'warning' | 'failed'
 
 export type AppShellStatusItem = {
   id: string
   label: string
   tone?: AppShellStatusTone
   muted?: boolean
+}
+
+export type AppShellNotice = {
+  title: string
+  detail: string
+  tone?: 'info' | 'failed'
+  action?: {
+    label: string
+    busyLabel: string
+    busy: boolean
+    onClick: () => void
+  }
 }
 
 export type AppShellProps = {
@@ -29,6 +42,7 @@ export type AppShellProps = {
   elapsedSeconds: number
   barrageTotal: number
   statusItems: readonly AppShellStatusItem[]
+  notice?: AppShellNotice | null
   children: ReactNode
   roomId?: string
   emergencyStopShortcut?: string
@@ -70,7 +84,8 @@ const liveDotStyles: Record<SessionStatus, string> = {
 const statusDotStyles: Record<AppShellStatusTone, string> = {
   offline: 'bg-[var(--text-faint)]',
   online: 'bg-[var(--ok)] shadow-[0_0_0_3px_var(--ok-soft)]',
-  warning: 'bg-[var(--amber)]'
+  warning: 'bg-[var(--amber)]',
+  failed: 'bg-[var(--danger)] shadow-[0_0_0_3px_rgb(255_95_82_/_12%)]'
 }
 
 function formatElapsed(totalSeconds: number): string {
@@ -89,6 +104,7 @@ export function AppShell({
   elapsedSeconds,
   barrageTotal,
   statusItems,
+  notice,
   children,
   roomId = 'AX-1024',
   emergencyStopShortcut = 'Ctrl/⌘ + Shift + X'
@@ -228,6 +244,33 @@ export function AppShell({
           className="min-h-0 min-w-0 overflow-auto px-4.5 py-4"
           data-control-workspace
         >
+          {notice && (
+            <section
+              className={[
+                'mb-4 flex min-h-14 items-center justify-between gap-4 border px-4 py-3',
+                notice.tone === 'failed'
+                  ? 'border-[rgb(255_95_82_/_45%)] bg-[rgb(255_95_82_/_10%)]'
+                  : 'border-[var(--border-strong)] bg-[var(--panel)]'
+              ].join(' ')}
+              role={notice.tone === 'failed' ? 'alert' : 'status'}
+            >
+              <div className="grid min-w-0 gap-1">
+                <strong className="text-sm text-[var(--text)]">{notice.title}</strong>
+                <span className="text-xs leading-5 text-[var(--text-dim)]">{notice.detail}</span>
+              </div>
+              {notice.action && (
+                <button
+                  className="inline-flex min-h-8 shrink-0 items-center gap-2 border border-[var(--border-strong)] bg-[var(--panel-raise)] px-3 text-xs font-bold text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  type="button"
+                  disabled={notice.action.busy}
+                  onClick={notice.action.onClick}
+                >
+                  <RefreshCw size={15} aria-hidden="true" />
+                  {notice.action.busy ? notice.action.busyLabel : notice.action.label}
+                </button>
+              )}
+            </section>
+          )}
           {children}
         </main>
 

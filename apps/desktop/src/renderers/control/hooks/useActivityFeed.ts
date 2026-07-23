@@ -16,7 +16,7 @@ export function useActivityFeed() {
       id: 'system-ready',
       source: 'system',
       author: '系统',
-      text: '控制台已就绪，当前使用前端演示模式。'
+      text: '控制台已就绪，正在连接本地后端。'
     }
   ])
   const [message, setMessage] = useState('')

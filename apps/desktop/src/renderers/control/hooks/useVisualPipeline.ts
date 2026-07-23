@@ -3,7 +3,6 @@ import type { SessionStatus } from '../../../shared/session'
 import {
   COMPRESSION_PROFILES,
   compressCompositeCanvas,
-  createWaitingVisualBatchSink,
   deliverAndReleaseVisualBatch,
   drawCompositeFrame,
   releaseVisualFrames,
@@ -24,6 +23,7 @@ type UseVisualPipelineOptions = {
   cameraStreamRef: MutableRefObject<MediaStream | null>
   videoRef: RefObject<HTMLVideoElement | null>
   cameraVideoRef: RefObject<HTMLVideoElement | null>
+  batchSink?: VisualBatchSink
 }
 
 type VisualPipeline = {
@@ -42,7 +42,8 @@ export function useVisualPipeline({
   captureStreamRef,
   cameraStreamRef,
   videoRef,
-  cameraVideoRef
+  cameraVideoRef,
+  batchSink
 }: UseVisualPipelineOptions): VisualPipeline {
   const compositeCanvasRef = useRef<HTMLCanvasElement>(null)
   const [status, setStatus] = useState<VisualPipelineStatus>('waiting-backend')
@@ -56,7 +57,29 @@ export function useVisualPipeline({
   const sampleBusyRef = useRef<number | null>(null)
   const batchBusyRef = useRef<number | null>(null)
   const frameSequenceRef = useRef(0)
-  const batchSinkRef = useRef<VisualBatchSink>(createWaitingVisualBatchSink())
+  const defaultBatchSinkRef = useRef<VisualBatchSink>({
+    consume: async (batch, signal) => {
+      for (const frame of batch.frames) {
+        if (signal.aborted) {
+          throw new DOMException('Visual delivery aborted.', 'AbortError')
+        }
+        if (!frame.blob) continue
+        const body = new Uint8Array(await frame.blob.arrayBuffer())
+        if (signal.aborted) {
+          throw new DOMException('Visual delivery aborted.', 'AbortError')
+        }
+        await window.advx.submitVisualFrame({
+          inputId: frame.frameId,
+          capturedAtMs: frame.capturedAt,
+          mimeType: frame.blob.type || 'image/jpeg',
+          body
+        })
+      }
+      return 'accepted'
+    }
+  })
+  const batchSinkRef = useRef<VisualBatchSink>(batchSink ?? defaultBatchSinkRef.current)
+  batchSinkRef.current = batchSink ?? defaultBatchSinkRef.current
 
   useEffect(() => {
     sessionStatusRef.current = sessionStatus

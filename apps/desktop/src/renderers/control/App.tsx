@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import type { BackendConnectionState } from '../../shared/contracts'
 import { AppShell, type AppShellStatusItem } from './app/AppShell'
 import { AudienceWorkspace } from './AudienceWorkspace'
 import { LiveView } from './features/live/LiveView'
@@ -6,6 +7,7 @@ import { SettingsView } from './features/settings/SettingsView'
 import { SourcePickerDialog } from './features/source-picker/SourcePickerDialog'
 import { useActivityFeed } from './hooks/useActivityFeed'
 import { useAudienceWorkspacePersistence } from './hooks/useAudienceWorkspacePersistence'
+import { useBackendRuntime } from './hooks/useBackendRuntime'
 import { useDemoBarrage } from './hooks/useDemoBarrage'
 import { useElapsedTime } from './hooks/useElapsedTime'
 import { useMediaController } from './hooks/useMediaController'
@@ -20,6 +22,14 @@ import {
   useControlStore
 } from './store/controlStore'
 
+const backendConnectionLabels: Record<BackendConnectionState, string> = {
+  starting: '启动中',
+  connecting: '连接中',
+  connected: '已连接',
+  disconnected: '已断开',
+  failed: '启动失败'
+}
+
 export function App(): React.JSX.Element {
   const activeView = useControlStore(selectActiveView)
   const setActiveView = useControlStore(selectSetActiveView)
@@ -28,6 +38,7 @@ export function App(): React.JSX.Element {
   const sessionStartedRef = useRef<() => void>(() => undefined)
   const handleSessionStarted = useCallback(() => sessionStartedRef.current(), [])
 
+  const backend = useBackendRuntime()
   const activityFeed = useActivityFeed()
   const audience = useAudienceWorkspacePersistence({
     onSystemActivity: activityFeed.appendSystemActivity
@@ -36,7 +47,11 @@ export function App(): React.JSX.Element {
     sessionStatus: session.status,
     dispatchSession,
     onSystemActivity: activityFeed.appendSystemActivity,
-    onSessionStarted: handleSessionStarted
+    onSessionStarted: handleSessionStarted,
+    backendConnected: backend.connection === 'connected',
+    providersConfigured: backend.status?.providersConfigured ?? false,
+    backendSessionId: backend.status?.session.sessionId,
+    onBackendSessionSnapshot: backend.applySessionSnapshot
   })
   const barrage = useDemoBarrage({
     workspace: audience.workspace,
@@ -48,7 +63,9 @@ export function App(): React.JSX.Element {
     setMessage: activityFeed.setMessage,
     appendAudienceActivity: activityFeed.appendAudienceActivity,
     appendUserActivity: activityFeed.appendUserActivity,
-    clearAudienceActivity: activityFeed.clearAudienceActivity
+    appendSystemActivity: activityFeed.appendSystemActivity,
+    clearAudienceActivity: activityFeed.clearAudienceActivity,
+    backendConnected: backend.connection === 'connected'
   })
   const visualPipeline = useVisualPipeline({
     sessionStatus: session.status,
@@ -60,15 +77,44 @@ export function App(): React.JSX.Element {
     videoRef: media.videoRef,
     cameraVideoRef: media.cameraVideoRef
   })
-  const elapsedSeconds = useElapsedTime(session.status)
+  const elapsedSeconds = useElapsedTime(
+    session.status,
+    backend.status?.session.startedAtMs ?? null
+  )
   const overlay = useOverlaySettings()
-  const modelConfig = useModelConfig()
+  const modelConfig = useModelConfig({
+    backendConnection: backend.connection,
+    onBackendStatus: backend.applyStatus
+  })
 
   useEffect(() => {
-    sessionStartedRef.current = () => barrage.emitBarrage('直播开始了，先热个场。')
+    sessionStartedRef.current = () =>
+      barrage.emitBarrage('直播开始了，先热个场。', 'scroll', true)
   }, [barrage.emitBarrage])
 
+  useEffect(() => {
+    const status = backend.status
+    if (status?.connection !== 'connected') return
+    dispatchSession({
+      type: 'sync',
+      status: status.session.state,
+      error: status.session.state === 'error' ? '后端 Session 进入错误状态。' : null
+    })
+  }, [backend.status, dispatchSession])
+
+  const backendReady =
+    backend.connection === 'connected' && (backend.status?.providersConfigured ?? false)
   const statusItems: AppShellStatusItem[] = [
+    {
+      id: 'backend',
+      label: `后端 · ${backendConnectionLabels[backend.connection]}`,
+      tone:
+        backend.connection === 'connected'
+          ? 'online'
+          : backend.connection === 'failed'
+            ? 'failed'
+            : 'warning'
+    },
     {
       id: 'screen',
       label: `屏幕 ${media.captureStatus}${
@@ -116,6 +162,23 @@ export function App(): React.JSX.Element {
         elapsedSeconds={elapsedSeconds}
         barrageTotal={barrage.barrageTotal}
         statusItems={statusItems}
+        notice={
+          backend.notice
+            ? {
+                ...backend.notice,
+                tone: backend.connection === 'failed' ? 'failed' : 'info',
+                action:
+                  backend.connection === 'failed'
+                    ? {
+                        label: '重试',
+                        busyLabel: '正在重试',
+                        busy: backend.retrying,
+                        onClick: () => void backend.retry()
+                      }
+                    : undefined
+              }
+            : null
+        }
       >
         {activeView === 'live' && (
           <LiveView
@@ -138,6 +201,7 @@ export function App(): React.JSX.Element {
               barrageTotal: barrage.barrageTotal,
               microphoneLevel: media.microphoneLevel,
               message: activityFeed.message,
+              messageSending: barrage.messageSending,
               pipPreviewStyle: media.pipPreviewStyle,
               videoRef: media.videoRef,
               cameraVideoRef: media.cameraVideoRef,
@@ -149,7 +213,7 @@ export function App(): React.JSX.Element {
               onClearBarrage: barrage.clearBarrage,
               onToggleOverlay: media.toggleOverlay,
               onMessageChange: activityFeed.setMessage,
-              onSendUserMessage: barrage.sendUserMessage
+              onSendUserMessage: () => void barrage.sendUserMessage()
             }}
             chat={{
               activity: activityFeed.activity,
@@ -161,6 +225,12 @@ export function App(): React.JSX.Element {
               captureStatus: media.captureStatus,
               cameraStatus: media.cameraStatus,
               microphoneLevel: media.microphoneLevel,
+              asrReady: backendReady,
+              asrStatus: backendReady
+                ? '已就绪'
+                : backend.connection === 'connected'
+                  ? '等待配置'
+                  : '等待后端',
               visualSettings: media.visualSettings,
               lastFrameBytes: visualPipeline.lastFrameBytes,
               lastFrameOverTarget: visualPipeline.lastFrameOverTarget,
@@ -205,6 +275,11 @@ export function App(): React.JSX.Element {
             modelBaseUrl={modelConfig.baseUrl}
             modelName={modelConfig.model}
             apiKey={modelConfig.apiKey}
+            asrApiKey={modelConfig.asrApiKey}
+            modelConfigStatus={modelConfig.status}
+            modelConfigLoading={modelConfig.loading}
+            modelConfigSaving={modelConfig.saving}
+            canSaveModelConfig={modelConfig.canSave}
             configNotice={modelConfig.notice}
             overlaySettings={overlay.settings}
             overlayTargets={overlay.targets}
@@ -212,6 +287,7 @@ export function App(): React.JSX.Element {
             onModelBaseUrlChange={modelConfig.setBaseUrl}
             onModelNameChange={modelConfig.setModel}
             onApiKeyChange={modelConfig.setApiKey}
+            onAsrApiKeyChange={modelConfig.setAsrApiKey}
             onSaveModelConfig={() => void modelConfig.save()}
             onOverlaySettingsChange={overlay.updateSettings}
             onPreviewBarrage={(mode) => void barrage.previewBarrage(mode)}

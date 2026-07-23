@@ -22,7 +22,8 @@ export const DEFAULT_OVERLAY_SETTINGS: OverlaySettings = {
   clickThrough: true
 }
 
-export type VisibleBarrage = BarrageEvent & {
+export type VisibleBarrage = Omit<BarrageEvent, 'mode'> & {
+  mode: BarrageMode
   instanceId: number
   shownAt: number
   lane: number

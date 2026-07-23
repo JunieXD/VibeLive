@@ -15,7 +15,11 @@ export function useMediaController({
   sessionStatus,
   dispatchSession,
   onSystemActivity,
-  onSessionStarted
+  onSessionStarted,
+  backendConnected = true,
+  providersConfigured = true,
+  backendSessionId,
+  onBackendSessionSnapshot
 }: UseMediaControllerOptions): MediaController {
   const [sourcePickerOpen, setSourcePickerOpen] = useState(false)
   const sessionStatusRef = useRef<SessionStatus>(sessionStatus)
@@ -38,13 +42,17 @@ export function useMediaController({
     devices,
     fatalMediaRef,
     onSystemActivity,
-    onSessionStarted
+    onSessionStarted,
+    backendSessionId,
+    onBackendSessionSnapshot
   })
 
   const isSessionActive = ['starting', 'running', 'paused', 'stopping'].includes(sessionStatus)
   const requirements = requiredVisualSources(devices.visualSettings.mode)
   const canStart =
     sessionStatus === 'idle' &&
+    backendConnected &&
+    providersConfigured &&
     devices.selectedMicrophoneId !== '' &&
     (!requirements.screen || devices.selectedSource !== null) &&
     (!requirements.camera || devices.cameraEnabled)

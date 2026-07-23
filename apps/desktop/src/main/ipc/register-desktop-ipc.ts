@@ -7,7 +7,7 @@ import {
   session,
   systemPreferences
 } from "electron";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
@@ -17,15 +17,19 @@ import {
   type Persona
 } from "../../shared/audience";
 import type {
+  BackendRuntimeStatus,
   BarrageEvent,
   DesktopSource,
   MediaAccessSnapshot,
   MediaAccessStatus,
   ModelConfig,
+  ModelConfigStatus,
   OverlaySettings,
   SaveAudienceWorkspaceResult,
   SaveModelConfigResult
 } from "../../shared/contracts";
+import { BackendClient, BackendClientError } from "../backend/backend-client";
+import { resolveModelConfig } from "../model-config";
 import {
   getOverlaySettings,
   listOverlayTargets,
@@ -72,18 +76,41 @@ async function listDesktopSources(controlWindow: BrowserWindow | null): Promise<
     }));
 }
 
-async function saveModelConfig(config: ModelConfig): Promise<SaveModelConfigResult> {
+async function saveModelConfig(
+  config: ModelConfig,
+  backendClient: BackendClient
+): Promise<SaveModelConfigResult> {
+  const normalized = resolveModelConfig(config, await loadStoredModelConfig());
+
+  let backendConfigured = false;
+  let restartRequired = false;
+  try {
+    await backendClient.configureProviders(normalized);
+    backendConfigured = true;
+  } catch (error) {
+    if (error instanceof BackendClientError && error.code === "providers_already_configured") {
+      restartRequired = true;
+    } else {
+      throw error;
+    }
+  }
+
   const configDirectory = app.getPath("userData");
   await mkdir(configDirectory, { recursive: true });
 
   const storedConfig: Record<string, string> = {
-    baseUrl: config.baseUrl.trim(),
-    model: config.model.trim()
+    baseUrl: normalized.baseUrl,
+    model: normalized.model
   };
 
   let securelyStored = false;
-  if (config.apiKey && safeStorage.isEncryptionAvailable()) {
-    storedConfig.encryptedApiKey = safeStorage.encryptString(config.apiKey).toString("base64");
+  if (safeStorage.isEncryptionAvailable()) {
+    storedConfig.encryptedModelApiKey = safeStorage
+      .encryptString(normalized.apiKey)
+      .toString("base64");
+    storedConfig.encryptedAsrApiKey = safeStorage
+      .encryptString(normalized.asrApiKey)
+      .toString("base64");
     securelyStored = true;
   }
 
@@ -92,7 +119,69 @@ async function saveModelConfig(config: ModelConfig): Promise<SaveModelConfigResu
     JSON.stringify(storedConfig, null, 2),
     "utf8"
   );
-  return { ok: true, securelyStored };
+  return { ok: true, securelyStored, backendConfigured, restartRequired };
+}
+
+async function loadStoredModelConfig(): Promise<ModelConfig | null> {
+  let raw: string;
+  try {
+    raw = await readFile(join(app.getPath("userData"), "model-config.json"), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  if (!safeStorage.isEncryptionAvailable()) return null;
+
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const encryptedModelApiKey =
+    typeof parsed.encryptedModelApiKey === "string"
+      ? parsed.encryptedModelApiKey
+      : typeof parsed.encryptedApiKey === "string"
+        ? parsed.encryptedApiKey
+        : null;
+  if (
+    typeof parsed.baseUrl !== "string" ||
+    typeof parsed.model !== "string" ||
+    encryptedModelApiKey === null ||
+    typeof parsed.encryptedAsrApiKey !== "string"
+  ) {
+    return null;
+  }
+  try {
+    return {
+      baseUrl: parsed.baseUrl,
+      model: parsed.model,
+      apiKey: safeStorage.decryptString(Buffer.from(encryptedModelApiKey, "base64")),
+      asrApiKey: safeStorage.decryptString(Buffer.from(parsed.encryptedAsrApiKey, "base64"))
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
+  const config = await loadStoredModelConfig();
+  if (!config) {
+    return {
+      baseUrl: null,
+      model: null,
+      modelApiKeyStored: false,
+      asrApiKeyStored: false
+    };
+  }
+  return {
+    baseUrl: config.baseUrl,
+    model: config.model,
+    modelApiKeyStored: true,
+    asrApiKeyStored: true
+  };
+}
+
+export async function configureSavedModelConfig(backendClient: BackendClient): Promise<boolean> {
+  const config = await loadStoredModelConfig();
+  if (!config) return false;
+  await backendClient.configureProviders(config);
+  return true;
 }
 
 function hasCameraCaptureAuthorization(webContentsId: number): boolean {
@@ -455,13 +544,28 @@ export function broadcastOverlaySettings(
 
 export function registerDesktopIpc(
   getControlWindow: () => BrowserWindow | null,
-  confirmControlWindowClose: () => void
+  confirmControlWindowClose: () => void,
+  backendClient: BackendClient,
+  restartBackend: () => Promise<BackendRuntimeStatus>
 ): void {
   const assertControlSender = (event: Electron.IpcMainInvokeEvent): void => {
     if (event.sender.id !== getControlWindow()?.webContents.id) {
       throw new Error("This API is only available to the control window.");
     }
   };
+
+  backendClient.onStatus((status) => {
+    const controlWindow = getControlWindow();
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("backend:status", status);
+    }
+  });
+  backendClient.onBarrage((event) => {
+    const controlWindow = getControlWindow();
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("backend:barrage", event);
+    }
+  });
 
   ipcMain.handle("desktop:list-sources", () => listDesktopSources(getControlWindow()));
   ipcMain.handle("desktop:select-source", async (event, sourceId: string) => {
@@ -507,7 +611,65 @@ export function registerDesktopIpc(
   ipcMain.handle("overlay:hide", hideOverlay);
   ipcMain.handle("overlay:clear", clearOverlay);
   ipcMain.handle("overlay:push", (_event, event: BarrageEvent) => pushBarrage(event));
-  ipcMain.handle("config:save-model", (_event, config: ModelConfig) => saveModelConfig(config));
+  ipcMain.handle("config:save-model", (event, config: ModelConfig) => {
+    assertControlSender(event);
+    return saveModelConfig(config, backendClient);
+  });
+  ipcMain.handle("config:get-model-status", (event) => {
+    assertControlSender(event);
+    return getStoredModelConfigStatus();
+  });
+  ipcMain.handle("backend:get-status", (event) => {
+    assertControlSender(event);
+    return backendClient.status();
+  });
+  ipcMain.handle("backend:restart", (event) => {
+    assertControlSender(event);
+    return restartBackend();
+  });
+  ipcMain.handle("backend:session-start", (event) => {
+    assertControlSender(event);
+    return backendClient.startSession();
+  });
+  ipcMain.handle("backend:session-pause", (event) => {
+    assertControlSender(event);
+    return backendClient.pauseSession();
+  });
+  ipcMain.handle("backend:session-resume", (event) => {
+    assertControlSender(event);
+    return backendClient.resumeSession();
+  });
+  ipcMain.handle("backend:session-stop", (event) => {
+    assertControlSender(event);
+    return backendClient.stopSession();
+  });
+  ipcMain.handle("backend:submit-text", (event, text: string) => {
+    assertControlSender(event);
+    if (typeof text !== "string" || !text.trim() || text.length > 4_000) {
+      throw new Error("文字输入无效。");
+    }
+    return backendClient.submitText(`text-${randomUUID()}`, Date.now(), text.trim());
+  });
+  ipcMain.handle(
+    "backend:submit-audio",
+    (
+      event,
+      input: { inputId: string; capturedAtMs: number; body: Uint8Array }
+    ) => {
+      assertControlSender(event);
+      return backendClient.submitAudioSegment(input);
+    }
+  );
+  ipcMain.handle(
+    "backend:submit-frame",
+    (
+      event,
+      input: { inputId: string; capturedAtMs: number; mimeType: string; body: Uint8Array }
+    ) => {
+      assertControlSender(event);
+      return backendClient.submitFrame(input);
+    }
+  );
   ipcMain.handle("audience:load-workspace", (event) => {
     assertControlSender(event);
     return loadAudienceWorkspace();

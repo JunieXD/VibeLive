@@ -6,6 +6,7 @@ import {
   type Dispatch,
   type MutableRefObject
 } from 'react'
+import type { BackendSessionSnapshot } from '../../../shared/contracts'
 import type { SessionAction, SessionStatus } from '../../../shared/session'
 import { describeMediaError } from '../media'
 import { requiredVisualSources } from '../visual'
@@ -22,6 +23,12 @@ type UseSessionMediaControlsOptions = {
   fatalMediaRef: MutableRefObject<(kind: FatalMediaKind, error: string) => void>
   onSystemActivity: (text: string) => void
   onSessionStarted: () => void
+  backendSessionId?: string | null
+  onBackendSessionSnapshot?: (snapshot: BackendSessionSnapshot) => void
+}
+
+function describeBackendError(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
 }
 
 export function useSessionMediaControls({
@@ -31,15 +38,27 @@ export function useSessionMediaControls({
   devices,
   fatalMediaRef,
   onSystemActivity,
-  onSessionStarted
+  onSessionStarted,
+  backendSessionId,
+  onBackendSessionSnapshot
 }: UseSessionMediaControlsOptions) {
   const [overlayVisible, setOverlayVisible] = useState(true)
   const devicesRef = useRef(devices)
   const onSystemActivityRef = useRef(onSystemActivity)
   const onSessionStartedRef = useRef(onSessionStarted)
+  const backendSessionIdRef = useRef(backendSessionId)
+  const onBackendSessionSnapshotRef = useRef(onBackendSessionSnapshot)
   devicesRef.current = devices
   onSystemActivityRef.current = onSystemActivity
   onSessionStartedRef.current = onSessionStarted
+  backendSessionIdRef.current = backendSessionId
+  onBackendSessionSnapshotRef.current = onBackendSessionSnapshot
+
+  const syncBackendSession = useCallback((snapshot: BackendSessionSnapshot): void => {
+    sessionStatusRef.current = snapshot.state
+    dispatchSession({ type: 'sync', status: snapshot.state })
+    onBackendSessionSnapshotRef.current?.(snapshot)
+  }, [dispatchSession, sessionStatusRef])
 
   const releaseOverlay = useCallback(async (): Promise<string | null> => {
     const [clearResult, hideResult] = await Promise.allSettled([
@@ -65,6 +84,7 @@ export function useSessionMediaControls({
     let displayStream: MediaStream | null = devices.captureStreamRef.current
     let cameraStream: MediaStream | null = devices.cameraStreamRef.current
     let microphoneStream: MediaStream | null = devices.microphoneStreamRef.current
+    let backendSessionStarted = false
     sessionStatusRef.current = 'starting'
     dispatchSession({ type: 'start' })
     try {
@@ -104,21 +124,34 @@ export function useSessionMediaControls({
       }
       if (!devices.operation.isCurrent(operationId)) return
 
+      const backendSession = await window.advx.startBackendSession()
+      backendSessionStarted = backendSession.sessionId !== null
+      if (!devices.operation.isCurrent(operationId)) {
+        if (backendSessionStarted) {
+          await window.advx.stopBackendSession().catch(() => undefined)
+        }
+        return
+      }
       await window.advx.showOverlay()
       if (!devices.operation.isCurrent(operationId)) {
         await window.advx.hideOverlay()
+        if (backendSessionStarted) {
+          await window.advx.stopBackendSession().catch(() => undefined)
+        }
         return
       }
       setOverlayVisible(true)
-      sessionStatusRef.current = 'running'
-      dispatchSession({ type: 'started' })
-      onSessionStartedRef.current()
+      syncBackendSession(backendSession)
+      if (backendSession.state === 'running') onSessionStartedRef.current()
     } catch (error) {
       if (!devices.operation.isCurrent(operationId)) return
       if (devices.captureStreamRef.current === displayStream) devices.stopCapture()
       if (devices.cameraStreamRef.current === cameraStream) devices.stopCamera()
       if (devices.microphoneStreamRef.current === microphoneStream) {
         await devices.stopMicrophone()
+      }
+      if (backendSessionStarted) {
+        await window.advx.stopBackendSession().catch(() => undefined)
       }
       const overlayError = await releaseOverlay()
       if (!devices.operation.isCurrent(operationId)) return
@@ -139,7 +172,7 @@ export function useSessionMediaControls({
       }
       devices.operation.finish(operationId)
     }
-  }, [dispatchSession, releaseOverlay, sessionStatusRef])
+  }, [dispatchSession, releaseOverlay, sessionStatusRef, syncBackendSession])
 
   const stopSession = useCallback(async (): Promise<void> => {
     const devices = devicesRef.current
@@ -150,18 +183,29 @@ export function useSessionMediaControls({
     devices.stopCapture()
     devices.stopCamera()
     await devices.stopMicrophone()
+    let stopError: string | null = null
+    try {
+      if (backendSessionIdRef.current !== null) {
+        const backendSession = await window.advx.stopBackendSession()
+        syncBackendSession(backendSession)
+      }
+    } catch (error) {
+      stopError = `后端 Session 未能确认停止：${describeBackendError(error, '连接异常。')}`
+    }
     try {
       const overlayError = await releaseOverlay()
       if (!devices.operation.isCurrent(operationId)) return
-      if (overlayError) onSystemActivityRef.current(overlayError)
+      const notice = [stopError, overlayError].filter(Boolean).join(' ')
+      if (notice) onSystemActivityRef.current(notice)
     } finally {
       if (devices.operation.isCurrent(operationId)) {
-        sessionStatusRef.current = 'idle'
-        dispatchSession({ type: 'stopped' })
+        sessionStatusRef.current = stopError ? 'error' : 'idle'
+        if (stopError) dispatchSession({ type: 'fail', error: stopError })
+        else dispatchSession({ type: 'stopped' })
       }
       devices.operation.finish(operationId)
     }
-  }, [dispatchSession, releaseOverlay, sessionStatusRef])
+  }, [dispatchSession, releaseOverlay, sessionStatusRef, syncBackendSession])
 
   useEffect(() => window.advx.onEmergencyStop(() => void stopSession()), [stopSession])
 
@@ -186,6 +230,14 @@ export function useSessionMediaControls({
       devices.stopCamera()
       try {
         await devices.stopMicrophone()
+        const backendSession = await window.advx.pauseBackendSession()
+        syncBackendSession(backendSession)
+      } catch (error) {
+        sessionStatusRef.current = 'error'
+        dispatchSession({
+          type: 'fail',
+          error: `暂停后端 Session 失败：${describeBackendError(error, '连接异常。')}`
+        })
       } finally {
         devices.operation.finish(operationId)
       }
@@ -217,8 +269,9 @@ export function useSessionMediaControls({
           devices.selectedMicrophoneId || undefined
         )
         if (!devices.operation.isCurrent(operationId)) return
-        sessionStatusRef.current = 'running'
-        dispatchSession({ type: 'resume' })
+        const backendSession = await window.advx.resumeBackendSession()
+        if (!devices.operation.isCurrent(operationId)) return
+        syncBackendSession(backendSession)
       } catch (error) {
         if (!devices.operation.isCurrent(operationId)) return
         if (devices.captureStreamRef.current === displayStream) devices.stopCapture()
@@ -231,7 +284,11 @@ export function useSessionMediaControls({
         sessionStatusRef.current = 'error'
         dispatchSession({
           type: 'fail',
-          error: `恢复采集失败：${describeMediaError(error, failureKind)}${
+          error: `恢复采集或后端 Session 失败：${
+            error instanceof DOMException
+              ? describeMediaError(error, failureKind)
+              : describeBackendError(error, '连接异常。')
+          }${
             overlayError ? ` ${overlayError}` : ''
           }`
         })
@@ -248,7 +305,7 @@ export function useSessionMediaControls({
       return
     }
     devices.operation.finish(operationId)
-  }, [dispatchSession, releaseOverlay, sessionStatus, sessionStatusRef])
+  }, [dispatchSession, releaseOverlay, sessionStatus, sessionStatusRef, syncBackendSession])
 
   const showOverlay = useCallback(async (): Promise<void> => {
     await window.advx.showOverlay()

@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ControlApi, ModelConfig, OverlaySettings } from "../shared/contracts";
+import type {
+  BackendBarrageEvent,
+  BackendRuntimeStatus,
+  ControlApi,
+  ModelConfig,
+  OverlaySettings
+} from "../shared/contracts";
 
 const api: ControlApi = {
   listDesktopSources: () => ipcRenderer.invoke("desktop:list-sources"),
@@ -18,6 +24,16 @@ const api: ControlApi = {
   clearOverlay: () => ipcRenderer.invoke("overlay:clear"),
   pushBarrage: (event) => ipcRenderer.invoke("overlay:push", event),
   saveModelConfig: (config: ModelConfig) => ipcRenderer.invoke("config:save-model", config),
+  getModelConfigStatus: () => ipcRenderer.invoke("config:get-model-status"),
+  getBackendStatus: () => ipcRenderer.invoke("backend:get-status"),
+  restartBackend: () => ipcRenderer.invoke("backend:restart"),
+  startBackendSession: () => ipcRenderer.invoke("backend:session-start"),
+  pauseBackendSession: () => ipcRenderer.invoke("backend:session-pause"),
+  resumeBackendSession: () => ipcRenderer.invoke("backend:session-resume"),
+  stopBackendSession: () => ipcRenderer.invoke("backend:session-stop"),
+  submitUserText: (text) => ipcRenderer.invoke("backend:submit-text", text),
+  submitAudioSegment: (input) => ipcRenderer.invoke("backend:submit-audio", input),
+  submitVisualFrame: (input) => ipcRenderer.invoke("backend:submit-frame", input),
   loadAudienceWorkspace: () => ipcRenderer.invoke("audience:load-workspace"),
   saveAudienceWorkspace: (workspace) =>
     ipcRenderer.invoke("audience:save-workspace", workspace),
@@ -37,6 +53,18 @@ const api: ControlApi = {
       listener(settings);
     ipcRenderer.on("overlay:settings-changed", handler);
     return () => ipcRenderer.removeListener("overlay:settings-changed", handler);
+  },
+  onBackendStatus: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: BackendRuntimeStatus): void =>
+      listener(status);
+    ipcRenderer.on("backend:status", handler);
+    return () => ipcRenderer.removeListener("backend:status", handler);
+  },
+  onBackendBarrage: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: BackendBarrageEvent): void =>
+      listener(event);
+    ipcRenderer.on("backend:barrage", handler);
+    return () => ipcRenderer.removeListener("backend:barrage", handler);
   }
 };
 

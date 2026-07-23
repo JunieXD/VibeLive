@@ -43,6 +43,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     barrageTotal,
     microphoneLevel,
     message,
+    messageSending,
     pipPreviewStyle,
     videoRef,
     cameraVideoRef,
@@ -372,13 +373,13 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           placeholder={
             session.status === 'running' ? '说点什么，AI 观众会回应你' : '开始直播后可发送'
           }
-          disabled={session.status !== 'running'}
+          disabled={session.status !== 'running' || messageSending}
         />
         <button
           className="icon-button accent"
           type="button"
           title="发送"
-          disabled={session.status !== 'running' || message.trim() === ''}
+          disabled={session.status !== 'running' || messageSending || message.trim() === ''}
           onClick={onSendUserMessage}
         >
           <Send size={16} />

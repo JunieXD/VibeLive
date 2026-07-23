@@ -29,6 +29,8 @@ pnpm contracts
 pnpm dev
 ```
 
+`pnpm dev` 会用同一份临时本地令牌启动 FastAPI 和 Electron。首次联调需要在桌面端“设置”中填写 OpenAI-compatible 模型地址、模型名称、模型 API Key 和 StepFun ASR API Key，然后选择画面与麦克风并开始直播。完整步骤见[真实管线联调](./docs/REAL_PIPELINE.md)。
+
 常用命令：
 
 ```bash
@@ -44,4 +46,5 @@ pnpm build
 - [产品说明](./docs/PRODUCT.md)
 - [系统架构](./docs/ARCHITECTURE.md)
 - [后端详细设计](./docs/BACKEND_DESIGN.md)
+- [真实管线联调](./docs/REAL_PIPELINE.md)
 - [决策与开放问题](./docs/DECISIONS.md)
