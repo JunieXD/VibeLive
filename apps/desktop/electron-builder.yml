@@ -1,0 +1,15 @@
+appId: com.advx.live
+productName: ADVX Live
+directories:
+  output: release
+files:
+  - out/**
+extraResources:
+  - from: ../backend/dist
+    to: backend
+    filter:
+      - "**/*"
+mac:
+  target: dmg
+win:
+  target: nsis

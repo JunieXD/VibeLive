@@ -1,0 +1,18 @@
+{
+  "name": "advx-live",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:desktop": "pnpm --filter @advx/desktop dev",
+    "dev:backend": "uv run --project apps/backend uvicorn advx_backend.main:app --app-dir apps/backend/src --reload --port 8765",
+    "build": "pnpm --filter @advx/desktop build",
+    "typecheck": "pnpm --filter @advx/contracts typecheck && pnpm --filter @advx/desktop typecheck",
+    "test": "pnpm --filter @advx/desktop test && uv run --project apps/backend pytest apps/backend/tests",
+    "contracts": "uv run --project apps/backend python apps/backend/scripts/export_openapi.py && pnpm exec openapi-typescript apps/backend/openapi.json -o packages/contracts/src/generated/openapi.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.10.1"
+  }
+}

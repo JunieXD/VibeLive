@@ -1,0 +1,39 @@
+# Node / Electron
+node_modules/
+.pnpm-store/
+dist/
+out/
+release/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Generated contracts
+apps/backend/openapi.json
+
+# Local runtime data and downloaded models
+.advx-data/
+resources/models/files/
+*.bin
+*.gguf
+*.onnx
+*.safetensors
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Logs and environment overrides
+*.log
+.env
+.env.*
+!.env.example

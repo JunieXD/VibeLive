@@ -1,0 +1,13 @@
+from typing import Protocol
+
+from advx_backend.contracts.audience import AudienceMember, AudienceMemory
+
+
+class AudienceRepository(Protocol):
+    async def list_enabled(self) -> list[AudienceMember]: ...
+
+    async def memories_for(self, audience_id: str) -> list[AudienceMemory]: ...
+
+    async def save_memory(self, memory: AudienceMemory) -> None: ...
+
+    async def delete_memory(self, memory_id: str) -> None: ...
