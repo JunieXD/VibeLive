@@ -10,7 +10,7 @@ export function createControlWindow(): BrowserWindow {
     minHeight: 720,
     show: false,
     title: "ADVX Live",
-    backgroundColor: "#f4f5f2",
+    backgroundColor: "#0e0f12",
     webPreferences: {
       preload: join(__dirname, "../preload/control.js"),
       contextIsolation: true,

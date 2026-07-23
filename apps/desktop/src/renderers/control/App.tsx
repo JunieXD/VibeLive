@@ -2,6 +2,7 @@ import {
   Activity,
   AudioLines,
   CircleStop,
+  Clock,
   Eye,
   EyeOff,
   Gauge,
@@ -39,12 +40,19 @@ type ActivityItem = {
 }
 
 const statusLabels: Record<SessionStatus, string> = {
-  idle: '待机',
-  starting: '启动中',
+  idle: '未开播',
+  starting: '连接中',
   running: '直播中',
   paused: '已暂停',
   stopping: '停止中',
   error: '需要处理'
+}
+
+function formatElapsed(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':')
 }
 
 function SourcePicker({
@@ -170,6 +178,8 @@ export function App(): React.JSX.Element {
   const [configNotice, setConfigNotice] = useState<string | null>(null)
   const [barrageOpacity, setBarrageOpacity] = useState(86)
   const [barrageSpeed, setBarrageSpeed] = useState(58)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [barrageTotal, setBarrageTotal] = useState(0)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const captureStreamRef = useRef<MediaStream | null>(null)
@@ -178,11 +188,14 @@ export function App(): React.JSX.Element {
   const meterFrameRef = useRef<number | null>(null)
   const barrageSequenceRef = useRef(0)
   const sessionStatusRef = useRef(session.status)
+  const startedAtRef = useRef<number | null>(null)
+  const chatListRef = useRef<HTMLDivElement>(null)
 
   const activeAudience = useMemo(() => audience.filter((member) => member.active), [audience])
   const isSessionActive = ['starting', 'running', 'paused', 'stopping'].includes(session.status)
   const canStart =
     session.status === 'idle' && selectedSource !== null && selectedMicrophoneId !== ''
+  const goLiveBusy = session.status === 'starting' || session.status === 'stopping'
 
   useEffect(() => {
     sessionStatusRef.current = session.status
@@ -194,6 +207,29 @@ export function App(): React.JSX.Element {
       videoRef.current.srcObject = captureStream
     }
   }, [captureStream])
+
+  useEffect(() => {
+    if (session.status === 'running' || session.status === 'paused') {
+      if (startedAtRef.current === null) {
+        startedAtRef.current = Date.now() - elapsedSeconds * 1000
+      }
+      const timer = window.setInterval(() => {
+        setElapsedSeconds(Math.floor((Date.now() - (startedAtRef.current ?? Date.now())) / 1000))
+      }, 1000)
+      return () => window.clearInterval(timer)
+    }
+    if (session.status === 'idle') {
+      startedAtRef.current = null
+      setElapsedSeconds(0)
+    }
+  }, [session.status, elapsedSeconds])
+
+  useEffect(() => {
+    const list = chatListRef.current
+    if (list) {
+      list.scrollTop = list.scrollHeight
+    }
+  }, [activity])
 
   const stopCapture = useCallback(() => {
     setCaptureStream((current) => {
@@ -345,13 +381,14 @@ export function App(): React.JSX.Element {
         createdAt: Date.now()
       }
       barrageSequenceRef.current += 1
+      setBarrageTotal((current) => current + 1)
 
       setActivity((current) => [
-        ...current.slice(-30),
+        ...current.slice(-40),
         {
           id: event.barrageId,
           source: 'audience',
-          author: `${member.name} · AI`,
+          author: member.name,
           text: event.text,
           color: member.color
         }
@@ -400,6 +437,14 @@ export function App(): React.JSX.Element {
 
   useEffect(() => window.advx.onEmergencyStop(() => void stopSession()), [stopSession])
 
+  const toggleGoLive = (): void => {
+    if (isSessionActive || session.status === 'error') {
+      void stopSession()
+    } else {
+      void startSession()
+    }
+  }
+
   const togglePause = (): void => {
     if (session.status === 'running') {
       dispatch({ type: 'pause' })
@@ -427,7 +472,7 @@ export function App(): React.JSX.Element {
     const trimmed = message.trim()
     if (!trimmed) return
     setActivity((current) => [
-      ...current.slice(-30),
+      ...current.slice(-40),
       {
         id: crypto.randomUUID(),
         source: 'user',
@@ -503,348 +548,420 @@ export function App(): React.JSX.Element {
 
         <div className="sidebar-status">
           <div className="status-heading">
-            <span>系统状态</span>
+            <span>房间信息</span>
             <Activity size={15} />
           </div>
           <div className="compact-status">
-            <span className={`status-dot ${captureStream ? 'online' : ''}`} />
-            画面采集
-            <strong>{captureStream ? '正常' : '待配置'}</strong>
+            <span>房间号</span>
+            <strong>AX-1024</strong>
           </div>
           <div className="compact-status">
-            <span className={`status-dot ${microphoneReady ? 'online' : ''}`} />
-            麦克风
-            <strong>{microphoneReady ? '正常' : '待配置'}</strong>
+            <span>分区</span>
+            <strong>虚拟主播</strong>
           </div>
           <div className="compact-status">
-            <span className="status-dot demo" />
-            AI 核心
-            <strong>演示</strong>
+            <span>在线观众</span>
+            <strong>{activeAudience.length} 人</strong>
           </div>
-          <span className="shortcut-hint">紧急停止 Ctrl/⌘ + Shift + X</span>
         </div>
       </aside>
 
-      <main className="workspace">
-        <header className="workspace-header">
-          <div>
-            <p className="eyebrow">本地会话</p>
-            <h1>
+      <div className="main-column">
+        <header className="topbar">
+          <div className="topbar-leading">
+            <span className={`live-badge ${session.status}`}>
+              <span className="live-badge-dot" />
+              {statusLabels[session.status]}
+            </span>
+            <h1 className="topbar-title">
               {activeView === 'live' && '直播控制台'}
               {activeView === 'audience' && 'AI 观众'}
               {activeView === 'settings' && '设置'}
             </h1>
           </div>
-          <div className={`session-badge ${session.status}`}>
-            <span />
-            {statusLabels[session.status]}
+          <div className="topbar-stats">
+            <span className="stat-chip" title="直播时长">
+              <Clock size={14} />
+              {formatElapsed(elapsedSeconds)}
+            </span>
+            <span className="stat-chip" title="累计弹幕">
+              <MessageSquareText size={14} />
+              {barrageTotal}
+            </span>
+            <span className="stat-chip" title="在线观众">
+              <Users size={14} />
+              {activeAudience.length}
+            </span>
           </div>
         </header>
 
-        {activeView === 'live' && (
-          <>
-            <section className="command-bar" aria-label="会话控制">
-              <button
-                className="primary-button"
-                type="button"
-                disabled={!canStart}
-                onClick={() => void startSession()}
-              >
-                <Play size={17} fill="currentColor" />
-                开始
-              </button>
-              <button
-                className="command-button"
-                type="button"
-                disabled={session.status !== 'running' && session.status !== 'paused'}
-                onClick={togglePause}
-              >
-                {session.status === 'paused' ? <Play size={17} /> : <Pause size={17} />}
-                {session.status === 'paused' ? '恢复' : '暂停'}
-              </button>
-              <button
-                className="command-button"
-                type="button"
-                disabled={!isSessionActive}
-                onClick={() => void clearBarrage()}
-              >
-                <Trash2 size={17} />
-                清屏
-              </button>
-              <button
-                className="command-button"
-                type="button"
-                disabled={!isSessionActive}
-                onClick={() => void toggleOverlay()}
-              >
-                {overlayVisible ? <EyeOff size={17} /> : <Eye size={17} />}
-                {overlayVisible ? '隐藏' : '显示'}
-              </button>
-              <span className="command-spacer" />
-              <button
-                className="danger-button"
-                type="button"
-                disabled={!isSessionActive && session.status !== 'error'}
-                onClick={() => void stopSession()}
-              >
-                <CircleStop size={17} />
-                停止
-              </button>
-            </section>
+        <main className="workspace">
+          {activeView === 'live' && (
+            <div className="live-view">
+              {session.error && <div className="error-banner">{session.error}</div>}
 
-            {session.error && <div className="error-banner">{session.error}</div>}
-
-            <div className="live-layout">
-              <section className="stage-panel">
-                <div className="panel-heading">
-                  <div>
-                    <span className="panel-title">画面预览</span>
-                    <span className="panel-subtitle">{selectedSource?.name ?? '尚未选择来源'}</span>
-                  </div>
-                  <button className="secondary-button" type="button" onClick={() => setSourcePickerOpen(true)}>
-                    <MonitorUp size={16} />
-                    {selectedSource ? '更换来源' : '选择来源'}
-                  </button>
-                </div>
-
-                <div className="video-stage">
-                  {captureStream ? (
-                    <video ref={videoRef} autoPlay muted playsInline />
-                  ) : selectedSource ? (
-                    <img src={selectedSource.thumbnailUrl} alt={`${selectedSource.name} 预览`} />
-                  ) : (
-                    <div className="stage-empty">
-                      <MonitorUp size={28} />
-                      <strong>等待画面来源</strong>
+              <div className="live-layout">
+                <section className="stage-panel">
+                  <div className="stage-toolbar">
+                    <div className="stage-source">
+                      <MonitorUp size={17} />
+                      <div>
+                        <span className="panel-title">画面预览</span>
+                        <span className="panel-subtitle">{selectedSource?.name ?? '尚未选择来源'}</span>
+                      </div>
                     </div>
-                  )}
-                  <div className="preview-label">PREVIEW</div>
-                  {session.status === 'paused' && <div className="paused-overlay">观察已暂停</div>}
-                </div>
+                    <button className="ghost-button" type="button" onClick={() => setSourcePickerOpen(true)}>
+                      <MonitorUp size={15} />
+                      {selectedSource ? '更换来源' : '选择来源'}
+                    </button>
+                  </div>
 
-                <div className="composer">
-                  <MessageSquareText size={18} />
-                  <input
-                    value={message}
-                    onChange={(event) => setMessage(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') sendUserMessage()
-                    }}
-                    placeholder={session.status === 'running' ? '发送一条文字弹幕' : '开始会话后可发送'}
-                    disabled={session.status !== 'running'}
-                  />
+                  <div className="video-stage">
+                    {captureStream ? (
+                      <video ref={videoRef} autoPlay muted playsInline />
+                    ) : selectedSource ? (
+                      <img src={selectedSource.thumbnailUrl} alt={`${selectedSource.name} 预览`} />
+                    ) : (
+                      <div className="stage-empty">
+                        <MonitorUp size={30} />
+                        <strong>等待画面来源</strong>
+                        <span>选择屏幕或窗口后开始预览</span>
+                      </div>
+                    )}
+                    <div className={`stage-badge ${session.status === 'running' ? 'rec' : ''}`}>
+                      {session.status === 'running' ? 'REC' : 'PREVIEW'}
+                    </div>
+                    {session.status === 'paused' && <div className="paused-overlay">观察已暂停</div>}
+                  </div>
+
+                  <div className="command-bar" aria-label="会话控制">
+                    <button
+                      className={`go-live-button ${isSessionActive || session.status === 'error' ? 'is-live' : ''}`}
+                      type="button"
+                      disabled={goLiveBusy || (!canStart && !isSessionActive && session.status !== 'error')}
+                      onClick={toggleGoLive}
+                    >
+                      {isSessionActive || session.status === 'error' ? (
+                        <CircleStop size={18} />
+                      ) : (
+                        <Play size={18} fill="currentColor" />
+                      )}
+                      {session.status === 'starting' && '启动中...'}
+                      {session.status === 'stopping' && '停止中...'}
+                      {(session.status === 'running' ||
+                        session.status === 'paused' ||
+                        session.status === 'error') &&
+                        '结束直播'}
+                      {session.status === 'idle' && '开始直播'}
+                    </button>
+                    <button
+                      className="command-button"
+                      type="button"
+                      disabled={session.status !== 'running' && session.status !== 'paused'}
+                      onClick={togglePause}
+                      title={session.status === 'paused' ? '恢复观察' : '暂停观察'}
+                    >
+                      {session.status === 'paused' ? <Play size={16} /> : <Pause size={16} />}
+                      {session.status === 'paused' ? '恢复' : '暂停'}
+                    </button>
+                    <button
+                      className="command-button"
+                      type="button"
+                      disabled={!isSessionActive}
+                      onClick={() => void clearBarrage()}
+                      title="清空弹幕"
+                    >
+                      <Trash2 size={16} />
+                      清屏
+                    </button>
+                    <button
+                      className="command-button"
+                      type="button"
+                      disabled={!isSessionActive}
+                      onClick={() => void toggleOverlay()}
+                      title={overlayVisible ? '隐藏弹幕覆盖层' : '显示弹幕覆盖层'}
+                    >
+                      {overlayVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {overlayVisible ? '隐藏' : '显示'}
+                    </button>
+                    <span className="command-spacer" />
+                    <div className="command-meter" aria-label={`麦克风音量 ${microphoneLevel}%`}>
+                      <Mic size={14} />
+                      <div className="mini-meter">
+                        <span style={{ width: `${microphoneLevel}%` }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="composer">
+                    <MessageSquareText size={17} />
+                    <input
+                      value={message}
+                      onChange={(event) => setMessage(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') sendUserMessage()
+                      }}
+                      placeholder={session.status === 'running' ? '说点什么，AI 观众会回应你' : '开始直播后可发送'}
+                      disabled={session.status !== 'running'}
+                    />
+                    <button
+                      className="icon-button accent"
+                      type="button"
+                      title="发送"
+                      disabled={session.status !== 'running' || message.trim() === ''}
+                      onClick={sendUserMessage}
+                    >
+                      <Send size={16} />
+                    </button>
+                  </div>
+                </section>
+
+                <aside className="right-rail">
+                  <section className="chat-panel">
+                    <div className="panel-heading compact">
+                      <span className="panel-title">房间互动</span>
+                      <span className="chat-count">{activity.length}</span>
+                    </div>
+                    <div className="chat-list" ref={chatListRef}>
+                      {activity.map((item) => (
+                        <article className={`chat-item ${item.source}`} key={item.id}>
+                          <span
+                            className="chat-avatar"
+                            style={item.color ? { backgroundColor: item.color } : undefined}
+                          >
+                            {item.author.charAt(0)}
+                          </span>
+                          <div className="chat-content">
+                            <span
+                              className="chat-author"
+                              style={item.color ? { color: item.color } : undefined}
+                            >
+                              {item.author}
+                              {item.source === 'audience' && <em className="chat-tag">AI</em>}
+                            </span>
+                            <p>{item.text}</p>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="mixer-panel">
+                    <div className="panel-heading compact">
+                      <span className="panel-title">混音与链路</span>
+                      <Gauge size={16} />
+                    </div>
+                    <div className="mixer-row">
+                      <span>
+                        <Radio size={14} />
+                        画面采集
+                      </span>
+                      <strong className={captureStream ? 'ok' : ''}>
+                        {captureStream ? '采集中' : '未连接'}
+                      </strong>
+                    </div>
+                    <div className="mixer-row">
+                      <span>
+                        <Mic size={14} />
+                        麦克风
+                      </span>
+                      <div className="mixer-meter" aria-label={`麦克风音量 ${microphoneLevel}%`}>
+                        <span style={{ width: `${microphoneLevel}%` }} />
+                      </div>
+                    </div>
+                    <div className="mixer-row">
+                      <span>
+                        <AudioLines size={14} />
+                        本地 ASR
+                      </span>
+                      <strong>等待后端</strong>
+                    </div>
+                    <div className="mixer-row">
+                      <span>
+                        <Sparkles size={14} />
+                        多模态模型
+                      </span>
+                      <strong>演示模式</strong>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+
+              <section className="device-strip">
+                <div className="device-control">
+                  <Mic size={16} />
+                  <div>
+                    <label htmlFor="microphone">麦克风</label>
+                    <select
+                      id="microphone"
+                      value={selectedMicrophoneId}
+                      onChange={(event) => setSelectedMicrophoneId(event.target.value)}
+                      disabled={isSessionActive}
+                    >
+                      {microphones.length === 0 && <option value="">未授权设备</option>}
+                      {microphones.map((device, index) => (
+                        <option key={device.deviceId} value={device.deviceId}>
+                          {device.label || `麦克风 ${index + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <button
-                    className="icon-button accent"
+                    className="ghost-button"
                     type="button"
-                    title="发送"
-                    disabled={session.status !== 'running' || message.trim() === ''}
-                    onClick={sendUserMessage}
+                    disabled={isSessionActive}
+                    onClick={() => void requestMicrophoneAccess()}
                   >
-                    <Send size={17} />
+                    <Volume2 size={15} />
+                    检测设备
                   </button>
+                </div>
+                <div className="privacy-note">
+                  <KeyRound size={14} />
+                  原始麦克风音频仅供本地处理
+                </div>
+              </section>
+            </div>
+          )}
+
+          {activeView === 'audience' && (
+            <section className="settings-surface">
+              <div className="section-intro">
+                <div>
+                  <p className="eyebrow">本场参与者</p>
+                  <h2>{activeAudience.length} 位 AI 观众已启用</h2>
+                </div>
+                <Users size={24} />
+              </div>
+              <div className="audience-list">
+                {audience.map((member) => (
+                  <article className="audience-row" key={member.id}>
+                    <div className="audience-avatar" style={{ backgroundColor: member.color }}>
+                      {member.initials}
+                    </div>
+                    <div className="audience-identity">
+                      <strong>{member.name}</strong>
+                      <span>AI · {member.role}</span>
+                    </div>
+                    <p>{member.memory}</p>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={member.active}
+                        onChange={() => toggleAudience(member.id)}
+                      />
+                      <span aria-hidden="true" />
+                      <em>{member.active ? '参与' : '安静'}</em>
+                    </label>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {activeView === 'settings' && (
+            <div className="settings-columns">
+              <section className="settings-surface">
+                <div className="section-intro">
+                  <div>
+                    <p className="eyebrow">模型连接</p>
+                    <h2>OpenAI-compatible</h2>
+                  </div>
+                  <Sparkles size={24} />
+                </div>
+                <div className="form-stack">
+                  <label>
+                    服务地址
+                    <input value={modelBaseUrl} onChange={(event) => setModelBaseUrl(event.target.value)} />
+                  </label>
+                  <label>
+                    模型名称
+                    <input
+                      value={modelName}
+                      onChange={(event) => setModelName(event.target.value)}
+                      placeholder="输入多模态模型名称"
+                    />
+                  </label>
+                  <label>
+                    API Key
+                    <input
+                      type="password"
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                      placeholder="仅由 Electron Main 安全保存"
+                    />
+                  </label>
+                  <div className="form-action">
+                    {configNotice && <span>{configNotice}</span>}
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={!modelBaseUrl.trim() || !modelName.trim()}
+                      onClick={() => void saveModelConfig()}
+                    >
+                      <KeyRound size={16} />
+                      保存连接
+                    </button>
+                  </div>
                 </div>
               </section>
 
-              <aside className="right-rail">
-                <section className="runtime-panel">
-                  <div className="panel-heading compact">
-                    <span className="panel-title">运行状态</span>
-                    <Gauge size={17} />
+              <section className="settings-surface">
+                <div className="section-intro">
+                  <div>
+                    <p className="eyebrow">弹幕显示</p>
+                    <h2>覆盖层偏好</h2>
                   </div>
-                  <div className="runtime-row">
-                    <span><Radio size={15} />画面</span>
-                    <strong className={captureStream ? 'positive' : ''}>
-                      {captureStream ? '采集中' : '未连接'}
-                    </strong>
-                  </div>
-                  <div className="runtime-row">
-                    <span><Mic size={15} />麦克风</span>
-                    <div className="level-meter" aria-label={`麦克风音量 ${microphoneLevel}%`}>
-                      <span style={{ width: `${microphoneLevel}%` }} />
-                    </div>
-                  </div>
-                  <div className="runtime-row">
-                    <span><AudioLines size={15} />本地 ASR</span>
-                    <strong>等待后端</strong>
-                  </div>
-                  <div className="runtime-row">
-                    <span><Sparkles size={15} />模型</span>
-                    <strong>演示模式</strong>
-                  </div>
-                </section>
-
-                <section className="activity-panel">
-                  <div className="panel-heading compact">
-                    <span className="panel-title">房间动态</span>
-                    <span className="activity-count">{activity.length}</span>
-                  </div>
-                  <div className="activity-list">
-                    {activity.slice(-12).map((item) => (
-                      <article className={`activity-item ${item.source}`} key={item.id}>
-                        <span className="activity-author" style={{ color: item.color }}>
-                          {item.author}
-                        </span>
-                        <p>{item.text}</p>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              </aside>
-            </div>
-
-            <section className="device-strip">
-              <div className="device-control">
-                <Mic size={17} />
-                <div>
-                  <label htmlFor="microphone">麦克风</label>
-                  <select
-                    id="microphone"
-                    value={selectedMicrophoneId}
-                    onChange={(event) => setSelectedMicrophoneId(event.target.value)}
-                    disabled={isSessionActive}
-                  >
-                    {microphones.length === 0 && <option value="">未授权设备</option>}
-                    {microphones.map((device, index) => (
-                      <option key={device.deviceId} value={device.deviceId}>
-                        {device.label || `麦克风 ${index + 1}`}
-                      </option>
-                    ))}
-                  </select>
+                  <SlidersHorizontal size={24} />
                 </div>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  disabled={isSessionActive}
-                  onClick={() => void requestMicrophoneAccess()}
-                >
-                  <Volume2 size={16} />
-                  检测设备
-                </button>
-              </div>
-              <div className="privacy-note">
-                <KeyRound size={16} />
-                原始麦克风音频仅供本地处理
-              </div>
-            </section>
-          </>
-        )}
-
-        {activeView === 'audience' && (
-          <section className="settings-surface">
-            <div className="section-intro">
-              <div>
-                <p className="eyebrow">本场参与者</p>
-                <h2>{activeAudience.length} 位 AI 观众已启用</h2>
-              </div>
-              <Users size={24} />
-            </div>
-            <div className="audience-list">
-              {audience.map((member) => (
-                <article className="audience-row" key={member.id}>
-                  <div className="audience-avatar" style={{ backgroundColor: member.color }}>
-                    {member.initials}
-                  </div>
-                  <div className="audience-identity">
-                    <strong>{member.name}</strong>
-                    <span>AI · {member.role}</span>
-                  </div>
-                  <p>{member.memory}</p>
-                  <label className="switch">
+                <div className="slider-stack">
+                  <label>
+                    <span>
+                      不透明度<strong>{barrageOpacity}%</strong>
+                    </span>
                     <input
-                      type="checkbox"
-                      checked={member.active}
-                      onChange={() => toggleAudience(member.id)}
+                      type="range"
+                      min="30"
+                      max="100"
+                      value={barrageOpacity}
+                      onChange={(event) => setBarrageOpacity(Number(event.target.value))}
                     />
-                    <span aria-hidden="true" />
-                    <em>{member.active ? '参与' : '安静'}</em>
                   </label>
-                </article>
-              ))}
+                  <label>
+                    <span>
+                      移动速度<strong>{barrageSpeed}</strong>
+                    </span>
+                    <input
+                      type="range"
+                      min="20"
+                      max="100"
+                      value={barrageSpeed}
+                      onChange={(event) => setBarrageSpeed(Number(event.target.value))}
+                    />
+                  </label>
+                </div>
+              </section>
             </div>
-          </section>
-        )}
+          )}
+        </main>
 
-        {activeView === 'settings' && (
-          <div className="settings-columns">
-            <section className="settings-surface">
-              <div className="section-intro">
-                <div>
-                  <p className="eyebrow">模型连接</p>
-                  <h2>OpenAI-compatible</h2>
-                </div>
-                <Sparkles size={24} />
-              </div>
-              <div className="form-stack">
-                <label>
-                  服务地址
-                  <input value={modelBaseUrl} onChange={(event) => setModelBaseUrl(event.target.value)} />
-                </label>
-                <label>
-                  模型名称
-                  <input
-                    value={modelName}
-                    onChange={(event) => setModelName(event.target.value)}
-                    placeholder="输入多模态模型名称"
-                  />
-                </label>
-                <label>
-                  API Key
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                    placeholder="仅由 Electron Main 安全保存"
-                  />
-                </label>
-                <div className="form-action">
-                  {configNotice && <span>{configNotice}</span>}
-                  <button
-                    className="primary-button"
-                    type="button"
-                    disabled={!modelBaseUrl.trim() || !modelName.trim()}
-                    onClick={() => void saveModelConfig()}
-                  >
-                    <KeyRound size={16} />
-                    保存连接
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            <section className="settings-surface">
-              <div className="section-intro">
-                <div>
-                  <p className="eyebrow">弹幕显示</p>
-                  <h2>覆盖层偏好</h2>
-                </div>
-                <SlidersHorizontal size={24} />
-              </div>
-              <div className="slider-stack">
-                <label>
-                  <span>不透明度<strong>{barrageOpacity}%</strong></span>
-                  <input
-                    type="range"
-                    min="30"
-                    max="100"
-                    value={barrageOpacity}
-                    onChange={(event) => setBarrageOpacity(Number(event.target.value))}
-                  />
-                </label>
-                <label>
-                  <span>移动速度<strong>{barrageSpeed}</strong></span>
-                  <input
-                    type="range"
-                    min="20"
-                    max="100"
-                    value={barrageSpeed}
-                    onChange={(event) => setBarrageSpeed(Number(event.target.value))}
-                  />
-                </label>
-              </div>
-            </section>
-          </div>
-        )}
-      </main>
+        <footer className="status-bar">
+          <span className="status-item">
+            <i className={`status-dot ${captureStream ? 'online' : ''}`} />
+            画面 {captureStream ? '采集中' : '未连接'}
+          </span>
+          <span className="status-item">
+            <i className={`status-dot ${microphoneReady ? 'online' : ''}`} />
+            麦克风 {microphoneReady ? '正常' : '待配置'}
+          </span>
+          <span className="status-item">
+            <i className="status-dot demo" />
+            AI 核心 · 演示模式
+          </span>
+          <span className="status-spacer" />
+          <span className="status-item muted">紧急停止 Ctrl/⌘ + Shift + X</span>
+        </footer>
+      </div>
 
       {sourcePickerOpen && (
         <SourcePicker onClose={() => setSourcePickerOpen(false)} onSelect={chooseSource} />
