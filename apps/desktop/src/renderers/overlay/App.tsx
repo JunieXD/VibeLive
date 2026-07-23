@@ -1,15 +1,36 @@
 import { useEffect, useRef, useState } from 'react'
-import type { OverlaySettings } from '../../shared/contracts'
+import type { OverlayFontFamily, OverlaySettings } from '../../shared/contracts'
 import {
   applySettingsToQueue,
   DEFAULT_OVERLAY_SETTINGS,
   enqueueBarrage,
+  FIXED_BARRAGE_DURATION_MS,
   fitSettingsToViewport,
   normalizeOverlaySettings,
-  remainingTravelMs,
+  remainingDisplayMs,
   travelDurationMs,
   type VisibleBarrage
 } from './overlay-state'
+
+const FONT_FAMILY_STACKS: Record<OverlayFontFamily, string> = {
+  bilibili:
+    'SimHei, "Microsoft JhengHei", "Microsoft YaHei", Arial, Helvetica, sans-serif',
+  yahei: '"Microsoft YaHei", "PingFang SC", Arial, Helvetica, sans-serif',
+  system: '"Segoe UI", "Microsoft YaHei", Arial, Helvetica, sans-serif'
+}
+
+function outlineTextShadow(widthPx: number): string {
+  if (widthPx <= 0) return 'none'
+
+  const offset = `${widthPx}px`
+  const blur = `${Math.max(1, widthPx)}px`
+  return [
+    `${offset} 0 ${blur} #000`,
+    `-${offset} 0 ${blur} #000`,
+    `0 ${offset} ${blur} #000`,
+    `0 -${offset} ${blur} #000`
+  ].join(', ')
+}
 
 export function App(): React.JSX.Element {
   const [items, setItems] = useState<VisibleBarrage[]>([])
@@ -37,8 +58,9 @@ export function App(): React.JSX.Element {
 
     const scheduleRemoval = (item: VisibleBarrage): void => {
       clearTimer(item.instanceId)
-      const remainingMs = remainingTravelMs(
+      const remainingMs = remainingDisplayMs(
         item.shownAt,
+        item.mode,
         settingsRef.current.speed
       )
       if (remainingMs <= 0) {
@@ -127,27 +149,29 @@ export function App(): React.JSX.Element {
       aria-label="弹幕覆盖层"
       style={{
         '--overlay-font-size': `${settings.fontSizePx}px`,
+        '--overlay-font-family': FONT_FAMILY_STACKS[settings.fontFamily],
+        '--overlay-font-weight': settings.bold ? 700 : 400,
+        '--overlay-outline-shadow': outlineTextShadow(settings.outlineWidthPx),
         '--overlay-speed': settings.speed,
         '--overlay-opacity': settings.opacity / 100,
         '--overlay-density': settings.density,
         '--overlay-region-top': `${settings.region.topPercent}%`,
         '--overlay-region-bottom': `${settings.region.bottomPercent}%`,
-        '--travel-duration': `${travelDurationMs(settings.speed)}ms`
+        '--travel-duration': `${travelDurationMs(settings.speed)}ms`,
+        '--fixed-duration': `${FIXED_BARRAGE_DURATION_MS}ms`
       } as React.CSSProperties}
     >
-      <div className="ai-watermark">ADVX LIVE · AI AUDIENCE</div>
       {items.map((item) => (
         <div
-          className="overlay-barrage"
+          className={`overlay-barrage overlay-barrage--${item.mode}`}
           key={item.instanceId}
           style={{
             '--lane': item.lane,
             '--lane-top': `${item.laneTopPercent}%`,
-            '--barrage-color': item.color
+            '--lane-bottom': `${item.laneBottomPercent}%`
           } as React.CSSProperties}
         >
-          <span className="overlay-name">{item.audienceName} · AI</span>
-          <span>{item.text}</span>
+          {item.text}
         </div>
       ))}
     </main>

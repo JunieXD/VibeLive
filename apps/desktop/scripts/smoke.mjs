@@ -272,6 +272,32 @@ try {
   await page.getByRole('heading', { name: '弹幕覆盖层', exact: true }).waitFor()
   await page.getByLabel('弹幕目标', { exact: true }).waitFor()
 
+  const defaultOverlaySettings = await page.evaluate(() => window.advx.getOverlaySettings())
+  assert.deepEqual(
+    {
+      fontSizePx: defaultOverlaySettings.fontSizePx,
+      fontFamily: defaultOverlaySettings.fontFamily,
+      bold: defaultOverlaySettings.bold,
+      outlineWidthPx: defaultOverlaySettings.outlineWidthPx,
+      speed: defaultOverlaySettings.speed,
+      opacity: defaultOverlaySettings.opacity,
+      density: defaultOverlaySettings.density,
+      region: defaultOverlaySettings.region,
+      clickThrough: defaultOverlaySettings.clickThrough
+    },
+    {
+      fontSizePx: 25,
+      fontFamily: 'bilibili',
+      bold: true,
+      outlineWidthPx: 1,
+      speed: 75,
+      opacity: 80,
+      density: 6,
+      region: { topPercent: 0, bottomPercent: 50 },
+      clickThrough: true
+    }
+  )
+
   const targetOptions = await page.getByLabel('弹幕目标', { exact: true }).locator('option').count()
   assert.ok(targetOptions >= 1, 'Overlay target IPC returned no displays.')
   if (targetOptions > 1) {
@@ -292,7 +318,10 @@ try {
     )
   }
 
+  await page.getByLabel('弹幕字体', { exact: true }).selectOption('system')
+  await page.getByLabel('粗体', { exact: true }).uncheck()
   await setRange(page, '字号', 30)
+  await setRange(page, '描边粗细', 2)
   await setRange(page, '移动速度', 100)
   await setRange(page, '透明度', 55)
   await setRange(page, '密度', 3)
@@ -304,6 +333,9 @@ try {
   assert.deepEqual(
     {
       fontSizePx: configuredSettings.fontSizePx,
+      fontFamily: configuredSettings.fontFamily,
+      bold: configuredSettings.bold,
+      outlineWidthPx: configuredSettings.outlineWidthPx,
       speed: configuredSettings.speed,
       opacity: configuredSettings.opacity,
       density: configuredSettings.density,
@@ -312,6 +344,9 @@ try {
     },
     {
       fontSizePx: 30,
+      fontFamily: 'system',
+      bold: false,
+      outlineWidthPx: 2,
       speed: 100,
       opacity: 55,
       density: 3,
@@ -400,10 +435,9 @@ try {
       await window.advx.pushBarrage({
         barrageId: `smoke-${index}`,
         audienceId: `audience-${index}`,
-        audienceName: `测试观众 ${index + 1}`,
         text: `Overlay 参数验证弹幕 ${index + 1}`,
-        color: index % 2 === 0 ? '#a8f53a' : '#65d6b9',
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        mode: 'scroll'
       })
     }
   })
@@ -430,6 +464,18 @@ try {
       fontSize: itemStyle.fontSize,
       opacity: itemStyle.opacity,
       animationDuration: itemStyle.animationDuration,
+      backgroundColor: itemStyle.backgroundColor,
+      borderLeftWidth: itemStyle.borderLeftWidth,
+      borderRadius: itemStyle.borderRadius,
+      boxShadow: itemStyle.boxShadow,
+      color: itemStyle.color,
+      fontFamily: itemStyle.fontFamily,
+      fontWeight: itemStyle.fontWeight,
+      lineHeight: itemStyle.lineHeight,
+      padding: itemStyle.padding,
+      textShadow: itemStyle.textShadow,
+      textContent: first.textContent,
+      identityNodeCount: document.querySelectorAll('.overlay-name, .ai-watermark, img').length,
       regionTop: rootStyle.getPropertyValue('--overlay-region-top').trim(),
       regionBottom: rootStyle.getPropertyValue('--overlay-region-bottom').trim(),
       itemRects: items.map((item) => {
@@ -443,6 +489,19 @@ try {
   assert.equal(rendered.fontSize, '30px')
   assert.equal(rendered.opacity, '0.55')
   assert.equal(rendered.animationDuration, '5s')
+  assert.equal(rendered.backgroundColor, 'rgba(0, 0, 0, 0)')
+  assert.equal(rendered.borderLeftWidth, '0px')
+  assert.equal(rendered.borderRadius, '0px')
+  assert.equal(rendered.boxShadow, 'none')
+  assert.equal(rendered.color, 'rgb(255, 255, 255)')
+  assert.match(rendered.fontFamily, /Segoe UI/)
+  assert.equal(rendered.fontWeight, '400')
+  assert.equal(rendered.lineHeight, '33.75px')
+  assert.equal(rendered.padding, '0px')
+  assert.match(rendered.textShadow, /rgb\(0, 0, 0\)/)
+  assert.match(rendered.textShadow, /2px/)
+  assert.equal(rendered.textContent, 'Overlay 参数验证弹幕 6')
+  assert.equal(rendered.identityNodeCount, 0)
   assert.equal(rendered.regionTop, '20%')
   assert.equal(rendered.regionBottom, '60%')
   const sortedRects = [...rendered.itemRects].sort((left, right) => left.top - right.top)
@@ -969,10 +1028,9 @@ try {
       await window.advx.pushBarrage({
         barrageId: `click-proof-${index}`,
         audienceId: `audience-${index}`,
-        audienceName: `测试观众 ${index + 1}`,
         text: `Overlay 点击穿透验证弹幕 ${index + 1}`,
-        color: index % 2 === 0 ? '#a8f53a' : '#65d6b9',
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        mode: 'scroll'
       })
     }
   })
@@ -1205,6 +1263,7 @@ try {
   proof = {
     targetOptions,
     sourceCount,
+    defaultSettings: defaultOverlaySettings,
     settings: configuredSettings,
     rendered,
     bounds: boundsProof,
@@ -1220,6 +1279,151 @@ try {
   assert.deepEqual(restoredSettings, configuredSettings, 'Overlay settings were not persisted.')
   proof.restoredSettings = restoredSettings
 
+  const defaultPreviewSettings = {
+    ...defaultOverlaySettings,
+    targetDisplayId: restoredSettings.targetDisplayId
+  }
+  await restartedPage.evaluate(
+    (settings) => window.advx.setOverlaySettings(settings),
+    defaultPreviewSettings
+  )
+  await restartedPage.reload()
+  await restartedPage.getByRole('heading', { name: '直播控制台', exact: true }).waitFor()
+  await restartedPage.getByRole('button', { name: '设置', exact: true }).click()
+  await restartedPage.getByLabel('弹幕字体', { exact: true }).waitFor()
+  assert.equal(
+    await restartedPage.getByLabel('弹幕字体', { exact: true }).inputValue(),
+    'bilibili'
+  )
+  assert.equal(
+    await restartedPage.getByLabel('粗体', { exact: true }).isChecked(),
+    true
+  )
+  assert.equal(
+    await restartedPage.getByLabel('描边粗细', { exact: true }).inputValue(),
+    '1'
+  )
+
+  await restartedPage.getByRole('button', { name: '滚动', exact: true }).click()
+  let restartedOverlayPage = electronApp
+    .windows()
+    .find((candidate) => candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html'))
+  restartedOverlayPage ??= await electronApp.waitForEvent('window', {
+    predicate: (candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html')
+  })
+  await restartedOverlayPage.locator('.overlay-barrage--scroll').waitFor()
+  await restartedPage.getByRole('button', { name: '顶端', exact: true }).click()
+  await restartedPage.getByRole('button', { name: '底端', exact: true }).click()
+  await restartedOverlayPage.waitForFunction(
+    () => document.querySelectorAll('.overlay-barrage').length === 3
+  )
+  const previewControlModes = await restartedOverlayPage.evaluate(() => ({
+    scroll: document.querySelectorAll('.overlay-barrage--scroll').length,
+    top: document.querySelectorAll('.overlay-barrage--top').length,
+    bottom: document.querySelectorAll('.overlay-barrage--bottom').length
+  }))
+  assert.deepEqual(previewControlModes, { scroll: 1, top: 1, bottom: 1 })
+
+  await restartedPage.evaluate(() => window.advx.clearOverlay())
+  await restartedOverlayPage.locator('.overlay-barrage').first().waitFor({ state: 'detached' })
+  const mockBarrageEvents = [
+    ['mock-scroll-1', '这波操作有点东西', 'scroll'],
+    ['mock-scroll-2', '前方高能，请注意', 'scroll'],
+    ['mock-scroll-3', '画面很清楚，继续冲', 'scroll'],
+    ['mock-top-1', '顶端固定：本场最佳', 'top'],
+    ['mock-top-2', '顶端固定：名场面预定', 'top'],
+    ['mock-bottom-1', '底端固定：感谢观看', 'bottom']
+  ].map(([barrageId, text, mode], index) => ({
+    barrageId,
+    audienceId: `mock-audience-${index}`,
+    text,
+    mode,
+    createdAt: Date.now() + index
+  }))
+  await restartedPage.evaluate(async (events) => {
+    await window.advx.showOverlay()
+    for (const event of events) {
+      await window.advx.pushBarrage(event)
+    }
+  }, mockBarrageEvents)
+  await restartedOverlayPage.waitForFunction(
+    () => document.querySelectorAll('.overlay-barrage').length === 6
+  )
+  await restartedOverlayPage.waitForTimeout(1_200)
+  const modeMock = await restartedOverlayPage.evaluate(() => {
+    const root = document.querySelector('.overlay-root')
+    const scroll = document.querySelector('.overlay-barrage--scroll')
+    const top = document.querySelector('.overlay-barrage--top')
+    const bottom = document.querySelector('.overlay-barrage--bottom')
+    if (
+      !(root instanceof HTMLElement) ||
+      !(scroll instanceof HTMLElement) ||
+      !(top instanceof HTMLElement) ||
+      !(bottom instanceof HTMLElement)
+    ) {
+      return null
+    }
+    const rootRect = root.getBoundingClientRect()
+    const scrollStyle = getComputedStyle(scroll)
+    const topStyle = getComputedStyle(top)
+    const bottomStyle = getComputedStyle(bottom)
+    return {
+      count: document.querySelectorAll('.overlay-barrage').length,
+      modes: {
+        scroll: document.querySelectorAll('.overlay-barrage--scroll').length,
+        top: document.querySelectorAll('.overlay-barrage--top').length,
+        bottom: document.querySelectorAll('.overlay-barrage--bottom').length
+      },
+      fontSize: scrollStyle.fontSize,
+      fontFamily: scrollStyle.fontFamily,
+      fontWeight: scrollStyle.fontWeight,
+      opacity: scrollStyle.opacity,
+      textShadow: scrollStyle.textShadow,
+      durations: {
+        scroll: scrollStyle.animationDuration,
+        top: topStyle.animationDuration,
+        bottom: bottomStyle.animationDuration
+      },
+      fixedRects: [top, bottom].map((item) => {
+        const rect = item.getBoundingClientRect()
+        return { top: rect.top, bottom: rect.bottom }
+      }),
+      rootHeight: rootRect.height,
+      identityNodeCount: document.querySelectorAll('.overlay-name, .ai-watermark, img').length
+    }
+  })
+  assert.ok(modeMock, 'Three-mode mock styles were not readable.')
+  assert.equal(modeMock.count, 6)
+  assert.deepEqual(modeMock.modes, { scroll: 3, top: 2, bottom: 1 })
+  assert.equal(modeMock.fontSize, '25px')
+  assert.match(modeMock.fontFamily, /SimHei/)
+  assert.ok(['700', 'bold'].includes(modeMock.fontWeight))
+  assert.equal(modeMock.opacity, '0.8')
+  assert.match(modeMock.textShadow, /1px/)
+  assert.deepEqual(modeMock.durations, {
+    scroll: '8.438s',
+    top: '4s',
+    bottom: '4s'
+  })
+  assert.equal(modeMock.identityNodeCount, 0)
+  assert.ok(
+    modeMock.fixedRects.every(
+      (rect) => rect.top >= -1 && rect.bottom <= modeMock.rootHeight * 0.5 + 1
+    ),
+    'A fixed barrage escaped the default top-half display region.'
+  )
+  await restartedOverlayPage.evaluate(() => {
+    const root = document.querySelector('.overlay-root')
+    if (root instanceof HTMLElement) root.style.background = '#687583'
+  })
+  await restartedOverlayPage.screenshot({
+    path: resolve(artifactDirectory, 'overlay-modes-mock.png'),
+    omitBackground: false
+  })
+  proof.previewControls = previewControlModes
+  proof.modeMock = modeMock
+
   await writeFile(
     resolve(artifactDirectory, 'overlay-smoke-proof.json'),
     JSON.stringify(proof, null, 2),
@@ -1227,10 +1431,11 @@ try {
   )
 
   console.log(
-    `Desktop Overlay smoke passed: ${targetOptions} target(s), ${sourceCount} capture source(s), live styles, collision-free density, bounds, clear, persistence, and ${clickThroughProof.skipped ? 'API-only' : 'real Windows'} click-through.`
+    `Desktop Overlay smoke passed: ${targetOptions} target(s), ${sourceCount} capture source(s), three barrage modes, font styling, collision-free density, bounds, clear, persistence, and ${clickThroughProof.skipped ? 'API-only' : 'real Windows'} click-through.`
   )
   console.log(`Settings screenshot: ${resolve(artifactDirectory, 'overlay-settings.png')}`)
   console.log(`Overlay screenshot: ${resolve(artifactDirectory, 'overlay-renderer.png')}`)
+  console.log(`Three-mode mock: ${resolve(artifactDirectory, 'overlay-modes-mock.png')}`)
   console.log(`Proof: ${resolve(artifactDirectory, 'overlay-smoke-proof.json')}`)
 } finally {
   await electronApp.close()

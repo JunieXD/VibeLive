@@ -1,25 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import type { BarrageEvent, OverlaySettings } from '../../shared/contracts'
+import type {
+  BarrageEvent,
+  BarrageMode,
+  OverlaySettings
+} from '../../shared/contracts'
 import {
   applySettingsToQueue,
   DEFAULT_OVERLAY_SETTINGS,
+  displayDurationMs,
   enqueueBarrage,
+  FIXED_BARRAGE_DURATION_MS,
   fitSettingsToViewport,
   laneFor,
+  laneBottomPercent,
   laneTopPercent,
+  remainingDisplayMs,
   remainingTravelMs,
   travelDurationMs,
   type VisibleBarrage
 } from './overlay-state'
 
-function barrage(barrageId: string): BarrageEvent {
+function barrage(barrageId: string, mode: BarrageMode = 'scroll'): BarrageEvent {
   return {
     barrageId,
     audienceId: 'audience',
-    audienceName: '观众',
     text: barrageId,
-    color: '#ffffff',
-    createdAt: 0
+    createdAt: 0,
+    mode
   }
 }
 
@@ -40,6 +47,11 @@ describe('overlay state helpers', () => {
     expect(travelDurationMs(120)).toBe(5_000)
     expect(remainingTravelMs(1_000, 100, 3_000)).toBe(3_000)
     expect(remainingTravelMs(1_000, 100, 7_000)).toBe(0)
+    expect(displayDurationMs('scroll', 100)).toBe(5_000)
+    expect(displayDurationMs('top', 100)).toBe(FIXED_BARRAGE_DURATION_MS)
+    expect(displayDurationMs('bottom', 20)).toBe(FIXED_BARRAGE_DURATION_MS)
+    expect(remainingDisplayMs(1_000, 'top', 100, 3_500)).toBe(1_500)
+    expect(remainingDisplayMs(1_000, 'bottom', 100, 5_500)).toBe(0)
   })
 
   it('keeps deterministic lanes and their positions inside the configured region', () => {
@@ -49,6 +61,28 @@ describe('overlay state helpers', () => {
     expect(laneTopPercent(0, 4, { topPercent: 12, bottomPercent: 72 })).toBe(12)
     expect(laneTopPercent(3, 4, { topPercent: 12, bottomPercent: 72 })).toBe(57)
     expect(laneTopPercent(0, 1, { topPercent: 12, bottomPercent: 72 })).toBe(12)
+    expect(laneBottomPercent(0, 4, { topPercent: 12, bottomPercent: 72 })).toBe(28)
+    expect(laneBottomPercent(3, 4, { topPercent: 12, bottomPercent: 72 })).toBe(73)
+  })
+
+  it('allocates lanes independently for scrolling, top, and bottom barrages', () => {
+    const configured = settings({ density: 3 })
+    const items = [
+      barrage('same-id', 'scroll'),
+      barrage('same-id', 'top'),
+      barrage('same-id', 'bottom')
+    ].reduce<VisibleBarrage[]>(
+      (current, event, index) =>
+        enqueueBarrage(current, event, index + 1, configured).items,
+      []
+    )
+
+    expect(items).toHaveLength(3)
+    expect(new Set(items.map((item) => item.mode))).toEqual(
+      new Set(['scroll', 'top', 'bottom'])
+    )
+    expect(items.find((item) => item.mode === 'top')?.lane).toBe(0)
+    expect(items.find((item) => item.mode === 'bottom')?.lane).toBe(0)
   })
 
   it('keeps one visible item per lane and evicts the oldest item when full', () => {

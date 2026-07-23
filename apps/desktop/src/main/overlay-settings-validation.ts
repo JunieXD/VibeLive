@@ -1,15 +1,24 @@
-import type { OverlaySettings } from "../shared/contracts";
+import type { OverlayFontFamily, OverlaySettings } from "../shared/contracts";
+
+const OVERLAY_FONT_FAMILIES: readonly OverlayFontFamily[] = [
+  "bilibili",
+  "yahei",
+  "system"
+];
 
 export function createDefaultOverlaySettings(primaryDisplayId: number): OverlaySettings {
   return {
     targetDisplayId: primaryDisplayId,
-    fontSizePx: 22,
-    speed: 58,
-    opacity: 86,
+    fontSizePx: 25,
+    fontFamily: "bilibili",
+    bold: true,
+    outlineWidthPx: 1,
+    speed: 75,
+    opacity: 80,
     density: 6,
     region: {
-      topPercent: 5,
-      bottomPercent: 75
+      topPercent: 0,
+      bottomPercent: 50
     },
     clickThrough: true
   };
@@ -17,6 +26,10 @@ export function createDefaultOverlaySettings(primaryDisplayId: number): OverlayS
 
 function isNumberInRange(value: unknown, minimum: number, maximum: number): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= minimum && value <= maximum;
+}
+
+function isOverlayFontFamily(value: unknown): value is OverlayFontFamily {
+  return OVERLAY_FONT_FAMILIES.includes(value as OverlayFontFamily);
 }
 
 export function normalizeOverlaySettings(
@@ -27,10 +40,17 @@ export function normalizeOverlaySettings(
   if (!value || typeof value !== "object") return null;
 
   const settings = value as Partial<OverlaySettings>;
+  const defaults = createDefaultOverlaySettings(primaryDisplayId);
   const region = settings.region;
+  const fontFamily = settings.fontFamily ?? defaults.fontFamily;
+  const bold = settings.bold ?? defaults.bold;
+  const outlineWidthPx = settings.outlineWidthPx ?? defaults.outlineWidthPx;
   if (
     !Number.isInteger(settings.targetDisplayId) ||
     !isNumberInRange(settings.fontSizePx, 14, 36) ||
+    !isOverlayFontFamily(fontFamily) ||
+    typeof bold !== "boolean" ||
+    !isNumberInRange(outlineWidthPx, 0, 3) ||
     !isNumberInRange(settings.speed, 20, 100) ||
     !isNumberInRange(settings.opacity, 30, 100) ||
     !isNumberInRange(settings.density, 1, 10) ||
@@ -48,6 +68,9 @@ export function normalizeOverlaySettings(
       ? (settings.targetDisplayId as number)
       : primaryDisplayId,
     fontSizePx: settings.fontSizePx,
+    fontFamily,
+    bold,
+    outlineWidthPx,
     speed: settings.speed,
     opacity: settings.opacity,
     density: settings.density,

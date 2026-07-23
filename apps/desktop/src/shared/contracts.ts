@@ -8,13 +8,14 @@ export type DesktopSource = {
   kind: 'screen' | 'window'
 }
 
+export type BarrageMode = 'scroll' | 'top' | 'bottom'
+
 export type BarrageEvent = {
   barrageId: string
   audienceId: string
-  audienceName: string
   text: string
-  color: string
   createdAt: number
+  mode: BarrageMode
 }
 
 export type ModelConfig = {
@@ -66,9 +67,14 @@ export type OverlayRegion = {
   bottomPercent: number
 }
 
+export type OverlayFontFamily = 'bilibili' | 'yahei' | 'system'
+
 export type OverlaySettings = {
   targetDisplayId: number
   fontSizePx: number
+  fontFamily: OverlayFontFamily
+  bold: boolean
+  outlineWidthPx: number
   speed: number
   opacity: number
   density: number

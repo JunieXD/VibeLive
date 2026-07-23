@@ -1,14 +1,23 @@
-import type { BarrageEvent, OverlaySettings } from '../../shared/contracts'
+import type {
+  BarrageEvent,
+  BarrageMode,
+  OverlaySettings
+} from '../../shared/contracts'
+
+export const FIXED_BARRAGE_DURATION_MS = 4_000
 
 export const DEFAULT_OVERLAY_SETTINGS: OverlaySettings = {
   targetDisplayId: 0,
-  fontSizePx: 22,
-  speed: 58,
-  opacity: 86,
+  fontSizePx: 25,
+  fontFamily: 'bilibili',
+  bold: true,
+  outlineWidthPx: 1,
+  speed: 75,
+  opacity: 80,
   density: 6,
   region: {
-    topPercent: 5,
-    bottomPercent: 75
+    topPercent: 0,
+    bottomPercent: 50
   },
   clickThrough: true
 }
@@ -18,6 +27,7 @@ export type VisibleBarrage = BarrageEvent & {
   shownAt: number
   lane: number
   laneTopPercent: number
+  laneBottomPercent: number
 }
 
 export type OverlayQueueResult = {
@@ -36,6 +46,15 @@ export function normalizeOverlaySettings(settings: OverlaySettings): OverlaySett
   return {
     ...settings,
     fontSizePx: clamp(settings.fontSizePx, 14, 36),
+    fontFamily:
+      settings.fontFamily === 'yahei' || settings.fontFamily === 'system'
+        ? settings.fontFamily
+        : 'bilibili',
+    bold: typeof settings.bold === 'boolean' ? settings.bold : true,
+    outlineWidthPx:
+      typeof settings.outlineWidthPx === 'number'
+        ? clamp(settings.outlineWidthPx, 0, 3)
+        : 1,
     speed: clamp(settings.speed, 20, 100),
     opacity: clamp(settings.opacity, 30, 100),
     density: Math.round(clamp(settings.density, 1, 10)),
@@ -58,6 +77,19 @@ export function remainingTravelMs(
   now = Date.now()
 ): number {
   return Math.max(0, travelDurationMs(speed) - (now - shownAt))
+}
+
+export function displayDurationMs(mode: BarrageMode, speed: number): number {
+  return mode === 'scroll' ? travelDurationMs(speed) : FIXED_BARRAGE_DURATION_MS
+}
+
+export function remainingDisplayMs(
+  shownAt: number,
+  mode: BarrageMode,
+  speed: number,
+  now = Date.now()
+): number {
+  return Math.max(0, displayDurationMs(mode, speed) - (now - shownAt))
 }
 
 export function fitSettingsToViewport(
@@ -102,12 +134,31 @@ export function laneTopPercent(
   return topPercent + (normalizedLane / normalizedLaneCount) * (bottomPercent - topPercent)
 }
 
+export function laneBottomPercent(
+  lane: number,
+  laneCount: number,
+  region: OverlaySettings['region']
+): number {
+  const normalizedLaneCount = Math.max(1, Math.round(laneCount))
+  const normalizedLane = clamp(Math.round(lane), 0, normalizedLaneCount - 1)
+  const topPercent = clamp(region.topPercent, 0, 100)
+  const bottomPercent = clamp(region.bottomPercent, topPercent, 100)
+
+  return 100 - bottomPercent +
+    (normalizedLane / normalizedLaneCount) * (bottomPercent - topPercent)
+}
+
+function barrageMode(mode: BarrageEvent['mode'] | undefined): BarrageMode {
+  return mode === 'top' || mode === 'bottom' ? mode : 'scroll'
+}
+
 function availableLaneFor(
   id: string,
   laneCount: number,
-  occupiedLanes: ReadonlySet<number>
+  occupiedLanes: ReadonlySet<number>,
+  mode: BarrageMode = 'scroll'
 ): number | null {
-  const preferredLane = laneFor(id, laneCount)
+  const preferredLane = mode === 'scroll' ? laneFor(id, laneCount) : 0
   for (let offset = 0; offset < laneCount; offset += 1) {
     const lane = (preferredLane + offset) % laneCount
     if (!occupiedLanes.has(lane)) return lane
@@ -123,20 +174,34 @@ export function enqueueBarrage(
   shownAt = Date.now()
 ): OverlayQueueResult {
   const normalizedSettings = normalizeOverlaySettings(settings)
-  const occupiedLanes = new Set(current.map((item) => item.lane))
+  const mode = barrageMode(event.mode)
+  const sameModeItems = current.filter((item) => barrageMode(item.mode) === mode)
+  const occupiedLanes = new Set(sameModeItems.map((item) => item.lane))
   const freeLane = availableLaneFor(
     event.barrageId,
     normalizedSettings.density,
-    occupiedLanes
+    occupiedLanes,
+    mode
   )
-  const evicted = freeLane === null ? current[0] : undefined
+  const evicted =
+    freeLane === null
+      ? sameModeItems[0]
+      : current.length >= normalizedSettings.density
+        ? current[0]
+        : undefined
   const lane = freeLane ?? evicted?.lane ?? 0
   const item: VisibleBarrage = {
     ...event,
+    mode,
     instanceId,
     shownAt,
     lane,
     laneTopPercent: laneTopPercent(
+      lane,
+      normalizedSettings.density,
+      normalizedSettings.region
+    ),
+    laneBottomPercent: laneBottomPercent(
       lane,
       normalizedSettings.density,
       normalizedSettings.region
@@ -159,17 +224,31 @@ export function applySettingsToQueue(
   const normalizedSettings = normalizeOverlaySettings(settings)
   const overflow = Math.max(0, current.length - normalizedSettings.density)
   const kept = current.slice(overflow)
-  const occupiedLanes = new Set<number>()
+  const occupiedLanesByMode = new Map<BarrageMode, Set<number>>()
 
   return {
     items: kept.map((item) => {
+      const mode = barrageMode(item.mode)
+      const occupiedLanes = occupiedLanesByMode.get(mode) ?? new Set<number>()
       const lane =
-        availableLaneFor(item.barrageId, normalizedSettings.density, occupiedLanes) ?? 0
+        availableLaneFor(
+          item.barrageId,
+          normalizedSettings.density,
+          occupiedLanes,
+          mode
+        ) ?? 0
       occupiedLanes.add(lane)
+      occupiedLanesByMode.set(mode, occupiedLanes)
       return {
         ...item,
+        mode,
         lane,
         laneTopPercent: laneTopPercent(
+          lane,
+          normalizedSettings.density,
+          normalizedSettings.region
+        ),
+        laneBottomPercent: laneBottomPercent(
           lane,
           normalizedSettings.density,
           normalizedSettings.region

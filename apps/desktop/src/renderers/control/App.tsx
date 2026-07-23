@@ -1,5 +1,6 @@
 import {
   Activity,
+  ArrowLeft,
   AudioLines,
   Camera,
   CameraOff,
@@ -16,6 +17,8 @@ import {
   Mic,
   MonitorUp,
   Pause,
+  PanelBottom,
+  PanelTop,
   PictureInPicture2,
   Play,
   Radio,
@@ -42,6 +45,7 @@ import {
 } from '../../shared/audience'
 import type {
   BarrageEvent,
+  BarrageMode,
   DesktopSource,
   MediaAccessStatus,
   OverlaySettings,
@@ -94,6 +98,21 @@ const statusLabels: Record<SessionStatus, string> = {
   paused: '已暂停',
   stopping: '停止中',
   error: '需要处理'
+}
+
+const DEMO_BARRAGE_MODES: readonly BarrageMode[] = [
+  'scroll',
+  'scroll',
+  'top',
+  'scroll',
+  'scroll',
+  'bottom'
+]
+
+const BARRAGE_PREVIEW_TEXT: Record<BarrageMode, string> = {
+  scroll: '这是一条滚动弹幕',
+  top: '这是一条顶端固定弹幕',
+  bottom: '这是一条底端固定弹幕'
 }
 
 const visualModeLabels: Record<VisualMode, string> = {
@@ -1410,10 +1429,19 @@ export function App(): React.JSX.Element {
   )
 
   const emitBarrage = useCallback(
-    (text?: string) => {
+    (
+      text?: string,
+      requestedMode?: BarrageMode,
+      forceOverlay = false
+    ) => {
       const sequence = barrageSequenceRef.current
       const member = selectWeightedPersona(activeAudience, sequence)
       if (!member) return
+      const mode =
+        requestedMode ??
+        (text === undefined
+          ? DEMO_BARRAGE_MODES[sequence % DEMO_BARRAGE_MODES.length]
+          : 'scroll')
       const learnedMeme =
         text === undefined && audienceRuntime.memes.length > 0 && sequence % 3 === 2
           ? audienceRuntime.memes[sequence % audienceRuntime.memes.length]
@@ -1422,10 +1450,9 @@ export function App(): React.JSX.Element {
       const event: BarrageEvent = {
         barrageId: `demo-${Date.now()}-${sequence}`,
         audienceId: member.id,
-        audienceName: member.name,
         text: text ?? learnedMeme?.text ?? demoLines[sequence % demoLines.length],
-        color: member.color,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        mode
       }
       barrageSequenceRef.current += 1
       setBarrageTotal((current) => current + 1)
@@ -1441,7 +1468,7 @@ export function App(): React.JSX.Element {
         }
       ])
 
-      if (overlayVisible) {
+      if (overlayVisible || forceOverlay) {
         void window.advx.pushBarrage(event)
       }
 
@@ -1829,6 +1856,12 @@ export function App(): React.JSX.Element {
       await window.advx.showOverlay()
       setOverlayVisible(true)
     }
+  }
+
+  const previewBarrage = async (mode: BarrageMode): Promise<void> => {
+    await window.advx.showOverlay()
+    setOverlayVisible(true)
+    emitBarrage(BARRAGE_PREVIEW_TEXT[mode], mode, true)
   }
 
   const clearBarrage = async (): Promise<void> => {
@@ -2626,6 +2659,24 @@ export function App(): React.JSX.Element {
                       </select>
                     </label>
 
+                    <label className="overlay-target-field">
+                      <span>字体</span>
+                      <select
+                        aria-label="弹幕字体"
+                        value={overlaySettings.fontFamily}
+                        onChange={(event) =>
+                          updateOverlaySettings({
+                            ...overlaySettings,
+                            fontFamily: event.target.value as OverlaySettings['fontFamily']
+                          })
+                        }
+                      >
+                        <option value="bilibili">B站默认</option>
+                        <option value="yahei">微软雅黑</option>
+                        <option value="system">系统字体</option>
+                      </select>
+                    </label>
+
                     <div className="slider-stack">
                       <label>
                         <span>
@@ -2641,6 +2692,25 @@ export function App(): React.JSX.Element {
                             updateOverlaySettings({
                               ...overlaySettings,
                               fontSizePx: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          描边粗细<strong>{overlaySettings.outlineWidthPx}px</strong>
+                        </span>
+                        <input
+                          aria-label="描边粗细"
+                          type="range"
+                          min="0"
+                          max="3"
+                          step="0.5"
+                          value={overlaySettings.outlineWidthPx}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              outlineWidthPx: Number(event.target.value)
                             })
                           }
                         />
@@ -2740,6 +2810,58 @@ export function App(): React.JSX.Element {
                             })
                           }
                         />
+                      </label>
+                    </div>
+
+                    <div className="overlay-preview-row">
+                      <span>弹幕预览</span>
+                      <div className="overlay-preview-actions">
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          title="预览滚动弹幕"
+                          onClick={() => void previewBarrage('scroll')}
+                        >
+                          <ArrowLeft size={15} />
+                          滚动
+                        </button>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          title="预览顶端固定弹幕"
+                          onClick={() => void previewBarrage('top')}
+                        >
+                          <PanelTop size={15} />
+                          顶端
+                        </button>
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          title="预览底端固定弹幕"
+                          onClick={() => void previewBarrage('bottom')}
+                        >
+                          <PanelBottom size={15} />
+                          底端
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="overlay-toggle-row">
+                      <span>粗体</span>
+                      <label className="switch">
+                        <input
+                          aria-label="粗体"
+                          type="checkbox"
+                          checked={overlaySettings.bold}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              bold: event.target.checked
+                            })
+                          }
+                        />
+                        <span aria-hidden="true" />
+                        <em>{overlaySettings.bold ? '开启' : '关闭'}</em>
                       </label>
                     </div>
 

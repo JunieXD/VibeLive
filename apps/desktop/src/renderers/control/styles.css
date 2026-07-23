@@ -1281,6 +1281,32 @@ h2 {
   font-size: 11px;
 }
 
+.overlay-preview-row {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.overlay-preview-row > span {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.overlay-preview-actions {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.overlay-preview-actions .ghost-button {
+  min-width: 0;
+  padding: 0 8px;
+}
+
 .overlay-toggle-row {
   display: flex;
   min-width: 0;
@@ -1588,6 +1614,7 @@ h2 {
 
   .overlay-target-field,
   .slider-stack,
+  .overlay-preview-row,
   .overlay-toggle-row {
     padding-right: 16px;
     padding-left: 16px;
