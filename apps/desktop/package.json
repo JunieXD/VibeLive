@@ -6,11 +6,13 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "smoke": "node scripts/smoke.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@advx/contracts": "workspace:*",
+    "lucide-react": "^1.25.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -19,9 +21,10 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.6.0",
-    "electron": "^37.0.0",
+    "electron": "^43.2.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^4.0.0",
+    "playwright-core": "^1.61.1",
     "typescript": "^5.8.0",
     "vite": "^7.0.0",
     "vitest": "^3.2.0"

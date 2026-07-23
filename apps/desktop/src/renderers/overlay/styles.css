@@ -1,10 +1,84 @@
-:root,
+:root {
+  color: #ffffff;
+  background: transparent;
+  font-family: Inter, "Segoe UI", "PingFang SC", sans-serif;
+  letter-spacing: 0;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
 body,
-#root,
-.barrage-stage {
+#root {
   width: 100%;
   height: 100%;
   margin: 0;
   overflow: hidden;
   background: transparent;
+}
+
+.overlay-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ai-watermark {
+  position: fixed;
+  right: 24px;
+  bottom: 20px;
+  color: rgb(255 255 255 / 55%);
+  font-size: 11px;
+  font-weight: 700;
+  text-shadow: 0 1px 4px rgb(0 0 0 / 80%);
+}
+
+.overlay-barrage {
+  --lane: 0;
+  --barrage-color: #65d6b9;
+  position: absolute;
+  top: calc(8% + var(--lane) * 9%);
+  left: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: 72vw;
+  padding: 7px 12px;
+  border-left: 3px solid var(--barrage-color);
+  border-radius: 4px;
+  background: rgb(15 18 17 / 80%);
+  color: #ffffff;
+  font-size: clamp(16px, 1.5vw, 24px);
+  font-weight: 650;
+  line-height: 1.35;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 24%);
+  animation: barrage-travel 9s linear forwards;
+}
+
+.overlay-name {
+  color: var(--barrage-color);
+  font-size: 0.72em;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+@keyframes barrage-travel {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-100vw - 100%));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-barrage {
+    animation-duration: 14s;
+  }
 }
