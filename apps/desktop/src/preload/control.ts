@@ -37,6 +37,7 @@ const api: ControlApi = {
   loadAudienceWorkspace: () => ipcRenderer.invoke("audience:load-workspace"),
   saveAudienceWorkspace: (workspace) =>
     ipcRenderer.invoke("audience:save-workspace", workspace),
+  setColorTheme: (theme) => ipcRenderer.invoke("app:set-color-theme", theme),
   confirmCloseAfterAudienceSave: () => ipcRenderer.invoke("app:confirm-close"),
   onCloseRequested: (listener) => {
     const handler = (): void => listener();

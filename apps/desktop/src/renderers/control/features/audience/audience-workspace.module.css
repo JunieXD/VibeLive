@@ -27,9 +27,9 @@
   gap: 10px;
   min-height: 48px;
   padding: 8px 12px;
-  border-bottom: 1px solid rgb(255 177 59 / 35%);
-  background: #2b2419;
-  color: #f5c97c;
+  border-bottom: 1px solid var(--warning-border);
+  background: var(--warning-panel);
+  color: var(--warning-text);
 }
 
 .aw-persistence-alert > div {
@@ -48,7 +48,7 @@
 .aw-persistence-alert span {
   margin-top: 2px;
   overflow: hidden;
-  color: #d8c39f;
+  color: var(--warning-text-dim);
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -65,10 +65,10 @@
   align-items: center;
   gap: 5px;
   padding: 0 8px;
-  border: 1px solid rgb(245 201 124 / 35%);
+  border: 1px solid var(--warning-control-border);
   border-radius: 8px;
   background: transparent;
-  color: #f5c97c;
+  color: var(--warning-text);
 }
 
 .aw-persistence-actions button.danger {
@@ -539,9 +539,9 @@
 
 .aw-validation {
   padding: 7px 12px;
-  border-bottom: 1px solid rgb(255 95 82 / 25%);
-  background: rgb(255 95 82 / 8%);
-  color: #ff9d94;
+  border-bottom: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-text);
   font-size: 10px;
 }
 

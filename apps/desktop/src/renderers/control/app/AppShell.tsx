@@ -3,11 +3,14 @@ import {
   Clock,
   LayoutDashboard,
   MessageSquareText,
+  Moon,
   RefreshCw,
   Settings,
+  Sun,
   Users
 } from 'lucide-react'
 import type { JSX, ReactNode } from 'react'
+import type { ColorTheme } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
 
 export type AppShellView = 'live' | 'audience' | 'settings'
@@ -36,6 +39,8 @@ export type AppShellNotice = {
 export type AppShellProps = {
   activeView: AppShellView
   onViewChange: (view: AppShellView) => void
+  colorTheme: ColorTheme
+  onColorThemeToggle: () => void
   sessionStatus: SessionStatus
   audienceCount: number
   modeName: string
@@ -66,10 +71,10 @@ const statusLabels: Record<SessionStatus, string> = {
 const liveBadgeStyles: Record<SessionStatus, string> = {
   idle: 'border-[var(--border-strong)] bg-[var(--panel-raise)] text-[var(--text-dim)]',
   starting: 'border-[var(--border-strong)] bg-[var(--panel-raise)] text-[var(--text-dim)]',
-  running: 'border-[rgb(255_65_89_/_45%)] bg-[var(--live-soft)] text-[var(--live)]',
-  paused: 'border-[rgb(245_184_61_/_40%)] bg-[var(--amber-soft)] text-[var(--amber)]',
+  running: 'border-[var(--live-border)] bg-[var(--live-soft)] text-[var(--live)]',
+  paused: 'border-[var(--amber-border)] bg-[var(--amber-soft)] text-[var(--amber)]',
   stopping: 'border-[var(--border-strong)] bg-[var(--panel-raise)] text-[var(--text-dim)]',
-  error: 'border-[rgb(255_95_82_/_45%)] bg-[rgb(255_95_82_/_12%)] text-[var(--danger)]'
+  error: 'border-[var(--danger-border)] bg-[var(--danger-soft)] text-[var(--danger)]'
 }
 
 const liveDotStyles: Record<SessionStatus, string> = {
@@ -85,7 +90,7 @@ const statusDotStyles: Record<AppShellStatusTone, string> = {
   offline: 'bg-[var(--text-faint)]',
   online: 'bg-[var(--ok)] shadow-[0_0_0_3px_var(--ok-soft)]',
   warning: 'bg-[var(--amber)]',
-  failed: 'bg-[var(--danger)] shadow-[0_0_0_3px_rgb(255_95_82_/_12%)]'
+  failed: 'bg-[var(--danger)] shadow-[0_0_0_3px_var(--danger-soft)]'
 }
 
 function formatElapsed(totalSeconds: number): string {
@@ -98,6 +103,8 @@ function formatElapsed(totalSeconds: number): string {
 export function AppShell({
   activeView,
   onViewChange,
+  colorTheme,
+  onColorThemeToggle,
   sessionStatus,
   audienceCount,
   modeName,
@@ -114,6 +121,9 @@ export function AppShell({
     { view: 'audience' as const, label: viewLabels.audience, icon: Users },
     { view: 'settings' as const, label: viewLabels.settings, icon: Settings }
   ]
+  const themeSwitchLabel =
+    colorTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'
+  const ThemeSwitchIcon = colorTheme === 'dark' ? Sun : Moon
 
   return (
     <div className="grid h-screen w-screen grid-cols-[224px_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] pt-8 max-[1240px]:grid-cols-[200px_minmax(0,1fr)]">
@@ -211,32 +221,44 @@ export function AppShell({
             <h1 className="m-0 truncate text-[15px] font-bold">{viewLabels[activeView]}</h1>
           </div>
 
-          <div className="flex items-center gap-2" aria-label="直播统计">
-            <span
-              className="inline-flex h-7.5 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-xs font-bold tabular-nums text-[var(--text-dim)]"
-              title="直播时长"
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2" aria-label="直播统计">
+              <span
+                className="inline-flex h-7.5 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-xs font-bold tabular-nums text-[var(--text-dim)]"
+                title="直播时长"
+              >
+                <Clock size={14} className="text-[var(--text-faint)]" aria-hidden="true" />
+                {formatElapsed(elapsedSeconds)}
+              </span>
+              <span
+                className="inline-flex h-7.5 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-xs font-bold tabular-nums text-[var(--text-dim)]"
+                title="累计弹幕"
+              >
+                <MessageSquareText
+                  size={14}
+                  className="text-[var(--text-faint)]"
+                  aria-hidden="true"
+                />
+                {barrageTotal}
+              </span>
+              <span
+                className="inline-flex h-7.5 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-xs font-bold tabular-nums text-[var(--text-dim)]"
+                title="在线观众"
+              >
+                <Users size={14} className="text-[var(--text-faint)]" aria-hidden="true" />
+                {audienceCount}
+              </span>
+            </div>
+            <span className="mx-0.5 h-5 w-px bg-[var(--border)]" aria-hidden="true" />
+            <button
+              className="grid size-7.5 shrink-0 place-items-center rounded-lg border border-[var(--border)] bg-[var(--panel)] text-[var(--text-dim)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--panel-raise)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+              type="button"
+              aria-label={themeSwitchLabel}
+              title={themeSwitchLabel}
+              onClick={onColorThemeToggle}
             >
-              <Clock size={14} className="text-[var(--text-faint)]" aria-hidden="true" />
-              {formatElapsed(elapsedSeconds)}
-            </span>
-            <span
-              className="inline-flex h-7.5 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-xs font-bold tabular-nums text-[var(--text-dim)]"
-              title="累计弹幕"
-            >
-              <MessageSquareText
-                size={14}
-                className="text-[var(--text-faint)]"
-                aria-hidden="true"
-              />
-              {barrageTotal}
-            </span>
-            <span
-              className="inline-flex h-7.5 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-xs font-bold tabular-nums text-[var(--text-dim)]"
-              title="在线观众"
-            >
-              <Users size={14} className="text-[var(--text-faint)]" aria-hidden="true" />
-              {audienceCount}
-            </span>
+              <ThemeSwitchIcon size={15} aria-hidden="true" />
+            </button>
           </div>
         </header>
 
@@ -249,7 +271,7 @@ export function AppShell({
               className={[
                 'mb-4 flex min-h-14 items-center justify-between gap-4 border px-4 py-3',
                 notice.tone === 'failed'
-                  ? 'border-[rgb(255_95_82_/_45%)] bg-[rgb(255_95_82_/_10%)]'
+                  ? 'border-[var(--danger-border)] bg-[var(--danger-soft)]'
                   : 'border-[var(--border-strong)] bg-[var(--panel)]'
               ].join(' ')}
               role={notice.tone === 'failed' ? 'alert' : 'status'}

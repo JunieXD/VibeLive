@@ -13,19 +13,80 @@
   --text-dim: #9aa0ad;
   --text-faint: #666c78;
   --accent: #d5ff55;
+  --accent-hover: #e2ff7d;
   --accent-ink: #161a08;
+  --accent-on-dark: #d5ff55;
   --accent-soft: rgb(213 255 85 / 12%);
+  --accent-gradient-start: #d5ff55;
+  --accent-gradient-end: #a9ec33;
+  --accent-gradient-ink: #161a08;
   --live: #ff4159;
   --live-soft: rgb(255 65 89 / 14%);
+  --live-border: rgb(255 65 89 / 45%);
   --ok: #3ddc97;
   --ok-soft: rgb(61 220 151 / 12%);
   --amber: #f5b83d;
   --amber-soft: rgb(245 184 61 / 12%);
+  --amber-border: rgb(245 184 61 / 40%);
   --danger: #ff5f52;
+  --danger-soft: rgb(255 95 82 / 12%);
+  --danger-border: rgb(255 95 82 / 45%);
+  --danger-text: #ff9d94;
+  --warning-panel: #2b2419;
+  --warning-border: rgb(255 177 59 / 35%);
+  --warning-text: #f5c97c;
+  --warning-text-dim: #d8c39f;
+  --warning-control-border: rgb(245 201 124 / 35%);
+  --control-hover-border: #434754;
+  --avatar-bg: #33363f;
+  --avatar-ink: #ffffff;
+  --text-on-dark: #e8eaf0;
+  --scrollbar: #33363f;
+  --scrollbar-hover: #444754;
   font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-synthesis: none;
   letter-spacing: 0;
   text-rendering: optimizeLegibility;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --bg-deep: #e8ebf0;
+  --chrome: #ffffff;
+  --panel: #ffffff;
+  --panel-raise: #eef1f4;
+  --border: #dfe3e8;
+  --border-strong: #cbd1d8;
+  --text: #17191d;
+  --text-dim: #505864;
+  --text-faint: #69717d;
+  --accent: #536b00;
+  --accent-hover: #435700;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(83 107 0 / 10%);
+  --live: #c61b42;
+  --live-soft: rgb(198 27 66 / 9%);
+  --live-border: rgb(198 27 66 / 30%);
+  --ok: #16794b;
+  --ok-soft: rgb(22 121 75 / 10%);
+  --amber: #925f00;
+  --amber-soft: rgb(146 95 0 / 10%);
+  --amber-border: rgb(146 95 0 / 28%);
+  --danger: #b42318;
+  --danger-soft: rgb(180 35 24 / 9%);
+  --danger-border: rgb(180 35 24 / 28%);
+  --danger-text: #922018;
+  --warning-panel: #fff8e7;
+  --warning-border: rgb(146 95 0 / 28%);
+  --warning-text: #744a00;
+  --warning-text-dim: #765f33;
+  --warning-control-border: rgb(146 95 0 / 30%);
+  --control-hover-border: #9aa3af;
+  --avatar-bg: #d8dde4;
+  --avatar-ink: #252a31;
+  --scrollbar: #b9c0c9;
+  --scrollbar-hover: #939ca8;
 }
 
 * {
@@ -48,7 +109,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
   letter-spacing: 0;
 }
@@ -74,12 +136,12 @@ button:disabled {
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 6px;
-  background: #33363f;
+  background: var(--scrollbar);
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #444754;
+  background: var(--scrollbar-hover);
   background-clip: padding-box;
 }
 

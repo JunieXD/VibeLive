@@ -129,7 +129,7 @@ export function SourcePickerDialog({
                 <button
                   data-source-option
                   className={[
-                    'relative min-w-0 overflow-hidden rounded-lg border bg-[var(--panel-raise)] p-1.5 text-left text-[var(--text)] transition-[border-color,box-shadow] hover:border-[#4a4e5c] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]',
+                    'relative min-w-0 overflow-hidden rounded-lg border bg-[var(--panel-raise)] p-1.5 text-left text-[var(--text)] transition-[border-color,box-shadow] hover:border-[var(--control-hover-border)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]',
                     selected
                       ? 'border-[var(--accent)] shadow-[0_0_0_2px_var(--accent-soft)]'
                       : 'border-[var(--border-strong)]'

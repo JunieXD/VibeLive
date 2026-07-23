@@ -19,6 +19,7 @@ import {
 import type {
   BackendRuntimeStatus,
   BarrageEvent,
+  ColorTheme,
   DesktopSource,
   MediaAccessSnapshot,
   MediaAccessStatus,
@@ -42,6 +43,7 @@ import {
   pushBarrage,
   showOverlay
 } from "../windows/overlay";
+import { applyControlWindowTheme } from "../windows/control";
 
 let selectedSourceId: string | null = null;
 let displayCaptureAuthorization: { webContentsId: number; expiresAt: number } | null = null;
@@ -677,6 +679,16 @@ export function registerDesktopIpc(
   ipcMain.handle("audience:save-workspace", (event, workspace: AudienceWorkspaceState) => {
     assertControlSender(event);
     return enqueueAudienceWorkspaceSave(workspace);
+  });
+  ipcMain.handle("app:set-color-theme", (event, theme: ColorTheme) => {
+    assertControlSender(event);
+    if (theme !== "light" && theme !== "dark") {
+      throw new Error("Unsupported control window theme.");
+    }
+    const controlWindow = getControlWindow();
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      applyControlWindowTheme(controlWindow, theme);
+    }
   });
   ipcMain.handle("app:confirm-close", (event) => {
     assertControlSender(event);

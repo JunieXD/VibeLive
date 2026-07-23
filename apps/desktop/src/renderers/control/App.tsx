@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import type { BackendConnectionState } from '../../shared/contracts'
+import type { BackendConnectionState, ColorTheme } from '../../shared/contracts'
 import { AppShell, type AppShellStatusItem } from './app/AppShell'
 import { AudienceWorkspace } from './AudienceWorkspace'
 import { LiveView } from './features/live/LiveView'
@@ -8,6 +8,7 @@ import { SourcePickerDialog } from './features/source-picker/SourcePickerDialog'
 import { useActivityFeed } from './hooks/useActivityFeed'
 import { useAudienceWorkspacePersistence } from './hooks/useAudienceWorkspacePersistence'
 import { useBackendRuntime } from './hooks/useBackendRuntime'
+import { useColorTheme } from './hooks/useColorTheme'
 import { useDemoBarrage } from './hooks/useDemoBarrage'
 import { useElapsedTime } from './hooks/useElapsedTime'
 import { useMediaController } from './hooks/useMediaController'
@@ -30,11 +31,16 @@ const backendConnectionLabels: Record<BackendConnectionState, string> = {
   failed: '启动失败'
 }
 
-export function App(): React.JSX.Element {
+export type AppProps = {
+  initialColorTheme: ColorTheme
+}
+
+export function App({ initialColorTheme }: AppProps): React.JSX.Element {
   const activeView = useControlStore(selectActiveView)
   const setActiveView = useControlStore(selectSetActiveView)
   const session = useControlStore(selectSession)
   const dispatchSession = useControlStore(selectDispatchSession)
+  const { colorTheme, toggleColorTheme } = useColorTheme(initialColorTheme)
   const sessionStartedRef = useRef<() => void>(() => undefined)
   const handleSessionStarted = useCallback(() => sessionStartedRef.current(), [])
 
@@ -156,6 +162,8 @@ export function App(): React.JSX.Element {
       <AppShell
         activeView={activeView}
         onViewChange={setActiveView}
+        colorTheme={colorTheme}
+        onColorThemeToggle={toggleColorTheme}
         sessionStatus={session.status}
         audienceCount={barrage.activeAudience.length}
         modeName={barrage.runtime.mode.name}

@@ -7,11 +7,11 @@
 
 .error-banner {
   padding: 10px 13px;
-  border: 1px solid rgb(255 95 82 / 40%);
+  border: 1px solid var(--danger-border);
   border-left: 3px solid var(--danger);
   border-radius: 8px;
-  background: rgb(255 95 82 / 10%);
-  color: #ff9d94;
+  background: var(--danger-soft);
+  color: var(--danger-text);
   font-size: 12px;
   font-weight: 650;
 }
@@ -241,7 +241,7 @@
   padding: 4px 9px;
   border-radius: 5px;
   background: rgb(10 11 14 / 78%);
-  color: var(--accent);
+  color: var(--accent-on-dark);
   font-size: 10px;
   font-weight: 850;
   letter-spacing: 0.1em;
@@ -278,7 +278,7 @@
   display: grid;
   place-items: center;
   background: rgb(10 11 14 / 72%);
-  color: var(--text);
+  color: var(--text-on-dark);
   font-size: 15px;
   font-weight: 750;
 }
@@ -307,8 +307,12 @@
   padding: 0 20px;
   border: 0;
   border-radius: 8px;
-  background: linear-gradient(135deg, #d5ff55 0%, #a9ec33 100%);
-  color: var(--accent-ink);
+  background: linear-gradient(
+    135deg,
+    var(--accent-gradient-start) 0%,
+    var(--accent-gradient-end) 100%
+  );
+  color: var(--accent-gradient-ink);
   font-size: 14px;
   font-weight: 850;
   box-shadow: 0 4px 18px rgb(213 255 85 / 18%);
@@ -354,7 +358,7 @@
 }
 
 .primary-button:hover:not(:disabled) {
-  background: #e2ff7d;
+  background: var(--accent-hover);
 }
 
 .ghost-button,
@@ -367,7 +371,7 @@
 
 .ghost-button:hover:not(:disabled),
 .command-button:hover:not(:disabled) {
-  border-color: #434754;
+  border-color: var(--control-hover-border);
   background: var(--panel-raise);
   color: var(--text);
 }
@@ -403,7 +407,7 @@
 }
 
 .icon-button.accent:hover:not(:disabled) {
-  background: #e2ff7d;
+  background: var(--accent-hover);
 }
 
 .command-meter {
@@ -520,8 +524,8 @@
   height: 28px;
   place-items: center;
   border-radius: 50%;
-  background: #33363f;
-  color: #ffffff;
+  background: var(--avatar-bg);
+  color: var(--avatar-ink);
   font-size: 11px;
   font-weight: 800;
 }

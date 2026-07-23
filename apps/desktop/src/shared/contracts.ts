@@ -10,6 +10,8 @@ export type DesktopSource = {
 
 export type BarrageMode = 'scroll' | 'top' | 'bottom'
 
+export type ColorTheme = 'light' | 'dark'
+
 export type BarrageEvent = {
   barrageId: string
   audienceId: string
@@ -163,6 +165,7 @@ export type ControlApi = {
   saveAudienceWorkspace: (
     workspace: AudienceWorkspaceState
   ) => Promise<SaveAudienceWorkspaceResult>
+  setColorTheme: (theme: ColorTheme) => Promise<void>
   confirmCloseAfterAudienceSave: () => Promise<void>
   onCloseRequested: (listener: () => void) => () => void
   onEmergencyStop: (listener: () => void) => () => void
