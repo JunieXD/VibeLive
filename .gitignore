@@ -22,7 +22,6 @@ apps/backend/openapi.json
 
 # Local runtime data
 .advx-data/
-.omx/
 
 # IDE / OS
 .DS_Store
