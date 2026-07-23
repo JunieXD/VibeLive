@@ -68,6 +68,7 @@ export function hideOverlay(): void {
 }
 
 export function clearOverlay(): void {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
   sendWhenReady("overlay:clear");
 }
 

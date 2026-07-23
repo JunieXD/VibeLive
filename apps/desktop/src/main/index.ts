@@ -1,12 +1,12 @@
 import { app, BrowserWindow, globalShortcut } from "electron";
-import { configureDisplayCapture, registerDesktopIpc } from "./ipc/register-desktop-ipc";
+import { configureMediaAccess, registerDesktopIpc } from "./ipc/register-desktop-ipc";
 import { createControlWindow } from "./windows/control";
 import { hideOverlay } from "./windows/overlay";
 
 let controlWindow: BrowserWindow | null = null;
 
 app.whenReady().then(() => {
-  configureDisplayCapture();
+  configureMediaAccess(() => controlWindow);
   registerDesktopIpc(() => controlWindow);
   controlWindow = createControlWindow();
 

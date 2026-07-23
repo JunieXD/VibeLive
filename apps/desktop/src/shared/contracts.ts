@@ -26,9 +26,23 @@ export type SaveModelConfigResult = {
   securelyStored: boolean
 }
 
+export type MediaAccessStatus =
+  | 'not-determined'
+  | 'granted'
+  | 'denied'
+  | 'restricted'
+  | 'unknown'
+
+export type MediaAccessSnapshot = {
+  microphone: MediaAccessStatus
+  screen: MediaAccessStatus
+}
+
 export type ControlApi = {
   listDesktopSources: () => Promise<DesktopSource[]>
   selectDesktopSource: (sourceId: string) => Promise<boolean>
+  getMediaAccessStatus: () => Promise<MediaAccessSnapshot>
+  requestMicrophonePermission: () => Promise<MediaAccessStatus>
   showOverlay: () => Promise<void>
   hideOverlay: () => Promise<void>
   clearOverlay: () => Promise<void>

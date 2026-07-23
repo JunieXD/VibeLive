@@ -4,6 +4,8 @@ import type { ControlApi, ModelConfig } from "../shared/contracts";
 const api: ControlApi = {
   listDesktopSources: () => ipcRenderer.invoke("desktop:list-sources"),
   selectDesktopSource: (sourceId) => ipcRenderer.invoke("desktop:select-source", sourceId),
+  getMediaAccessStatus: () => ipcRenderer.invoke("media:get-access-status"),
+  requestMicrophonePermission: () => ipcRenderer.invoke("media:request-microphone"),
   showOverlay: () => ipcRenderer.invoke("overlay:show"),
   hideOverlay: () => ipcRenderer.invoke("overlay:hide"),
   clearOverlay: () => ipcRenderer.invoke("overlay:clear"),

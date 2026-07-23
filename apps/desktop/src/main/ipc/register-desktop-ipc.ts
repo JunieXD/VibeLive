@@ -4,13 +4,16 @@ import {
   desktopCapturer,
   ipcMain,
   safeStorage,
-  session
+  session,
+  systemPreferences
 } from "electron";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   BarrageEvent,
   DesktopSource,
+  MediaAccessSnapshot,
+  MediaAccessStatus,
   ModelConfig,
   SaveModelConfigResult
 } from "../../shared/contracts";
@@ -22,6 +25,14 @@ import {
 } from "../windows/overlay";
 
 let selectedSourceId: string | null = null;
+let displayCaptureAuthorization: { webContentsId: number; expiresAt: number } | null = null;
+
+function hasDisplayCaptureAuthorization(webContentsId: number): boolean {
+  return (
+    displayCaptureAuthorization?.webContentsId === webContentsId &&
+    displayCaptureAuthorization.expiresAt >= Date.now()
+  );
+}
 
 async function listDesktopSources(controlWindow: BrowserWindow | null): Promise<DesktopSource[]> {
   const sources = await desktopCapturer.getSources({
@@ -29,9 +40,13 @@ async function listDesktopSources(controlWindow: BrowserWindow | null): Promise<
     thumbnailSize: { width: 480, height: 270 },
     fetchWindowIcons: true
   });
+  const internalSourceIds = new Set(
+    BrowserWindow.getAllWindows().map((window) => window.getMediaSourceId())
+  );
+  if (controlWindow) internalSourceIds.add(controlWindow.getMediaSourceId());
 
   return sources
-    .filter((source) => source.id !== controlWindow?.getMediaSourceId())
+    .filter((source) => !internalSourceIds.has(source.id))
     .map((source) => ({
       id: source.id,
       name: source.name,
@@ -64,9 +79,72 @@ async function saveModelConfig(config: ModelConfig): Promise<SaveModelConfigResu
   return { ok: true, securelyStored };
 }
 
-export function configureDisplayCapture(): void {
-  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+function getMediaAccessStatus(): MediaAccessSnapshot {
+  return {
+    microphone: systemPreferences.getMediaAccessStatus("microphone"),
+    screen: systemPreferences.getMediaAccessStatus("screen")
+  };
+}
+
+async function requestMicrophonePermission(): Promise<MediaAccessStatus> {
+  if (process.platform === "darwin") {
+    await systemPreferences.askForMediaAccess("microphone");
+  }
+  return systemPreferences.getMediaAccessStatus("microphone");
+}
+
+export function configureMediaAccess(getControlWindow: () => BrowserWindow | null): void {
+  const isControlWebContents = (webContents: Electron.WebContents | null): boolean =>
+    webContents !== null && webContents.id === getControlWindow()?.webContents.id;
+
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    if (!isControlWebContents(webContents) || !details.isMainFrame) return false;
+    const permissionName: string = permission;
+    return (
+      permissionName === "display-capture" ||
+      (permission === "media" && details.mediaType === "audio")
+    );
+  });
+
+  session.defaultSession.setPermissionRequestHandler(
+    (webContents, permission, callback, details) => {
+      if (!isControlWebContents(webContents)) {
+        callback(false);
+        return;
+      }
+
+      if (permission === "display-capture") {
+        callback(true);
+        return;
+      }
+
+      const mediaTypes =
+        permission === "media" && "mediaTypes" in details ? details.mediaTypes : undefined;
+      const isMainFrame = "isMainFrame" in details && details.isMainFrame;
+      callback(
+        permission === "media" &&
+          isMainFrame &&
+          ((mediaTypes?.length === 1 && mediaTypes[0] === "audio") ||
+            (mediaTypes?.length === 0 && hasDisplayCaptureAuthorization(webContents.id)))
+      );
+    }
+  );
+
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     try {
+      const controlFrame = getControlWindow()?.webContents.mainFrame;
+      if (
+        !hasDisplayCaptureAuthorization(getControlWindow()?.webContents.id ?? -1) ||
+        !request.videoRequested ||
+        request.audioRequested ||
+        request.frame?.frameTreeNodeId !== controlFrame?.frameTreeNodeId
+      ) {
+        displayCaptureAuthorization = null;
+        callback({});
+        return;
+      }
+
+      displayCaptureAuthorization = null;
       const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
       const source = sources.find((candidate) => candidate.id === selectedSourceId);
       callback(source ? { video: source } : {});
@@ -78,12 +156,18 @@ export function configureDisplayCapture(): void {
 
 export function registerDesktopIpc(getControlWindow: () => BrowserWindow | null): void {
   ipcMain.handle("desktop:list-sources", () => listDesktopSources(getControlWindow()));
-  ipcMain.handle("desktop:select-source", async (_event, sourceId: string) => {
+  ipcMain.handle("desktop:select-source", async (event, sourceId: string) => {
+    if (event.sender.id !== getControlWindow()?.webContents.id) return false;
     const sources = await listDesktopSources(getControlWindow());
     const exists = sources.some((source) => source.id === sourceId);
     selectedSourceId = exists ? sourceId : null;
+    displayCaptureAuthorization = exists
+      ? { webContentsId: event.sender.id, expiresAt: Date.now() + 60_000 }
+      : null;
     return exists;
   });
+  ipcMain.handle("media:get-access-status", getMediaAccessStatus);
+  ipcMain.handle("media:request-microphone", requestMicrophonePermission);
   ipcMain.handle("overlay:show", showOverlay);
   ipcMain.handle("overlay:hide", hideOverlay);
   ipcMain.handle("overlay:clear", clearOverlay);
