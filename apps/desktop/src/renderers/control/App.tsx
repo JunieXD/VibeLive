@@ -25,9 +25,16 @@ import {
   X
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import type { BarrageEvent, DesktopSource } from '../../shared/contracts'
+import type {
+  BarrageEvent,
+  DesktopSource,
+  MediaAccessStatus,
+  OverlaySettings,
+  OverlayTarget
+} from '../../shared/contracts'
 import { demoLines, initialAudience, type AudienceMember } from '../../shared/demo'
 import { initialSessionState, sessionReducer, type SessionStatus } from '../../shared/session'
+import { calculateMicrophoneLevel, describeMediaError, stopMediaStream } from './media'
 
 type ActiveView = 'live' | 'audience' | 'settings'
 
@@ -161,6 +168,10 @@ export function App(): React.JSX.Element {
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState('')
   const [microphoneLevel, setMicrophoneLevel] = useState(0)
   const [microphoneReady, setMicrophoneReady] = useState(false)
+  const [microphonePermission, setMicrophonePermission] =
+    useState<MediaAccessStatus>('unknown')
+  const [screenPermission, setScreenPermission] = useState<MediaAccessStatus>('unknown')
+  const [mediaTransitioning, setMediaTransitioning] = useState(false)
   const [overlayVisible, setOverlayVisible] = useState(true)
   const [audience, setAudience] = useState<AudienceMember[]>(initialAudience)
   const [activity, setActivity] = useState<ActivityItem[]>([
@@ -176,8 +187,9 @@ export function App(): React.JSX.Element {
   const [modelName, setModelName] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [configNotice, setConfigNotice] = useState<string | null>(null)
-  const [barrageOpacity, setBarrageOpacity] = useState(86)
-  const [barrageSpeed, setBarrageSpeed] = useState(58)
+  const [overlayTargets, setOverlayTargets] = useState<OverlayTarget[]>([])
+  const [overlaySettings, setOverlaySettings] = useState<OverlaySettings | null>(null)
+  const [overlaySettingsNotice, setOverlaySettingsNotice] = useState<string | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [barrageTotal, setBarrageTotal] = useState(0)
 
@@ -186,7 +198,12 @@ export function App(): React.JSX.Element {
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const meterFrameRef = useRef<number | null>(null)
+  const mediaOperationRef = useRef(0)
+  const mediaTransitionRef = useRef(false)
   const barrageSequenceRef = useRef(0)
+  const overlaySettingsTimerRef = useRef<number | null>(null)
+  const overlaySettingsRevisionRef = useRef(0)
+  const overlaySettingsPendingRef = useRef(false)
   const sessionStatusRef = useRef(session.status)
   const startedAtRef = useRef<number | null>(null)
   const chatListRef = useRef<HTMLDivElement>(null)
@@ -195,7 +212,61 @@ export function App(): React.JSX.Element {
   const isSessionActive = ['starting', 'running', 'paused', 'stopping'].includes(session.status)
   const canStart =
     session.status === 'idle' && selectedSource !== null && selectedMicrophoneId !== ''
-  const goLiveBusy = session.status === 'starting' || session.status === 'stopping'
+  const goLiveBusy =
+    session.status === 'starting' || session.status === 'stopping' || mediaTransitioning
+  const captureStatus =
+    session.status === 'paused'
+      ? '已暂停'
+      : captureStream
+        ? '采集中'
+        : selectedSource
+          ? '待启动'
+          : '未连接'
+  const microphoneStatus =
+    session.status === 'paused'
+      ? '已暂停'
+      : microphoneReady
+        ? '正常'
+        : microphonePermission === 'denied' || microphonePermission === 'restricted'
+          ? '权限受限'
+          : selectedMicrophoneId
+            ? '待检测'
+            : '待授权'
+
+  const beginMediaOperation = useCallback((replaceCurrent = false): number | null => {
+    if (mediaTransitionRef.current && !replaceCurrent) return null
+    const operationId = mediaOperationRef.current + 1
+    mediaOperationRef.current = operationId
+    mediaTransitionRef.current = true
+    setMediaTransitioning(true)
+    return operationId
+  }, [])
+
+  const finishMediaOperation = useCallback((operationId: number): void => {
+    if (mediaOperationRef.current !== operationId) return
+    mediaTransitionRef.current = false
+    setMediaTransitioning(false)
+  }, [])
+
+  const assertMediaOperationCurrent = useCallback((operationId: number): void => {
+    if (mediaOperationRef.current !== operationId) {
+      throw new DOMException('Media operation was superseded.', 'AbortError')
+    }
+  }, [])
+
+  const releaseOverlay = useCallback(async (): Promise<string | null> => {
+    const [clearResult, hideResult] = await Promise.allSettled([
+      window.advx.clearOverlay(),
+      window.advx.hideOverlay()
+    ])
+    if (hideResult.status === 'fulfilled') {
+      setOverlayVisible(false)
+    }
+    if (clearResult.status === 'fulfilled' && hideResult.status === 'fulfilled') {
+      return null
+    }
+    return '悬浮层未能完全关闭，请使用紧急停止快捷键后重试。'
+  }, [])
 
   useEffect(() => {
     sessionStatusRef.current = session.status
@@ -205,8 +276,21 @@ export function App(): React.JSX.Element {
     captureStreamRef.current = captureStream
     if (videoRef.current) {
       videoRef.current.srcObject = captureStream
+      if (captureStream) {
+        void videoRef.current.play().catch(() => undefined)
+      }
     }
   }, [captureStream])
+
+  useEffect(() => {
+    void window.advx
+      .getMediaAccessStatus()
+      .then((status) => {
+        setMicrophonePermission(status.microphone)
+        setScreenPermission(status.screen)
+      })
+      .catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     if (session.status === 'running' || session.status === 'paused') {
@@ -231,141 +315,379 @@ export function App(): React.JSX.Element {
     }
   }, [activity])
 
-  const stopCapture = useCallback(() => {
-    setCaptureStream((current) => {
-      current?.getTracks().forEach((track) => track.stop())
-      captureStreamRef.current = null
-      return null
+  useEffect(() => {
+    let active = true
+
+    const unsubscribe = window.advx.onOverlaySettingsChanged((settings) => {
+      if (!active) return
+      void window.advx
+        .listOverlayTargets()
+        .then((targets) => {
+          if (active) setOverlayTargets(targets)
+        })
+        .catch(() => undefined)
+      if (overlaySettingsPendingRef.current) return
+      overlaySettingsRevisionRef.current += 1
+      setOverlaySettings(settings)
+      setOverlaySettingsNotice('已同步')
     })
+
+    void Promise.all([window.advx.listOverlayTargets(), window.advx.getOverlaySettings()])
+      .then(([targets, settings]) => {
+        if (!active) return
+        setOverlayTargets(targets)
+        setOverlaySettings(settings)
+      })
+      .catch(() => {
+        if (active) setOverlaySettingsNotice('加载失败')
+      })
+
+    return () => {
+      active = false
+      unsubscribe()
+      if (overlaySettingsTimerRef.current !== null) {
+        window.clearTimeout(overlaySettingsTimerRef.current)
+      }
+    }
   }, [])
 
-  const stopMicrophone = useCallback(() => {
+  const updateOverlaySettings = (settings: OverlaySettings): void => {
+    const revision = overlaySettingsRevisionRef.current + 1
+    overlaySettingsRevisionRef.current = revision
+    overlaySettingsPendingRef.current = true
+    setOverlaySettings(settings)
+    setOverlaySettingsNotice('正在同步')
+
+    if (overlaySettingsTimerRef.current !== null) {
+      window.clearTimeout(overlaySettingsTimerRef.current)
+    }
+    overlaySettingsTimerRef.current = window.setTimeout(() => {
+      overlaySettingsTimerRef.current = null
+      void window.advx
+        .setOverlaySettings(settings)
+        .then((normalizedSettings) => {
+          if (overlaySettingsRevisionRef.current !== revision) return
+          overlaySettingsPendingRef.current = false
+          setOverlaySettings(normalizedSettings)
+          setOverlaySettingsNotice('已同步')
+        })
+        .catch(() => {
+          if (overlaySettingsRevisionRef.current === revision) {
+            overlaySettingsPendingRef.current = false
+            setOverlaySettingsNotice('同步失败')
+          }
+        })
+    }, 150)
+  }
+
+  const stopCapture = useCallback(() => {
+    const stream = captureStreamRef.current
+    captureStreamRef.current = null
+    stopMediaStream(stream)
+    if (videoRef.current?.srcObject === stream) {
+      videoRef.current.pause()
+      videoRef.current.srcObject = null
+    }
+    setCaptureStream(null)
+  }, [])
+
+  const stopMicrophone = useCallback(async (): Promise<void> => {
     if (meterFrameRef.current !== null) {
       cancelAnimationFrame(meterFrameRef.current)
       meterFrameRef.current = null
     }
-    microphoneStreamRef.current?.getTracks().forEach((track) => track.stop())
+    const stream = microphoneStreamRef.current
     microphoneStreamRef.current = null
-    void audioContextRef.current?.close()
+    stopMediaStream(stream)
+    const context = audioContextRef.current
     audioContextRef.current = null
+    if (context && context.state !== 'closed') {
+      await context.close().catch(() => undefined)
+    }
     setMicrophoneLevel(0)
     setMicrophoneReady(false)
   }, [])
 
   useEffect(() => {
     return () => {
-      captureStreamRef.current?.getTracks().forEach((track) => track.stop())
-      stopMicrophone()
+      mediaOperationRef.current += 1
+      mediaTransitionRef.current = false
+      stopMediaStream(captureStreamRef.current)
+      void stopMicrophone()
     }
   }, [stopMicrophone])
 
-  const startCapture = useCallback(async (): Promise<MediaStream> => {
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        frameRate: { ideal: 12, max: 20 }
-      },
-      audio: false
-    })
-    setCaptureStream((current) => {
-      current?.getTracks().forEach((track) => track.stop())
-      captureStreamRef.current = stream
-      return stream
-    })
-    stream.getVideoTracks()[0]?.addEventListener(
-      'ended',
-      () => {
-        setCaptureStream(null)
-        if (sessionStatusRef.current === 'running') {
-          dispatch({ type: 'fail', error: '画面来源已结束，请重新选择。' })
+  const startCapture = useCallback(
+    async (operationId: number, sourceId: string): Promise<MediaStream> => {
+      const accepted = await window.advx.selectDesktopSource(sourceId)
+      assertMediaOperationCurrent(operationId)
+      if (!accepted) {
+        throw new DOMException('The selected display source is no longer available.', 'NotFoundError')
+      }
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: { ideal: 12, max: 20 }
+        },
+        audio: false
+      })
+      try {
+        assertMediaOperationCurrent(operationId)
+        const videoTrack = stream.getVideoTracks()[0]
+        if (!videoTrack) {
+          throw new DOMException('No display video track was created.', 'NotReadableError')
         }
-      },
-      { once: true }
-    )
-    return stream
-  }, [])
+
+        const previousStream = captureStreamRef.current
+        captureStreamRef.current = stream
+        stopMediaStream(previousStream)
+        setCaptureStream(stream)
+        setScreenPermission('granted')
+        videoTrack.addEventListener(
+          'ended',
+          () => {
+            if (captureStreamRef.current !== stream) return
+            mediaOperationRef.current += 1
+            mediaTransitionRef.current = false
+            setMediaTransitioning(false)
+            captureStreamRef.current = null
+            setCaptureStream(null)
+            if (
+              sessionStatusRef.current === 'running' ||
+              sessionStatusRef.current === 'starting'
+            ) {
+              sessionStatusRef.current = 'error'
+              void stopMicrophone()
+              void releaseOverlay()
+              dispatch({ type: 'fail', error: '画面来源已结束，请重新选择。' })
+            }
+          },
+          { once: true }
+        )
+        return stream
+      } catch (error) {
+        stopMediaStream(stream)
+        throw error
+      }
+    },
+    [assertMediaOperationCurrent, releaseOverlay, stopMicrophone]
+  )
 
   const chooseSource = async (source: DesktopSource): Promise<void> => {
-    const accepted = await window.advx.selectDesktopSource(source.id)
-    if (!accepted) {
-      setActivity((current) => [
-        ...current,
-        { id: crypto.randomUUID(), source: 'system', author: '系统', text: '该画面来源已失效。' }
-      ])
-      return
-    }
-
-    setSelectedSource(source)
-    setSourcePickerOpen(false)
+    const operationId = beginMediaOperation()
+    if (operationId === null) return
     try {
-      await startCapture()
-    } catch {
+      setSourcePickerOpen(false)
+      await startCapture(operationId, source.id)
+      setSelectedSource(source)
+    } catch (error) {
+      if (mediaOperationRef.current !== operationId) return
+      const message = describeMediaError(error, 'display')
+      void window.advx
+        .getMediaAccessStatus()
+        .then((status) => setScreenPermission(status.screen))
+        .catch(() => undefined)
       setActivity((current) => [
         ...current,
         {
           id: crypto.randomUUID(),
           source: 'system',
           author: '系统',
-          text: '未能启动画面预览，请重新授权录屏权限。'
+          text: message
         }
       ])
+    } finally {
+      finishMediaOperation(operationId)
     }
   }
 
-  const requestMicrophoneAccess = useCallback(async () => {
-    try {
-      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      permissionStream.getTracks().forEach((track) => track.stop())
+  const refreshMicrophones = useCallback(
+    async (preferredDeviceId?: string, operationId?: number): Promise<void> => {
       const devices = await navigator.mediaDevices.enumerateDevices()
+      if (operationId !== undefined) {
+        assertMediaOperationCurrent(operationId)
+      }
       const inputs = devices.filter((device) => device.kind === 'audioinput')
       setMicrophones(inputs)
-      setSelectedMicrophoneId((current) => current || inputs[0]?.deviceId || '')
-    } catch {
+      setSelectedMicrophoneId((current) => {
+        if (inputs.some((device) => device.deviceId === current)) return current
+        if (preferredDeviceId && inputs.some((device) => device.deviceId === preferredDeviceId)) {
+          return preferredDeviceId
+        }
+        return inputs[0]?.deviceId ?? ''
+      })
+    },
+    [assertMediaOperationCurrent]
+  )
+
+  useEffect(() => {
+    const handleDeviceChange = (): void => {
+      void refreshMicrophones()
+    }
+
+    void refreshMicrophones()
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
+  }, [refreshMicrophones])
+
+  const startMicrophone = useCallback(
+    async (operationId: number, deviceId?: string): Promise<MediaStream> => {
+      await stopMicrophone()
+      assertMediaOperationCurrent(operationId)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      })
+      let context: AudioContext | null = null
+      try {
+        assertMediaOperationCurrent(operationId)
+        const audioTrack = stream.getAudioTracks()[0]
+        if (!audioTrack) {
+          throw new DOMException('No microphone audio track was created.', 'NotReadableError')
+        }
+
+        context = new AudioContext()
+        const analyser = context.createAnalyser()
+        analyser.fftSize = 512
+        context.createMediaStreamSource(stream).connect(analyser)
+        if (context.state === 'suspended') {
+          await context.resume()
+          assertMediaOperationCurrent(operationId)
+        }
+
+        const actualDeviceId = audioTrack.getSettings().deviceId
+        await refreshMicrophones(actualDeviceId, operationId)
+        assertMediaOperationCurrent(operationId)
+
+        microphoneStreamRef.current = stream
+        audioContextRef.current = context
+        setMicrophoneReady(true)
+        setMicrophonePermission('granted')
+
+        audioTrack.addEventListener(
+          'ended',
+          () => {
+            if (microphoneStreamRef.current !== stream) return
+            mediaOperationRef.current += 1
+            mediaTransitionRef.current = false
+            setMediaTransitioning(false)
+            microphoneStreamRef.current = null
+            if (meterFrameRef.current !== null) {
+              cancelAnimationFrame(meterFrameRef.current)
+              meterFrameRef.current = null
+            }
+            void context?.close()
+            audioContextRef.current = null
+            setMicrophoneLevel(0)
+            setMicrophoneReady(false)
+            if (
+              sessionStatusRef.current === 'running' ||
+              sessionStatusRef.current === 'starting'
+            ) {
+              sessionStatusRef.current = 'error'
+              stopCapture()
+              void releaseOverlay()
+              dispatch({ type: 'fail', error: '麦克风连接已中断，请检查设备。' })
+            }
+          },
+          { once: true }
+        )
+
+        const samples = new Uint8Array(analyser.fftSize)
+        const measure = (): void => {
+          if (microphoneStreamRef.current !== stream) return
+          analyser.getByteTimeDomainData(samples)
+          setMicrophoneLevel(calculateMicrophoneLevel(samples))
+          meterFrameRef.current = requestAnimationFrame(measure)
+        }
+        measure()
+        return stream
+      } catch (error) {
+        stopMediaStream(stream)
+        if (context && context.state !== 'closed') {
+          await context.close().catch(() => undefined)
+        }
+        throw error
+      }
+    },
+    [
+      assertMediaOperationCurrent,
+      refreshMicrophones,
+      releaseOverlay,
+      stopCapture,
+      stopMicrophone
+    ]
+  )
+
+  const requestMicrophoneAccess = useCallback(async (): Promise<void> => {
+    const operationId = beginMediaOperation()
+    if (operationId === null) return
+    try {
+      const nativeStatus = await window.advx.requestMicrophonePermission()
+      if (mediaOperationRef.current !== operationId) return
+      setMicrophonePermission(nativeStatus)
+      if (nativeStatus === 'denied' || nativeStatus === 'restricted') {
+        throw new DOMException('Microphone access is denied by the operating system.', 'NotAllowedError')
+      }
+      await startMicrophone(operationId, selectedMicrophoneId || undefined)
+    } catch (error) {
+      if (mediaOperationRef.current !== operationId) return
+      await stopMicrophone()
       setActivity((current) => [
         ...current,
         {
           id: crypto.randomUUID(),
           source: 'system',
           author: '系统',
-          text: '麦克风权限被拒绝，直播会话暂时无法开始。'
+          text: describeMediaError(error, 'microphone')
         }
       ])
+    } finally {
+      finishMediaOperation(operationId)
     }
-  }, [])
+  }, [
+    beginMediaOperation,
+    finishMediaOperation,
+    selectedMicrophoneId,
+    startMicrophone,
+    stopMicrophone
+  ])
 
-  useEffect(() => {
-    void navigator.mediaDevices.enumerateDevices().then((devices) => {
-      const inputs = devices.filter((device) => device.kind === 'audioinput')
-      setMicrophones(inputs)
-      setSelectedMicrophoneId(inputs[0]?.deviceId ?? '')
-    })
-  }, [])
+  const changeMicrophone = useCallback(
+    async (deviceId: string): Promise<void> => {
+      setSelectedMicrophoneId(deviceId)
+      if (!microphoneReady) return
 
-  const startMicrophone = useCallback(async (): Promise<void> => {
-    stopMicrophone()
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: selectedMicrophoneId ? { exact: selectedMicrophoneId } : undefined,
-        echoCancellation: true,
-        noiseSuppression: true
+      const operationId = beginMediaOperation()
+      if (operationId === null) return
+      try {
+        await startMicrophone(operationId, deviceId)
+      } catch (error) {
+        if (mediaOperationRef.current !== operationId) return
+        await stopMicrophone()
+        setActivity((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            source: 'system',
+            author: '系统',
+            text: describeMediaError(error, 'microphone')
+          }
+        ])
+      } finally {
+        finishMediaOperation(operationId)
       }
-    })
-    microphoneStreamRef.current = stream
-    const context = new AudioContext()
-    const analyser = context.createAnalyser()
-    analyser.fftSize = 256
-    context.createMediaStreamSource(stream).connect(analyser)
-    audioContextRef.current = context
-
-    const levels = new Uint8Array(analyser.frequencyBinCount)
-    const measure = (): void => {
-      analyser.getByteFrequencyData(levels)
-      const average = levels.reduce((total, value) => total + value, 0) / levels.length
-      setMicrophoneLevel(Math.min(100, Math.round(average * 1.8)))
-      meterFrameRef.current = requestAnimationFrame(measure)
-    }
-    measure()
-    setMicrophoneReady(true)
-  }, [selectedMicrophoneId, stopMicrophone])
+    },
+    [
+      beginMediaOperation,
+      finishMediaOperation,
+      microphoneReady,
+      startMicrophone,
+      stopMicrophone
+    ]
+  )
 
   const emitBarrage = useCallback(
     (text?: string) => {
@@ -408,32 +730,100 @@ export function App(): React.JSX.Element {
   }, [emitBarrage, session.status])
 
   const startSession = async (): Promise<void> => {
+    const operationId = beginMediaOperation()
+    if (operationId === null) return
+    let displayStream: MediaStream | null = captureStreamRef.current
+    let microphoneStream: MediaStream | null = microphoneStreamRef.current
+    sessionStatusRef.current = 'starting'
     dispatch({ type: 'start' })
     try {
-      if (!captureStream) {
-        await startCapture()
+      if (!displayStream) {
+        try {
+          displayStream = await startCapture(operationId, selectedSource?.id ?? '')
+        } catch (error) {
+          throw new Error(describeMediaError(error, 'display'))
+        }
       }
-      if (!microphoneReady) {
-        await startMicrophone()
+      if (mediaOperationRef.current !== operationId) return
+
+      if (!microphoneStream) {
+        try {
+          microphoneStream = await startMicrophone(
+            operationId,
+            selectedMicrophoneId || undefined
+          )
+        } catch (error) {
+          throw new Error(describeMediaError(error, 'microphone'))
+        }
       }
+      if (mediaOperationRef.current !== operationId) return
+
       await window.advx.showOverlay()
+      if (mediaOperationRef.current !== operationId) {
+        await window.advx.hideOverlay()
+        return
+      }
       setOverlayVisible(true)
+      sessionStatusRef.current = 'running'
       dispatch({ type: 'started' })
       emitBarrage('画面和声音都收到啦，今天从这里开始。')
-    } catch {
-      dispatch({ type: 'fail', error: '启动失败，请检查屏幕和麦克风权限。' })
+    } catch (error) {
+      if (mediaOperationRef.current !== operationId) return
+      if (captureStreamRef.current === displayStream) stopCapture()
+      if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
+      const overlayError = await releaseOverlay()
+      if (mediaOperationRef.current !== operationId) return
+      sessionStatusRef.current = 'error'
+      dispatch({
+        type: 'fail',
+        error: `${error instanceof Error ? error.message : '启动失败，请检查屏幕和麦克风权限。'}${
+          overlayError ? ` ${overlayError}` : ''
+        }`
+      })
+    } finally {
+      if (mediaOperationRef.current !== operationId) {
+        if (captureStreamRef.current === displayStream) stopCapture()
+        if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
+      }
+      finishMediaOperation(operationId)
     }
   }
 
   const stopSession = useCallback(async () => {
+    const operationId = beginMediaOperation(true)
+    if (operationId === null) return
+    sessionStatusRef.current = 'stopping'
     dispatch({ type: 'stop' })
     stopCapture()
-    stopMicrophone()
-    await window.advx.clearOverlay()
-    await window.advx.hideOverlay()
-    setOverlayVisible(false)
-    dispatch({ type: 'stopped' })
-  }, [stopCapture, stopMicrophone])
+    await stopMicrophone()
+    try {
+      const overlayError = await releaseOverlay()
+      if (mediaOperationRef.current !== operationId) return
+      if (overlayError) {
+        setActivity((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            source: 'system',
+            author: '系统',
+            text: overlayError
+          }
+        ])
+      }
+    } finally {
+      if (mediaOperationRef.current === operationId) {
+        sessionStatusRef.current = 'idle'
+        dispatch({ type: 'stopped' })
+      }
+      finishMediaOperation(operationId)
+    }
+  }, [
+    beginMediaOperation,
+    finishMediaOperation,
+    releaseOverlay,
+    stopCapture,
+    stopMicrophone
+  ])
 
   useEffect(() => window.advx.onEmergencyStop(() => void stopSession()), [stopSession])
 
@@ -445,12 +835,59 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const togglePause = (): void => {
+  const togglePause = async (): Promise<void> => {
+    const operationId = beginMediaOperation()
+    if (operationId === null) return
+    let displayStream: MediaStream | null = null
+    let microphoneStream: MediaStream | null = null
     if (session.status === 'running') {
+      sessionStatusRef.current = 'paused'
       dispatch({ type: 'pause' })
-    } else if (session.status === 'paused') {
-      dispatch({ type: 'resume' })
+      stopCapture()
+      try {
+        await stopMicrophone()
+      } finally {
+        finishMediaOperation(operationId)
+      }
+      return
     }
+
+    if (session.status === 'paused') {
+      try {
+        displayStream = await startCapture(operationId, selectedSource?.id ?? '')
+        if (mediaOperationRef.current !== operationId) return
+        microphoneStream = await startMicrophone(
+          operationId,
+          selectedMicrophoneId || undefined
+        )
+        if (mediaOperationRef.current !== operationId) return
+        sessionStatusRef.current = 'running'
+        dispatch({ type: 'resume' })
+      } catch (error) {
+        if (mediaOperationRef.current !== operationId) return
+        if (captureStreamRef.current === displayStream) stopCapture()
+        if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
+        const overlayError = await releaseOverlay()
+        if (mediaOperationRef.current !== operationId) return
+        sessionStatusRef.current = 'error'
+        dispatch({
+          type: 'fail',
+          error: `恢复采集失败：${
+            microphoneStream
+              ? describeMediaError(error, 'microphone')
+              : describeMediaError(error, displayStream ? 'microphone' : 'display')
+          }${overlayError ? ` ${overlayError}` : ''}`
+        })
+      } finally {
+        if (mediaOperationRef.current !== operationId) {
+          if (captureStreamRef.current === displayStream) stopCapture()
+          if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
+        }
+        finishMediaOperation(operationId)
+      }
+      return
+    }
+    finishMediaOperation(operationId)
   }
 
   const toggleOverlay = async (): Promise<void> => {
@@ -610,7 +1047,12 @@ export function App(): React.JSX.Element {
                         <span className="panel-subtitle">{selectedSource?.name ?? '尚未选择来源'}</span>
                       </div>
                     </div>
-                    <button className="ghost-button" type="button" onClick={() => setSourcePickerOpen(true)}>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      disabled={isSessionActive || mediaTransitioning}
+                      onClick={() => setSourcePickerOpen(true)}
+                    >
                       <MonitorUp size={15} />
                       {selectedSource ? '更换来源' : '选择来源'}
                     </button>
@@ -657,8 +1099,11 @@ export function App(): React.JSX.Element {
                     <button
                       className="command-button"
                       type="button"
-                      disabled={session.status !== 'running' && session.status !== 'paused'}
-                      onClick={togglePause}
+                      disabled={
+                        mediaTransitioning ||
+                        (session.status !== 'running' && session.status !== 'paused')
+                      }
+                      onClick={() => void togglePause()}
                       title={session.status === 'paused' ? '恢复观察' : '暂停观察'}
                     >
                       {session.status === 'paused' ? <Play size={16} /> : <Pause size={16} />}
@@ -667,7 +1112,7 @@ export function App(): React.JSX.Element {
                     <button
                       className="command-button"
                       type="button"
-                      disabled={!isSessionActive}
+                      disabled={!overlayVisible && barrageTotal === 0}
                       onClick={() => void clearBarrage()}
                       title="清空弹幕"
                     >
@@ -757,7 +1202,7 @@ export function App(): React.JSX.Element {
                         画面采集
                       </span>
                       <strong className={captureStream ? 'ok' : ''}>
-                        {captureStream ? '采集中' : '未连接'}
+                        {captureStatus}
                       </strong>
                     </div>
                     <div className="mixer-row">
@@ -795,8 +1240,8 @@ export function App(): React.JSX.Element {
                     <select
                       id="microphone"
                       value={selectedMicrophoneId}
-                      onChange={(event) => setSelectedMicrophoneId(event.target.value)}
-                      disabled={isSessionActive}
+                      onChange={(event) => void changeMicrophone(event.target.value)}
+                      disabled={isSessionActive || mediaTransitioning}
                     >
                       {microphones.length === 0 && <option value="">未授权设备</option>}
                       {microphones.map((device, index) => (
@@ -809,16 +1254,24 @@ export function App(): React.JSX.Element {
                   <button
                     className="ghost-button"
                     type="button"
-                    disabled={isSessionActive}
+                    disabled={isSessionActive || mediaTransitioning}
                     onClick={() => void requestMicrophoneAccess()}
                   >
                     <Volume2 size={15} />
-                    检测设备
+                    {mediaTransitioning
+                      ? '检测中...'
+                      : microphoneReady
+                        ? '重新检测'
+                        : '授权并检测'}
                   </button>
                 </div>
                 <div className="privacy-note">
                   <KeyRound size={14} />
-                  原始麦克风音频仅供本地处理
+                  {microphonePermission === 'denied' || microphonePermission === 'restricted'
+                    ? '系统麦克风权限受限'
+                    : microphoneReady
+                      ? '正在进行本地音量检测'
+                      : '授权后可实时检测麦克风音量'}
                 </div>
               </section>
             </div>
@@ -910,36 +1363,181 @@ export function App(): React.JSX.Element {
                 <div className="section-intro">
                   <div>
                     <p className="eyebrow">弹幕显示</p>
-                    <h2>覆盖层偏好</h2>
+                    <h2>弹幕覆盖层</h2>
                   </div>
                   <SlidersHorizontal size={24} />
                 </div>
-                <div className="slider-stack">
-                  <label>
-                    <span>
-                      不透明度<strong>{barrageOpacity}%</strong>
-                    </span>
-                    <input
-                      type="range"
-                      min="30"
-                      max="100"
-                      value={barrageOpacity}
-                      onChange={(event) => setBarrageOpacity(Number(event.target.value))}
-                    />
-                  </label>
-                  <label>
-                    <span>
-                      移动速度<strong>{barrageSpeed}</strong>
-                    </span>
-                    <input
-                      type="range"
-                      min="20"
-                      max="100"
-                      value={barrageSpeed}
-                      onChange={(event) => setBarrageSpeed(Number(event.target.value))}
-                    />
-                  </label>
-                </div>
+                {!overlaySettings ? (
+                  <div className="overlay-settings-loading">
+                    {overlaySettingsNotice ?? '正在读取覆盖层设置...'}
+                  </div>
+                ) : (
+                  <div className="overlay-settings-form">
+                    <label className="overlay-target-field">
+                      <span>弹幕目标</span>
+                      <select
+                        aria-label="弹幕目标"
+                        value={overlaySettings.targetDisplayId}
+                        onChange={(event) =>
+                          updateOverlaySettings({
+                            ...overlaySettings,
+                            targetDisplayId: Number(event.target.value)
+                          })
+                        }
+                      >
+                        {overlayTargets.map((target) => (
+                          <option key={target.id} value={target.id}>
+                            {target.isPrimary ? '主屏 · ' : ''}
+                            {target.name} · {target.bounds.width} × {target.bounds.height}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="slider-stack">
+                      <label>
+                        <span>
+                          字号<strong>{overlaySettings.fontSizePx}px</strong>
+                        </span>
+                        <input
+                          aria-label="字号"
+                          type="range"
+                          min="14"
+                          max="36"
+                          value={overlaySettings.fontSizePx}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              fontSizePx: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          移动速度<strong>{overlaySettings.speed}</strong>
+                        </span>
+                        <input
+                          aria-label="移动速度"
+                          type="range"
+                          min="20"
+                          max="100"
+                          value={overlaySettings.speed}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              speed: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          透明度<strong>{overlaySettings.opacity}%</strong>
+                        </span>
+                        <input
+                          aria-label="透明度"
+                          type="range"
+                          min="30"
+                          max="100"
+                          value={overlaySettings.opacity}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              opacity: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          密度<strong>{overlaySettings.density}</strong>
+                        </span>
+                        <input
+                          aria-label="密度"
+                          type="range"
+                          min="1"
+                          max="10"
+                          value={overlaySettings.density}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              density: Number(event.target.value)
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          显示区域顶部<strong>{overlaySettings.region.topPercent}%</strong>
+                        </span>
+                        <input
+                          aria-label="显示区域顶部"
+                          type="range"
+                          min="0"
+                          max={overlaySettings.region.bottomPercent - 20}
+                          value={overlaySettings.region.topPercent}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              region: {
+                                ...overlaySettings.region,
+                                topPercent: Number(event.target.value)
+                              }
+                            })
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>
+                          显示区域底部<strong>{overlaySettings.region.bottomPercent}%</strong>
+                        </span>
+                        <input
+                          aria-label="显示区域底部"
+                          type="range"
+                          min={overlaySettings.region.topPercent + 20}
+                          max="100"
+                          value={overlaySettings.region.bottomPercent}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              region: {
+                                ...overlaySettings.region,
+                                bottomPercent: Number(event.target.value)
+                              }
+                            })
+                          }
+                        />
+                      </label>
+                    </div>
+
+                    <div className="overlay-toggle-row">
+                      <span>
+                        点击穿透
+                        {overlaySettingsNotice && (
+                          <small role="status" aria-live="polite">
+                            {overlaySettingsNotice}
+                          </small>
+                        )}
+                      </span>
+                      <label className="switch">
+                        <input
+                          aria-label="点击穿透"
+                          type="checkbox"
+                          checked={overlaySettings.clickThrough}
+                          onChange={(event) =>
+                            updateOverlaySettings({
+                              ...overlaySettings,
+                              clickThrough: event.target.checked
+                            })
+                          }
+                        />
+                        <span aria-hidden="true" />
+                        <em>{overlaySettings.clickThrough ? '开启' : '关闭'}</em>
+                      </label>
+                    </div>
+                  </div>
+                )}
               </section>
             </div>
           )}
@@ -948,11 +1546,12 @@ export function App(): React.JSX.Element {
         <footer className="status-bar">
           <span className="status-item">
             <i className={`status-dot ${captureStream ? 'online' : ''}`} />
-            画面 {captureStream ? '采集中' : '未连接'}
+            画面 {captureStatus}
+            {screenPermission === 'denied' || screenPermission === 'restricted' ? ' · 权限受限' : ''}
           </span>
           <span className="status-item">
             <i className={`status-dot ${microphoneReady ? 'online' : ''}`} />
-            麦克风 {microphoneReady ? '正常' : '待配置'}
+            麦克风 {microphoneStatus}
           </span>
           <span className="status-item">
             <i className="status-dot demo" />

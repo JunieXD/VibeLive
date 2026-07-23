@@ -86,8 +86,21 @@ button:disabled {
   grid-template-columns: 224px minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
+  padding-top: 32px;
   overflow: hidden;
   background: var(--bg);
+}
+
+.app-shell::before {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 32px;
+  background: var(--bg);
+  content: "";
+  -webkit-app-region: drag;
 }
 
 .sidebar {
@@ -987,6 +1000,7 @@ h2 {
 .settings-columns {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  align-items: start;
   gap: 12px;
 }
 
@@ -1078,6 +1092,76 @@ h2 {
   accent-color: var(--accent);
 }
 
+.overlay-settings-form {
+  min-width: 0;
+}
+
+.overlay-target-field {
+  display: grid;
+  gap: 8px;
+  padding: 18px 20px 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.overlay-target-field select {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--bg-deep);
+  color: var(--text);
+}
+
+.overlay-target-field select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.overlay-target-field option {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.overlay-settings-loading {
+  display: grid;
+  min-height: 280px;
+  padding: 20px;
+  place-items: center;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.overlay-toggle-row {
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.overlay-toggle-row > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.overlay-toggle-row small {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .audience-list {
   display: grid;
 }
@@ -1130,6 +1214,7 @@ h2 {
 }
 
 .switch {
+  position: relative;
   display: grid;
   grid-template-columns: 34px 32px;
   align-items: center;
@@ -1139,8 +1224,12 @@ h2 {
 
 .switch input {
   position: absolute;
+  z-index: 1;
+  width: 34px;
+  height: 19px;
+  margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .switch > span {
@@ -1166,6 +1255,11 @@ h2 {
 
 .switch input:checked + span {
   background: var(--accent);
+}
+
+.switch input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .switch input:checked + span::after {
@@ -1331,6 +1425,19 @@ h2 {
 
   .device-control {
     grid-template-columns: 20px minmax(180px, 280px) auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .settings-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overlay-target-field,
+  .slider-stack,
+  .overlay-toggle-row {
+    padding-right: 16px;
+    padding-left: 16px;
   }
 }
 

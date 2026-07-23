@@ -11,5 +11,7 @@ extraResources:
       - "**/*"
 mac:
   target: dmg
+  extendInfo:
+    NSMicrophoneUsageDescription: ADVX Live uses the selected microphone for voice interaction with AI viewers.
 win:
   target: nsis

@@ -10,6 +10,13 @@ export function createControlWindow(): BrowserWindow {
     minHeight: 720,
     show: false,
     title: "ADVX Live",
+    autoHideMenuBar: true,
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#0e0f12",
+      symbolColor: "#e8eaf0",
+      height: 32
+    },
     backgroundColor: "#0e0f12",
     webPreferences: {
       preload: join(__dirname, "../preload/control.js"),
@@ -19,6 +26,7 @@ export function createControlWindow(): BrowserWindow {
     }
   });
 
+  window.removeMenu();
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url);
     return { action: "deny" };
