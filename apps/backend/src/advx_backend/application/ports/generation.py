@@ -3,7 +3,12 @@ from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeVar
 
-from advx_backend.contracts.generation import AudienceContext, GenerationRequest, Observation
+from advx_backend.contracts.generation import (
+    AudienceContext,
+    GenerationRequest,
+    GenerationResult,
+    Observation,
+)
 
 T = TypeVar("T")
 
@@ -43,6 +48,20 @@ class GenerationWorkItem:
             raise ValueError("work item observation_id does not match its request")
         if self.request_id != self.request.request_id:
             raise ValueError("work item request_id does not match its request")
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationOutput:
+    work_item: GenerationWorkItem
+    result: GenerationResult
+
+    def __post_init__(self) -> None:
+        if self.result.request_id != self.work_item.request_id:
+            raise ValueError("generation output request ids do not match")
+
+    @property
+    def request(self) -> GenerationRequest:
+        return self.work_item.request
 
 
 class AudienceSnapshotProvider(Protocol):

@@ -4,7 +4,12 @@ from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
 from advx_backend.application.ports.persistence import SessionRecordStore
-from advx_backend.application.ports.session import Clock, IdGenerator, SessionStatusPublisher
+from advx_backend.application.ports.session import (
+    Clock,
+    IdGenerator,
+    SessionResource,
+    SessionStatusPublisher,
+)
 from advx_backend.domain.session import (
     SessionOutcome,
     SessionRecord,
@@ -38,6 +43,11 @@ class SessionPersistenceError(SessionError):
         super().__init__("session persistence is unavailable")
 
 
+class SessionInitializationError(SessionError):
+    def __init__(self) -> None:
+        super().__init__("session resources could not be initialized")
+
+
 class InvalidSessionStateError(SessionError):
     def __init__(
         self,
@@ -61,12 +71,14 @@ class SessionService:
         id_generator: IdGenerator,
         publisher: SessionStatusPublisher,
         session_records: SessionRecordStore | None = None,
+        session_resources: SessionResource | None = None,
         app_version: str = "0.1.0",
     ) -> None:
         self._clock = clock
         self._id_generator = id_generator
         self._publisher = publisher
         self._session_records = session_records
+        self._session_resources = session_resources
         self._app_version = app_version
         self._lock = asyncio.Lock()
         self._state = SessionState.IDLE
@@ -104,6 +116,19 @@ class SessionService:
                         extra={"session_id": session_id},
                     )
                     raise SessionPersistenceError from error
+            if self._session_resources is not None:
+                try:
+                    await self._session_resources.start_session(session_id)
+                except asyncio.CancelledError:
+                    await asyncio.shield(self._cleanup_failed_start(session_id, now))
+                    raise
+                except Exception as error:
+                    logger.exception(
+                        "failed to initialize session resources",
+                        extra={"session_id": session_id},
+                    )
+                    await asyncio.shield(self._cleanup_failed_start(session_id, now))
+                    raise SessionInitializationError from error
             self._idle.clear()
             self._session_id = session_id
             self._started_at_ms = now
@@ -283,6 +308,17 @@ class SessionService:
         outcome: SessionOutcome,
     ) -> SessionStatus:
         await self._cancel_tasks(tasks)
+        if self._session_resources is not None:
+            try:
+                await self._session_resources.stop_session(session_id)
+            except Exception as error:
+                logger.warning(
+                    "failed to clean up session resources",
+                    extra={
+                        "session_id": session_id,
+                        "error_type": type(error).__name__,
+                    },
+                )
         ended_at_ms = max(self._started_at_ms or 0, self._clock.now_ms())
         if self._session_records is not None:
             try:
@@ -305,6 +341,34 @@ class SessionService:
             self._idle.set()
         await self._publisher.publish_session_status(idle)
         return idle
+
+    async def _cleanup_failed_start(self, session_id: str, started_at_ms: int) -> None:
+        if self._session_resources is not None:
+            try:
+                await self._session_resources.stop_session(session_id)
+            except Exception as error:
+                logger.warning(
+                    "failed to clean up partially initialized session resources",
+                    extra={
+                        "session_id": session_id,
+                        "error_type": type(error).__name__,
+                    },
+                )
+        if self._session_records is not None:
+            try:
+                await self._session_records.record_finished(
+                    session_id,
+                    ended_at_ms=max(started_at_ms, self._clock.now_ms()),
+                    outcome=SessionOutcome.ERROR,
+                )
+            except Exception as error:
+                logger.warning(
+                    "failed to close session record after initialization failure",
+                    extra={
+                        "session_id": session_id,
+                        "error_type": type(error).__name__,
+                    },
+                )
 
     @staticmethod
     async def _cancel_tasks(tasks: tuple[asyncio.Task[Any], ...]) -> None:

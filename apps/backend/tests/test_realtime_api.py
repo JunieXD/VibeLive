@@ -7,6 +7,7 @@ from starlette.websockets import WebSocketDisconnect
 from advx_backend.bootstrap import build_runtime
 from advx_backend.contracts.protocol import PROTOCOL_VERSION_HEADER
 from advx_backend.contracts.realtime import ClientHello
+from advx_backend.domain.barrage import BarrageEvent
 from advx_backend.main import create_app
 
 LOCAL_TOKEN = "test-local-token"
@@ -142,3 +143,42 @@ def test_realtime_only_forwards_newer_session_revisions(tmp_path: Path) -> None:
 
             assert first["session"]["revision"] > initial_revision
             assert second["session"]["revision"] > first["session"]["revision"]
+
+
+def test_realtime_forwards_validated_barrage_events(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
+    app = create_app(runtime=runtime)
+    event = BarrageEvent(
+        barrage_id="barrage-1",
+        session_id="session-1",
+        observation_id="observation-1",
+        request_id="request-1",
+        audience_id="audience-1",
+        text="hello",
+        created_at_ms=100,
+        expires_at_ms=200,
+    )
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.send_json(hello())
+            websocket.receive_json()
+            assert client.portal is not None
+            client.portal.call(runtime.realtime_broker.publish_barrage, event)
+
+            message = websocket.receive_json()
+
+    assert message == {
+        "type": "barrage.event",
+        "protocol_version": 1,
+        "barrage": {
+            "barrage_id": "barrage-1",
+            "session_id": "session-1",
+            "observation_id": "observation-1",
+            "request_id": "request-1",
+            "audience_id": "audience-1",
+            "text": "hello",
+            "created_at_ms": 100,
+            "expires_at_ms": 200,
+        },
+    }

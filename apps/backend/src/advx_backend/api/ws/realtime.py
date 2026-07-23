@@ -10,6 +10,8 @@ from advx_backend.contracts.protocol import PROTOCOL_VERSION
 from advx_backend.contracts.realtime import (
     BackendPong,
     BackendReady,
+    BarrageEventMessage,
+    BarrageSnapshot,
     ClientHello,
     ClientMessage,
     ClientMessageEnvelope,
@@ -19,6 +21,7 @@ from advx_backend.contracts.realtime import (
     SessionStatusEvent,
 )
 from advx_backend.contracts.session import SessionSnapshot
+from advx_backend.domain.barrage import BarrageEvent
 from advx_backend.domain.session import SessionStatus
 from advx_backend.infrastructure.security.local_token import local_token_matches
 
@@ -45,7 +48,9 @@ def create_realtime_router(
     async def realtime(websocket: WebSocket) -> None:
         await websocket.accept()
         subscription = None
+        barrage_subscription = None
         status_sender: asyncio.Task[None] | None = None
+        barrage_sender: asyncio.Task[None] | None = None
         send_lock = asyncio.Lock()
         try:
             hello = await _receive_hello(websocket, local_token=local_token)
@@ -53,6 +58,7 @@ def create_realtime_router(
                 return
 
             subscription = await broker.subscribe()
+            barrage_subscription = await broker.subscribe_barrages()
             current = await session_service.status()
             await _send_message(
                 websocket,
@@ -67,6 +73,14 @@ def create_realtime_router(
                     after_revision=current.revision,
                 ),
                 name="realtime-status-sender",
+            )
+            barrage_sender = asyncio.create_task(
+                _forward_barrages(
+                    websocket,
+                    subscription=barrage_subscription,
+                    send_lock=send_lock,
+                ),
+                name="realtime-barrage-sender",
             )
 
             while True:
@@ -107,8 +121,13 @@ def create_realtime_router(
             if status_sender is not None:
                 status_sender.cancel()
                 await asyncio.gather(status_sender, return_exceptions=True)
+            if barrage_sender is not None:
+                barrage_sender.cancel()
+                await asyncio.gather(barrage_sender, return_exceptions=True)
             if subscription is not None:
                 await broker.unsubscribe(subscription)
+            if barrage_subscription is not None:
+                await broker.unsubscribe_barrages(barrage_subscription)
 
     return router
 
@@ -233,9 +252,30 @@ async def _forward_statuses(
         last_revision = status.revision
 
 
+async def _forward_barrages(
+    websocket: WebSocket,
+    *,
+    subscription: asyncio.Queue[BarrageEvent],
+    send_lock: asyncio.Lock,
+) -> None:
+    while True:
+        event = await subscription.get()
+        await _send_message(
+            websocket,
+            BarrageEventMessage(barrage=BarrageSnapshot.from_domain(event)),
+            send_lock=send_lock,
+        )
+
+
 async def _send_message(
     websocket: WebSocket,
-    message: BackendReady | BackendPong | SessionStatusEvent | RealtimeProtocolError,
+    message: (
+        BackendReady
+        | BackendPong
+        | SessionStatusEvent
+        | BarrageEventMessage
+        | RealtimeProtocolError
+    ),
     *,
     send_lock: asyncio.Lock | None = None,
 ) -> None:

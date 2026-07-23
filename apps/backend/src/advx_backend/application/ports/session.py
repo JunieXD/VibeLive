@@ -13,3 +13,9 @@ class IdGenerator(Protocol):
 
 class SessionStatusPublisher(Protocol):
     async def publish_session_status(self, status: SessionStatus) -> None: ...
+
+
+class SessionResource(Protocol):
+    async def start_session(self, session_id: str) -> None: ...
+
+    async def stop_session(self, session_id: str) -> None: ...

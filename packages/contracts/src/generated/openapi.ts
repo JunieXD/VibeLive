@@ -217,6 +217,40 @@ export interface components {
             type: "backend.ready";
             session: components["schemas"]["SessionSnapshot"];
         };
+        /** BarrageEventMessage */
+        BarrageEventMessage: {
+            /**
+             * Protocol Version
+             * @default 1
+             * @constant
+             */
+            protocol_version: 1;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "barrage.event";
+            barrage: components["schemas"]["BarrageSnapshot"];
+        };
+        /** BarrageSnapshot */
+        BarrageSnapshot: {
+            /** Barrage Id */
+            barrage_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Observation Id */
+            observation_id: string;
+            /** Request Id */
+            request_id: string;
+            /** Audience Id */
+            audience_id: string;
+            /** Text */
+            text: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Expires At Ms */
+            expires_at_ms: number;
+        };
         /** RealtimeProtocolError */
         RealtimeProtocolError: {
             /**
@@ -260,7 +294,7 @@ export interface components {
             session: components["schemas"]["SessionSnapshot"];
         };
         /** ServerMessageEnvelope */
-        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["RealtimeProtocolError"];
+        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["RealtimeProtocolError"];
     };
     responses: never;
     parameters: never;

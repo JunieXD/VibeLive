@@ -2,12 +2,14 @@ import asyncio
 import logging
 from collections.abc import Iterable, Sequence
 
+from advx_backend.application.generation_mapper import to_generation_observation
 from advx_backend.application.ports.generation import (
     AudienceBatch,
     AudienceSelector,
     AudienceSnapshot,
     AudienceSnapshotProvider,
     GenerationInvocationPlanner,
+    GenerationOutput,
     GenerationTrigger,
     GenerationWorkItem,
     SessionTaskScope,
@@ -20,6 +22,7 @@ from advx_backend.contracts.generation import (
     GenerationResult,
     Observation,
 )
+from advx_backend.domain.observation import Observation as DomainObservation
 from advx_backend.services.audience_engine import keep_known_audiences
 
 logger = logging.getLogger(__name__)
@@ -51,15 +54,29 @@ class GenerationService:
         self._max_concurrency = max_concurrency
         self._model_slots = asyncio.BoundedSemaphore(max_concurrency)
 
-    async def generate(self, observation: Observation) -> tuple[GenerationResult, ...]:
+    async def generate(
+        self,
+        observation: DomainObservation | Observation,
+    ) -> tuple[GenerationResult, ...]:
+        outputs = await self.generate_outputs(observation)
+        return tuple(output.result for output in outputs)
+
+    async def generate_outputs(
+        self,
+        observation: DomainObservation | Observation,
+    ) -> tuple[GenerationOutput, ...]:
+        generation_observation = to_generation_observation(observation)
         task = await self._session_tasks.start_task(
-            observation.session_id,
-            lambda: self._orchestrate(observation),
-            name=(f"generation:{observation.session_id}:{observation.observation_id}"),
+            generation_observation.session_id,
+            lambda: self._orchestrate(generation_observation),
+            name=(
+                f"generation:{generation_observation.session_id}:"
+                f"{generation_observation.observation_id}"
+            ),
         )
         return await task
 
-    async def _orchestrate(self, observation: Observation) -> tuple[GenerationResult, ...]:
+    async def _orchestrate(self, observation: Observation) -> tuple[GenerationOutput, ...]:
         if not await self._session_tasks.accepts_results(observation.session_id):
             return ()
         if not await self._trigger.should_generate(observation=observation):
@@ -127,10 +144,10 @@ class GenerationService:
     async def _run_work_items(
         self,
         work_items: Sequence[GenerationWorkItem],
-    ) -> tuple[GenerationResult, ...]:
+    ) -> tuple[GenerationOutput, ...]:
         indexed_items = iter(enumerate(work_items))
-        pending: set[asyncio.Task[tuple[int, GenerationResult | None]]] = set()
-        accepted: list[GenerationResult | None] = [None] * len(work_items)
+        pending: set[asyncio.Task[tuple[int, GenerationOutput | None]]] = set()
+        accepted: list[GenerationOutput | None] = [None] * len(work_items)
         exhausted = False
 
         try:
@@ -174,9 +191,11 @@ class GenerationService:
         self,
         index: int,
         item: GenerationWorkItem,
-    ) -> tuple[int, GenerationResult | None]:
+    ) -> tuple[int, GenerationOutput | None]:
         try:
-            return index, await self._call_model(item)
+            result = await self._call_model(item)
+            output = None if result is None else GenerationOutput(work_item=item, result=result)
+            return index, output
         finally:
             self._model_slots.release()
 

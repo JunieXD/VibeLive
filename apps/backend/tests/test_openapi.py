@@ -12,6 +12,8 @@ def test_openapi_includes_http_and_realtime_contracts() -> None:
     assert "/sessions/{session_id}/pause" in schema["paths"]
     assert "ClientMessageEnvelope" in schemas
     assert "ServerMessageEnvelope" in schemas
+    assert "BarrageEventMessage" in schemas
+    assert "BarrageSnapshot" in schemas
     start_parameters = schema["paths"]["/sessions"]["post"]["parameters"]
     version_header = next(
         parameter

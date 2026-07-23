@@ -5,6 +5,7 @@ import pytest
 from advx_backend.application.session_service import (
     InvalidSessionStateError,
     SessionAlreadyActiveError,
+    SessionInitializationError,
     SessionNotFoundError,
     SessionPersistenceError,
     SessionService,
@@ -80,6 +81,32 @@ class RecordingSessionStore:
 
     async def recover_interrupted(self, *, ended_at_ms: int) -> int:
         return 0
+
+
+class RecordingSessionResource:
+    def __init__(self, *, fail_start: bool = False) -> None:
+        self.fail_start = fail_start
+        self.started: list[str] = []
+        self.stopped: list[str] = []
+
+    async def start_session(self, session_id: str) -> None:
+        self.started.append(session_id)
+        if self.fail_start:
+            raise RuntimeError("resource unavailable")
+
+    async def stop_session(self, session_id: str) -> None:
+        self.stopped.append(session_id)
+
+
+class BlockingSessionResource(RecordingSessionResource):
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_entered = asyncio.Event()
+
+    async def start_session(self, session_id: str) -> None:
+        self.started.append(session_id)
+        self.start_entered.set()
+        await asyncio.Event().wait()
 
 
 def create_service() -> tuple[SessionService, RecordingPublisher]:
@@ -283,3 +310,57 @@ async def test_session_finish_failure_does_not_block_cleanup() -> None:
 
     assert stopped.state is SessionState.IDLE
     assert stopped.session_id is None
+
+
+@pytest.mark.asyncio
+async def test_session_resource_start_failure_is_cleaned_up() -> None:
+    publisher = RecordingPublisher()
+    session_store = RecordingSessionStore()
+    session_resource = RecordingSessionResource(fail_start=True)
+    service = SessionService(
+        clock=IncrementingClock(),
+        id_generator=SequenceIdGenerator(),
+        publisher=publisher,
+        session_records=session_store,
+        session_resources=session_resource,
+    )
+
+    with pytest.raises(SessionInitializationError):
+        await service.start()
+
+    status = await service.status()
+    assert status.state is SessionState.IDLE
+    assert status.session_id is None
+    assert session_resource.started == ["session-1"]
+    assert session_resource.stopped == ["session-1"]
+    assert session_store.finished[0][0] == "session-1"
+    assert session_store.finished[0][2] is SessionOutcome.ERROR
+    assert publisher.statuses == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_resource_start_is_cleaned_up() -> None:
+    publisher = RecordingPublisher()
+    session_store = RecordingSessionStore()
+    session_resource = BlockingSessionResource()
+    service = SessionService(
+        clock=IncrementingClock(),
+        id_generator=SequenceIdGenerator(),
+        publisher=publisher,
+        session_records=session_store,
+        session_resources=session_resource,
+    )
+    start_task = asyncio.create_task(service.start())
+    await session_resource.start_entered.wait()
+
+    start_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await start_task
+    status = await service.status()
+    assert status.state is SessionState.IDLE
+    assert status.session_id is None
+    assert session_resource.stopped == ["session-1"]
+    assert session_store.finished[0][0] == "session-1"
+    assert session_store.finished[0][2] is SessionOutcome.ERROR
+    assert publisher.statuses == []

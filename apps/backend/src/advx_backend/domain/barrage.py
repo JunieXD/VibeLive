@@ -76,6 +76,23 @@ class BarrageEvent:
     created_at_ms: int
     expires_at_ms: int
 
+    def __post_init__(self) -> None:
+        for field_name in (
+            "barrage_id",
+            "session_id",
+            "observation_id",
+            "request_id",
+            "audience_id",
+            "text",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string")
+        if self.created_at_ms < 0:
+            raise ValueError("created_at_ms must not be negative")
+        if self.expires_at_ms <= self.created_at_ms:
+            raise ValueError("expires_at_ms must be later than created_at_ms")
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BarrageRejection:
