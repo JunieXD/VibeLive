@@ -1,0 +1,223 @@
+import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react'
+import type { SessionStatus } from '../../../shared/session'
+import {
+  COMPRESSION_PROFILES,
+  compressCompositeCanvas,
+  createWaitingVisualBatchSink,
+  deliverAndReleaseVisualBatch,
+  drawCompositeFrame,
+  releaseVisualFrames,
+  requiredVisualSources,
+  selectVisualBatchFrames,
+  type VisualBatchSink,
+  type VisualFrame,
+  type VisualPipelineStatus,
+  type VisualSettings
+} from '../visual'
+
+type UseVisualPipelineOptions = {
+  sessionStatus: SessionStatus
+  visualSettings: VisualSettings
+  captureStream: MediaStream | null
+  cameraStream: MediaStream | null
+  captureStreamRef: MutableRefObject<MediaStream | null>
+  cameraStreamRef: MutableRefObject<MediaStream | null>
+  videoRef: RefObject<HTMLVideoElement | null>
+  cameraVideoRef: RefObject<HTMLVideoElement | null>
+}
+
+type VisualPipeline = {
+  compositeCanvasRef: RefObject<HTMLCanvasElement | null>
+  status: VisualPipelineStatus
+  lastFrameBytes: number | null
+  lastFrameOverTarget: boolean
+  lastBatchAt: number | null
+}
+
+export function useVisualPipeline({
+  sessionStatus,
+  visualSettings,
+  captureStream,
+  cameraStream,
+  captureStreamRef,
+  cameraStreamRef,
+  videoRef,
+  cameraVideoRef
+}: UseVisualPipelineOptions): VisualPipeline {
+  const compositeCanvasRef = useRef<HTMLCanvasElement>(null)
+  const [status, setStatus] = useState<VisualPipelineStatus>('waiting-backend')
+  const [lastFrameBytes, setLastFrameBytes] = useState<number | null>(null)
+  const [lastFrameOverTarget, setLastFrameOverTarget] = useState(false)
+  const [lastBatchAt, setLastBatchAt] = useState<number | null>(null)
+
+  const sessionStatusRef = useRef(sessionStatus)
+  const pendingFramesRef = useRef<VisualFrame[]>([])
+  const runRef = useRef(0)
+  const sampleBusyRef = useRef<number | null>(null)
+  const batchBusyRef = useRef<number | null>(null)
+  const frameSequenceRef = useRef(0)
+  const batchSinkRef = useRef<VisualBatchSink>(createWaitingVisualBatchSink())
+
+  useEffect(() => {
+    sessionStatusRef.current = sessionStatus
+  }, [sessionStatus])
+
+  useEffect(() => {
+    const runId = runRef.current + 1
+    runRef.current = runId
+    releaseVisualFrames(pendingFramesRef.current)
+    pendingFramesRef.current = []
+
+    if (sessionStatus !== 'running') {
+      setStatus('waiting-backend')
+      return
+    }
+
+    setStatus('waiting-backend')
+    const profile = COMPRESSION_PROFILES[visualSettings.compressionPreset]
+    const batchAbortController = new AbortController()
+
+    const sampleFrame = async (): Promise<void> => {
+      if (sampleBusyRef.current !== null) return
+      const requirements = requiredVisualSources(visualSettings.mode)
+      const screenVideo = videoRef.current
+      const cameraVideo = cameraVideoRef.current
+      if (
+        (requirements.screen &&
+          (!captureStreamRef.current || !screenVideo || screenVideo.videoWidth === 0)) ||
+        (requirements.camera &&
+          (!cameraStreamRef.current || !cameraVideo || cameraVideo.videoWidth === 0))
+      ) {
+        return
+      }
+
+      const canvas = compositeCanvasRef.current
+      if (!canvas) return
+      sampleBusyRef.current = runId
+      try {
+        const primaryVideo = visualSettings.mode === 'camera' ? cameraVideo : screenVideo
+        const outputLongEdge = Math.min(
+          profile.maxLongEdge,
+          Math.max(primaryVideo?.videoWidth ?? 0, primaryVideo?.videoHeight ?? 0)
+        )
+        if (outputLongEdge <= 0) return
+        const drawn = drawCompositeFrame(canvas, {
+          mode: visualSettings.mode,
+          screen: requirements.screen ? screenVideo : null,
+          camera: requirements.camera ? cameraVideo : null,
+          mirrorCamera: visualSettings.mirrorCamera,
+          pipPosition: visualSettings.pipPosition,
+          pipSize: visualSettings.pipSize,
+          longEdge: outputLongEdge
+        })
+        if (!drawn) return
+
+        const encoded = await compressCompositeCanvas(canvas, profile)
+        if (runRef.current !== runId || sessionStatusRef.current !== 'running') return
+        const sequence = frameSequenceRef.current + 1
+        frameSequenceRef.current = sequence
+        const frame: VisualFrame = {
+          frameId: `visual-${Date.now()}-${sequence}`,
+          capturedAt: Date.now(),
+          width: encoded.width,
+          height: encoded.height,
+          mode: visualSettings.mode,
+          bytes: encoded.blob.size,
+          overTarget: encoded.overTarget,
+          blob: encoded.blob
+        }
+        pendingFramesRef.current.push(frame)
+        setLastFrameBytes(frame.bytes)
+        setLastFrameOverTarget(frame.overTarget)
+      } catch {
+        if (runRef.current === runId) setStatus('compression-failed')
+      } finally {
+        if (sampleBusyRef.current === runId) sampleBusyRef.current = null
+      }
+    }
+
+    const flushBatch = async (): Promise<void> => {
+      if (batchBusyRef.current !== null || pendingFramesRef.current.length === 0) return
+      batchBusyRef.current = runId
+      const pending = pendingFramesRef.current
+      pendingFramesRef.current = []
+      const selected = selectVisualBatchFrames(pending)
+      const selectedIds = new Set(selected.map((frame) => frame.frameId))
+      releaseVisualFrames(pending.filter((frame) => !selectedIds.has(frame.frameId)))
+      if (runRef.current !== runId) {
+        releaseVisualFrames(selected)
+        batchBusyRef.current = null
+        return
+      }
+
+      const createdAt = Date.now()
+      try {
+        const result = await deliverAndReleaseVisualBatch(
+          batchSinkRef.current,
+          {
+            batchId: `visual-batch-${createdAt}`,
+            createdAt,
+            frames: selected
+          },
+          batchAbortController.signal
+        )
+        if (runRef.current === runId) {
+          setLastBatchAt(createdAt)
+          setStatus(result === 'accepted' ? 'ready' : 'waiting-backend')
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        if (runRef.current === runId) setStatus('waiting-backend')
+      } finally {
+        if (batchBusyRef.current === runId) batchBusyRef.current = null
+      }
+    }
+
+    void sampleFrame()
+    const sampleTimer = window.setInterval(
+      () => void sampleFrame(),
+      visualSettings.sampleIntervalMs
+    )
+    const batchTimer = window.setInterval(() => void flushBatch(), 3000)
+    return () => {
+      window.clearInterval(sampleTimer)
+      window.clearInterval(batchTimer)
+      batchAbortController.abort()
+      if (runRef.current === runId) runRef.current += 1
+      if (sampleBusyRef.current === runId) sampleBusyRef.current = null
+      if (batchBusyRef.current === runId) batchBusyRef.current = null
+      releaseVisualFrames(pendingFramesRef.current)
+      pendingFramesRef.current = []
+    }
+  }, [
+    cameraStream,
+    cameraStreamRef,
+    cameraVideoRef,
+    captureStream,
+    captureStreamRef,
+    sessionStatus,
+    videoRef,
+    visualSettings.compressionPreset,
+    visualSettings.mirrorCamera,
+    visualSettings.mode,
+    visualSettings.pipPosition,
+    visualSettings.pipSize,
+    visualSettings.sampleIntervalMs
+  ])
+
+  useEffect(
+    () => () => {
+      releaseVisualFrames(pendingFramesRef.current)
+      pendingFramesRef.current = []
+    },
+    []
+  )
+
+  return {
+    compositeCanvasRef,
+    status,
+    lastFrameBytes,
+    lastFrameOverTarget,
+    lastBatchAt
+  }
+}

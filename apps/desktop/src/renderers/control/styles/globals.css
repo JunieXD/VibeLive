@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --bg: #0e0f12;
+  --bg-deep: #0a0b0e;
+  --chrome: #131419;
+  --panel: #1a1b21;
+  --panel-raise: #20222a;
+  --border: #262832;
+  --border-strong: #31343f;
+  --text: #e8eaf0;
+  --text-dim: #9aa0ad;
+  --text-faint: #666c78;
+  --accent: #d5ff55;
+  --accent-ink: #161a08;
+  --accent-soft: rgb(213 255 85 / 12%);
+  --live: #ff4159;
+  --live-soft: rgb(255 65 89 / 14%);
+  --ok: #3ddc97;
+  --ok-soft: rgb(61 220 151 / 12%);
+  --amber: #f5b83d;
+  --amber-soft: rgb(245 184 61 / 12%);
+  --danger: #ff5f52;
+  font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  letter-spacing: 0;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+select {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background: #33363f;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444754;
+  background-clip: padding-box;
+}
+
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h2 {
+  margin-bottom: 0;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

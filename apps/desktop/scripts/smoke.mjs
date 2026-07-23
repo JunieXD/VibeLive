@@ -176,14 +176,16 @@ try {
   if ((await modeSelect.locator('option').count()) !== 6) {
     throw new Error('Expected six built-in audience modes.')
   }
-  if ((await page.locator('.aw-persona-row').count()) !== 32) {
+  if ((await page.locator('[data-audience-persona-row]').count()) !== 32) {
     throw new Error('Expected the complete 32-persona catalog.')
   }
   await modeSelect.selectOption('room-6657')
   await page.waitForFunction(
-    () => document.querySelector('.aw-mode-copy strong')?.textContent === '6657 玩机器风格'
+    () =>
+      document.querySelector('[data-audience-mode-copy] strong')?.textContent ===
+      '6657 玩机器风格'
   )
-  const modeRanges = await page.locator('.aw-range-control input').evaluateAll((inputs) =>
+  const modeRanges = await page.locator('[data-audience-range] input').evaluateAll((inputs) =>
     inputs.map((input) => input.value)
   )
   if (modeRanges.join(',') !== '6,10,20,28') {
@@ -192,7 +194,7 @@ try {
 
   await page.getByRole('button', { name: '成长梗库', exact: true }).click()
   await page.getByRole('button', { name: '手动新增梗', exact: true }).click()
-  await page.locator('.aw-meme-form textarea').first().fill('烟火味这下有说法了')
+  await page.locator('[data-audience-meme-form] textarea').first().fill('烟火味这下有说法了')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await page.waitForTimeout(700)
   await page.getByText('烟火味这下有说法了', { exact: true }).first().waitFor()
@@ -206,8 +208,8 @@ try {
   const audienceOverflow = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth > window.innerWidth,
     workspace:
-      (document.querySelector('.audience-workspace')?.scrollWidth ?? 0) >
-      (document.querySelector('.audience-workspace')?.clientWidth ?? 0)
+      (document.querySelector('[data-audience-workspace]')?.scrollWidth ?? 0) >
+      (document.querySelector('[data-audience-workspace]')?.clientWidth ?? 0)
   }))
   if (audienceOverflow.document || audienceOverflow.workspace) {
     throw new Error(`Audience workspace overflowed at 1120x720: ${JSON.stringify(audienceOverflow)}`)
@@ -231,10 +233,10 @@ try {
     return {
       viewportHeight: window.innerHeight,
       document: metrics('html'),
-      workspace: metrics('.workspace'),
-      audience: metrics('.audience-workspace'),
-      layout: metrics('.aw-persona-layout'),
-      editor: metrics('.aw-editor')
+      workspace: metrics('[data-control-workspace]'),
+      audience: metrics('[data-audience-workspace]'),
+      layout: metrics('[data-audience-persona-layout]'),
+      editor: metrics('[data-audience-persona-editor]')
     }
   })
   if (
@@ -422,8 +424,8 @@ try {
   }
 
   await page.getByRole('button', { name: '选择来源', exact: true }).click()
-  await page.locator('.source-option').first().waitFor()
-  const sourceCount = await page.locator('.source-option').count()
+  await page.locator('[data-source-option]').first().waitFor()
+  const sourceCount = await page.locator('[data-source-option]').count()
   assert.ok(sourceCount >= 1, 'Desktop source IPC returned no sources.')
   await page.getByTitle('关闭').click()
   await page.getByRole('button', { name: '设置', exact: true }).click()
@@ -544,7 +546,7 @@ try {
   await page.evaluate(() => window.advx.clearOverlay())
   await page.getByRole('button', { name: '直播控制台', exact: true }).click()
   await page.getByRole('button', { name: '选择来源', exact: true }).click()
-  await page.locator('.source-option').first().waitFor()
+  await page.locator('[data-source-option]').first().waitFor()
 
   await page.evaluate(() => {
     const original = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices)
@@ -558,7 +560,7 @@ try {
       return stream
     }
   })
-  await page.locator('.source-option').first().click()
+  await page.locator('[data-source-option]').first().click()
   await page.getByRole('button', { name: '使用此来源', exact: true }).click()
   await page.waitForFunction(() => globalThis.__advxSmokeReleaseDisplayCapture)
   await electronApp.evaluate(({ BrowserWindow }) => {
@@ -584,7 +586,7 @@ try {
   }
 
   await page.getByRole('button', { name: '选择来源', exact: true }).click()
-  await page.locator('.source-option').first().click()
+  await page.locator('[data-source-option]').first().click()
   await page.getByRole('button', { name: '使用此来源', exact: true }).click()
   try {
     await page.locator('video').waitFor({ timeout: 15_000 })
@@ -611,9 +613,9 @@ try {
     }
   })
   await page.getByRole('button', { name: '更换来源', exact: true }).click()
-  await page.locator('.source-option').first().waitFor()
-  const switchSourceCount = await page.locator('.source-option').count()
-  await page.locator('.source-option').nth(switchSourceCount > 1 ? 1 : 0).click()
+  await page.locator('[data-source-option]').first().waitFor()
+  const switchSourceCount = await page.locator('[data-source-option]').count()
+  await page.locator('[data-source-option]').nth(switchSourceCount > 1 ? 1 : 0).click()
   await page.getByRole('button', { name: '使用此来源', exact: true }).click()
   await page.waitForFunction(() => document.body.textContent?.includes('录屏权限被拒绝'))
   const sourceNameAfterFailedSwitch = await page
@@ -885,8 +887,11 @@ try {
     modeLocked: await page.getByLabel('观众模式').isDisabled(),
     duplicateLocked: await page.getByRole('button', { name: '复制为自定义模式' }).isDisabled(),
     personaSaveLocked: await page.getByRole('button', { name: '保存覆盖' }).isDisabled(),
-    activityEditable: await page.locator('.aw-range-control input').first().isEnabled(),
-    participationEditable: await page.locator('.aw-persona-row .aw-switch input').first().isEnabled()
+    activityEditable: await page.locator('[data-audience-range] input').first().isEnabled(),
+    participationEditable: await page
+      .locator('[data-audience-persona-row] [data-audience-participation] input')
+      .first()
+      .isEnabled()
   }
   if (
     !liveEditPolicy.modeLocked ||
@@ -933,6 +938,42 @@ try {
   await page.getByRole('button', { name: '恢复', exact: true }).click()
   await page.waitForFunction(() => document.querySelectorAll('.video-stage video').length === 2)
   await page.waitForFunction(() => document.body.textContent?.includes('直播中'))
+  try {
+    await page.waitForFunction(() => {
+      const screen = document.querySelector('.screen-video')
+      const camera = document.querySelector('.camera-video')
+      return (
+        screen instanceof HTMLVideoElement &&
+        camera instanceof HTMLVideoElement &&
+        screen.srcObject?.getVideoTracks()[0]?.readyState === 'live' &&
+        camera.srcObject?.getVideoTracks()[0]?.readyState === 'live'
+      )
+    })
+  } catch (error) {
+    const resumeDiagnostics = await page.evaluate(() => {
+      const describe = (selector) => {
+        const video = document.querySelector(selector)
+        return video instanceof HTMLVideoElement
+          ? {
+              hasSource: video.srcObject instanceof MediaStream,
+              tracks: video.srcObject
+                ? video.srcObject.getTracks().map((track) => ({
+                    kind: track.kind,
+                    readyState: track.readyState
+                  }))
+                : []
+            }
+          : null
+      }
+      return {
+        screen: describe('.screen-video'),
+        camera: describe('.camera-video'),
+        text: document.body.textContent
+      }
+    })
+    console.error(`Resume media diagnostics: ${JSON.stringify(resumeDiagnostics)}`)
+    throw error
+  }
   await page.locator('.screen-video').evaluate((video) => {
     globalThis.__advxSmokeDisplayTrack = video.srcObject?.getVideoTracks()[0]
   })
@@ -950,6 +991,11 @@ try {
   )
   await page.getByRole('button', { name: '开启摄像头', exact: true }).click()
   await page.waitForFunction(() => document.querySelectorAll('.video-stage video').length === 2)
+  await page.waitForFunction(
+    () =>
+      document.querySelector('.camera-video')?.srcObject?.getVideoTracks()[0]?.readyState ===
+      'live'
+  )
   await page.locator('.camera-video').evaluate((video) => {
     globalThis.__advxSmokeCameraTrack = video.srcObject?.getVideoTracks()[0]
   })
@@ -1009,7 +1055,7 @@ try {
 
   await page.getByRole('button', { name: /AI 观众/ }).click()
   await page.getByLabel('观众模式').selectOption('room-6657')
-  await page.locator('.aw-range-control input').first().fill('7')
+  await page.locator('[data-audience-range] input').first().fill('7')
 
   console.log(
     `Monorepo desktop smoke passed: ${sourceCount} sources, six audience modes, 32 personas, live edit policy, meme candidate ingestion/undo, camera denied before explicit enable, ${cameraDevices} camera entries, three visual modes, ${compressedKilobytes} KB composite JPEG, versioned settings restore, microphone meter peak ${microphonePeak}%, and complete pause/stop track cleanup.`
