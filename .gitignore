@@ -33,3 +33,6 @@ apps/backend/openapi.json
 .env
 .env.*
 !.env.example
+
+.agents/
+skills-lock.json
