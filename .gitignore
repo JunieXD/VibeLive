@@ -19,13 +19,8 @@ htmlcov/
 # Generated contracts
 apps/backend/openapi.json
 
-# Local runtime data and downloaded models
+# Local runtime data
 .advx-data/
-resources/models/files/
-*.bin
-*.gguf
-*.onnx
-*.safetensors
 
 # IDE / OS
 .DS_Store

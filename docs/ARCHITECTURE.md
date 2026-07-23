@@ -2,7 +2,7 @@
 
 > 状态：Architecture Baseline
 >
-> 第一版技术基线：Electron + React + TypeScript、FastAPI + `uv`、`faster-whisper` + Silero VAD、OpenAI-compatible Model Provider。
+> 第一版技术基线：Electron + React + TypeScript、FastAPI + `uv`、StepFun Step Plan ASR、OpenAI-compatible Model Provider。
 
 ## 1. 架构目标
 
@@ -12,12 +12,14 @@
 flowchart TB
     USER["用户<br/>屏幕 · 语音 · 文字"]
     DESKTOP["Electron 桌面端<br/>采集 · 交互 · 弹幕展示"]
-    CORE["FastAPI AI 核心<br/>本地 ASR · 上下文理解 · 观众编排"]
+    CORE["FastAPI AI 核心<br/>ASR 接入 · 上下文理解 · 观众编排"]
     AUDIENCE[("AI 观众系统<br/>人格 · 偏好 · 关系 · 记忆")]
+    ASR["StepFun ASR<br/>语音转写"]
     MODEL["外部多模态模型<br/>OpenAI-compatible"]
 
     USER <-->|"输入与实时反馈"| DESKTOP
     DESKTOP <-->|"本地实时通信"| CORE
+    CORE <-->|"音频段与转写"| ASR
     CORE <-->|"观众状态与弹幕"| AUDIENCE
     AUDIENCE <-->|"多模态请求与响应"| MODEL
 ```
@@ -26,7 +28,7 @@ flowchart TB
 
 - Electron UI 不因 ASR、模型或网络故障而失去控制能力。
 - 采集、ASR、上下文、模型接入和渲染可以独立替换和测试。
-- 外部模型供应商的协议不会扩散到业务模块。
+- 外部服务供应商的协议不会扩散到业务模块。
 - 旧观察和旧会话的结果不会在错误时间显示。
 - Windows 和 macOS 可以使用不同的系统实现，但共享领域合同。
 - 用户停止后，采集和异步任务能够真正结束。
@@ -48,7 +50,7 @@ Electron 负责与操作系统和用户界面直接相关的能力：
 - 启动、监督和停止本地 FastAPI 后端。
 - 平台安全存储能力的接入。
 
-Renderer 不应直接持有模型凭据，也不应直接调用外部模型服务。
+Renderer 不应直接持有 ASR 或模型凭据，也不应直接调用外部服务。
 
 ### 2.2 FastAPI 本地后端
 
@@ -56,7 +58,7 @@ FastAPI 负责本地计算和 AI 编排：
 
 - 会话生命周期。
 - 接收有界的画面帧和音频数据。
-- 本地 ASR 调度。
+- ASR Provider 调度。
 - 近期画面与转写缓冲。
 - 用户文字、语音转写和公开弹幕组成的房间事件流。
 - 稳定观众档案、关系状态和观众独立记忆。
@@ -103,7 +105,7 @@ Capture 负责把系统媒体能力转换为内部数据：
 - 通过 Electron/Chromium Media API 获取用户授权的屏幕或窗口视频轨道。
 - 通过 Electron/Chromium Media API 获取用户选择的麦克风音频轨道。
 - 对画面进行缩放、编码、节流和必要的变化检测。
-- 通过 AudioWorklet 对音频进行本地 ASR 所需的格式转换和有界分块。
+- 通过 AudioWorklet 对音频进行 ASR 所需的格式转换和有界分块。
 - 在暂停、来源结束或停止时释放轨道和缓冲。
 
 采样频率、图像尺寸、编码格式和音频块长度属于运行参数，需要实测后配置，不能写死在领域合同中。
@@ -142,7 +144,7 @@ idle -> starting -> running <-> paused -> stopping -> idle
 
 ### 4.2 ASR Provider
 
-业务层依赖本地 `AsrProvider`，而不是具体 ASR 引擎。
+业务层依赖 `AsrProvider`，而不是具体 ASR 服务协议。
 
 概念接口：
 
@@ -150,6 +152,7 @@ idle -> starting -> running <-> paused -> stopping -> idle
 class AsrProvider(Protocol):
     async def start(self, config: AsrConfig) -> None: ...
     async def push_audio(self, chunk: AudioChunk) -> None: ...
+    async def commit(self) -> None: ...
     async def results(self) -> AsyncIterator[TranscriptSegment]: ...
     async def stop(self) -> None: ...
 ```
@@ -161,11 +164,13 @@ class AsrProvider(Protocol):
 - 开始和结束时间。
 - 是否为最终结果。
 
-第一版实现 `FasterWhisperAsrProvider`，使用 `faster-whisper` 完成识别、Silero VAD 完成语音活动检测与分段，只把稳定的最终文本用于模型上下文。
+第一版实现 `StepFunAsrProvider`，通过 Step Plan 的 HTTP + SSE 接口调用 `stepaudio-2.5-asr`。Electron 将麦克风音频转换为单声道 16 kHz PCM S16LE 并通过本地数据面发送给 FastAPI；Provider 在音频段提交后编码请求，并把供应商的增量、最终和错误事件转换为统一结果。
+
+Step Plan 接口一次提交一个有限音频段，不提供持续上传音频的双向流。`commit()` 只表示当前音频段结束，不规定使用静音检测、固定窗口或其他分段算法。Provider 串行处理已提交片段，避免后提交的语音先成为房间事件。具体分段方式和时长需要通过延迟与准确率实测决定。
 
 每个最终转写会转换为来源为 `user_voice` 的 `RoomEvent`。用户从 React UI 发送的文字则由 Main/FastAPI 校验后转换为 `user_text` 事件；两者在对话中地位相同，但保留来源信息。
 
-ASR 模型在首次使用前下载并校验版本与哈希。CPU 是最低运行基线；模型大小、量化方式和平台加速根据 Windows/macOS 实测配置，不能泄漏到上层业务合同。
+StepFun 的 endpoint、model、鉴权和 SSE 事件只存在于 Adapter 内。业务层和跨进程合同不出现供应商字段；如果 Step Plan 延迟不能满足体验，可以新增双向流式 ASR Adapter，而不修改房间事件和 Audience Engine。
 
 ### 4.3 Room 与观众模型
 
@@ -352,10 +357,12 @@ Electron 与 FastAPI 之间需要两类通信：
 | -------- | ------------------------------ | -------------------------------------- |
 | 普通设置 | 弹幕样式、来源偏好、语言       | 保存在本地配置文件                     |
 | 观众状态 | 人格、偏好、关系、记忆         | 本地持久化，可查看和删除               |
-| 模型设置 | Provider 类型、endpoint、model | 可本地持久化并可编辑                   |
+| 外部服务设置 | ASR/模型 Provider、endpoint、model | 可本地持久化并可编辑                |
 | 敏感凭据 | API Key、访问令牌              | 使用平台安全存储，不进入普通配置和日志 |
 
-模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不读取已保存的明文凭据；Main 使用本次启动的短期鉴权通道将当前会话所需凭据注入 FastAPI 内存，停止后清理。凭据不得进入命令行参数、环境变量、普通配置和日志。
+ASR 和模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不读取已保存的明文凭据；Main 使用本次启动的短期鉴权通道将当前会话所需凭据注入 FastAPI 内存，停止后清理。凭据不得进入命令行参数、环境变量、普通配置和日志。
+
+控制界面必须展示当前启用的 ASR 服务，并在开始采集前说明麦克风音频会发送到 StepFun。原始音频默认不持久化，也不得写入日志；弹幕生成模型只接收最终转写文本。
 
 第一版没有账号或云同步。观众档案、关系和长期记忆需要本地持久化；具体使用版本化文件还是 SQLite，在数据规模、迁移和并发需求验证后决定。Electron 和 FastAPI 使用结构化本地日志，通过 `session_id`、`observation_id` 和 `request_id` 关联事件，但不记录原始音频、完整画面或长段转写。
 
@@ -378,7 +385,7 @@ Electron 与 FastAPI 之间需要两类通信：
 | ------------------ | --------------------------------------------------- |
 | 屏幕来源结束       | 停止使用旧画面，提示用户重新选择或停止会话          |
 | 麦克风断开         | 停止 ASR，明确进入仅画面状态或结束会话              |
-| ASR 失败           | 不把不稳定文本送入模型，保留控制和停止能力          |
+| ASR 失败或网络中断 | 不把不稳定文本送入模型，保留文字输入、控制和停止能力 |
 | Provider 不可用    | 停止新的模型请求，显示明确状态，不伪造上下文弹幕    |
 | 模型输出非法       | 丢弃本次候选并记录脱敏错误                          |
 | 观众 ID 非法或串号 | 丢弃候选，不更新关系与记忆                          |
@@ -395,7 +402,7 @@ Electron 与 FastAPI 之间需要两类通信：
 - 透明置顶窗口和鼠标穿透。
 - 多 DPI、Retina 和坐标换算。
 - 全局快捷键、托盘和应用退出。
-- FastAPI、Python Runtime 和本地 ASR 模型的打包与签名。
+- FastAPI 和 Python Runtime 的打包与签名。
 - 操作系统休眠、锁屏和设备热插拔后的行为。
 
 平台适配应位于 Electron 系统层或打包层，不能让 Windows/macOS 分支扩散到 Audience Engine 和 Model Provider。
@@ -405,17 +412,17 @@ Electron 与 FastAPI 之间需要两类通信：
 - 领域单元测试：上下文选择、会话失效、TTL、去重和调度。
 - 观众状态测试：人格稳定、记忆隔离、点名路由、关系更新和删除生效。
 - Provider 合同测试：成功、无图像能力、非法输出、超时、取消、限流和断流。
-- ASR 合同测试：音频格式、部分结果、最终结果、停止和模型加载失败。
+- ASR 合同测试：音频格式、SSE 分片、部分结果、最终结果、超时、限流、断流和停止。
 - Electron 集成测试：开始、暂停、清屏、停止和后端崩溃。
 - 两个平台的真实系统测试：权限、点击穿透、采集释放和打包启动。
-- 端到端测试：真实屏幕、真实麦克风、本地 ASR 和至少一个真实外部模型。
+- 端到端测试：真实屏幕、真实麦克风、StepFun ASR 和至少一个真实外部模型。
 
 模拟服务可以覆盖错误路径，但不能代替最终的真实多模态验收。
 
 ## 11. 明确未定的实现
 
 - Python Runtime 使用哪种目录式冻结工具随 Electron 分发。
-- `faster-whisper` 的默认模型、量化和可选 GPU/平台加速方案。
+- 麦克风音频的分段方式，以及 Step Plan SSE 的延迟是否满足实时互动体验。
 - 屏幕帧在进程间使用何种编码和压缩。
 - 双平台实测后采用哪个成熟弹幕库。
 - 观众发言时机、参与选择、批量/独立调用和彼此接话算法。

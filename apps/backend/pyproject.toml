@@ -10,12 +10,6 @@ dependencies = [
     "uvicorn[standard]>=0.35,<1",
 ]
 
-[project.optional-dependencies]
-asr = [
-    "faster-whisper>=1.2,<2",
-    "silero-vad>=6,<7",
-]
-
 [dependency-groups]
 dev = [
     "pytest>=8.4,<9",
