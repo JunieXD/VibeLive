@@ -27,6 +27,7 @@ describe('desktop media helpers', () => {
 
   it('returns actionable permission errors for each capture type', () => {
     expect(describeMediaError({ name: 'NotAllowedError' }, 'display')).toContain('录屏权限')
+    expect(describeMediaError({ name: 'NotAllowedError' }, 'camera')).toContain('摄像头权限')
     expect(describeMediaError({ name: 'NotAllowedError' }, 'microphone')).toContain('麦克风权限')
   })
 })

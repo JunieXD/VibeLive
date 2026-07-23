@@ -1,17 +1,22 @@
 import {
   Activity,
   AudioLines,
+  Camera,
+  CameraOff,
   CircleStop,
   Clock,
   Eye,
   EyeOff,
+  FlipHorizontal2,
   Gauge,
+  Image as ImageIcon,
   KeyRound,
   LayoutDashboard,
   MessageSquareText,
   Mic,
   MonitorUp,
   Pause,
+  PictureInPicture2,
   Play,
   Radio,
   RefreshCw,
@@ -25,16 +30,52 @@ import {
   X
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import {
+  archiveStaleMemes,
+  autoIngestMeme,
+  compileAudienceWorkspaceSnapshot,
+  createInitialAudienceWorkspace,
+  recordMemeUsage,
+  type AudienceWorkspaceState,
+  type MemeCandidate,
+  type RuntimePersona
+} from '../../shared/audience'
 import type {
   BarrageEvent,
   DesktopSource,
   MediaAccessStatus,
   OverlaySettings,
-  OverlayTarget
+  OverlayTarget,
+  SaveAudienceWorkspaceResult
 } from '../../shared/contracts'
-import { demoLines, initialAudience, type AudienceMember } from '../../shared/demo'
+import { demoLines } from '../../shared/demo'
 import { initialSessionState, sessionReducer, type SessionStatus } from '../../shared/session'
+import { AudienceWorkspace } from './AudienceWorkspace'
 import { calculateMicrophoneLevel, describeMediaError, stopMediaStream } from './media'
+import {
+  COMPRESSION_PROFILES,
+  cameraPreviewTransform,
+  createWaitingVisualBatchSink,
+  deliverAndReleaseVisualBatch,
+  drawCompositeFrame,
+  formatFrameKilobytes,
+  getPipRectangle,
+  loadVisualSettings,
+  releaseVisualFrames,
+  requiredVisualSources,
+  resolveVisualMode,
+  saveVisualSettings,
+  selectVisualBatchFrames,
+  compressCompositeCanvas,
+  type CompressionPreset,
+  type PipPosition,
+  type PipSize,
+  type VisualBatchSink,
+  type VisualFrame,
+  type VisualMode,
+  type VisualPipelineStatus,
+  type VisualSettings
+} from './visual'
 
 type ActiveView = 'live' | 'audience' | 'settings'
 
@@ -55,11 +96,85 @@ const statusLabels: Record<SessionStatus, string> = {
   error: '需要处理'
 }
 
+const visualModeLabels: Record<VisualMode, string> = {
+  screen: '屏幕',
+  camera: '摄像头',
+  pip: '画中画'
+}
+
+const pipPositionLabels: Record<PipPosition, string> = {
+  'top-left': '左上',
+  'top-right': '右上',
+  'bottom-left': '左下',
+  'bottom-right': '右下'
+}
+
+const pipSizeLabels: Record<PipSize, string> = {
+  small: '小',
+  medium: '中',
+  large: '大'
+}
+
+const visualPipelineLabels: Record<VisualPipelineStatus, string> = {
+  'waiting-backend': '等待后端接入',
+  ready: '已就绪',
+  'compression-failed': '压缩失败'
+}
+
 function formatElapsed(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
   return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':')
+}
+
+function formatBatchTime(timestamp: number | null): string {
+  return timestamp === null
+    ? '--:--:--'
+    : new Date(timestamp).toLocaleTimeString('zh-CN', { hour12: false })
+}
+
+function selectWeightedPersona(
+  personas: readonly RuntimePersona[],
+  sequence: number
+): RuntimePersona | undefined {
+  const totalWeight = personas.reduce((total, persona) => total + persona.weight, 0)
+  if (totalWeight <= 0) return personas[0]
+  let cursor = (sequence * 7) % totalWeight
+  for (const persona of personas) {
+    cursor -= persona.weight
+    if (cursor < 0) return persona
+  }
+  return personas.at(-1)
+}
+
+function proposeDemoMemeCandidate(input: {
+  modeId: string
+  text: string
+  sourceKinds: MemeCandidate['sourceKinds']
+  evidenceSummary: string
+  personaTags?: readonly string[]
+}): MemeCandidate | null {
+  const text = input.text.trim()
+  const looksLikeRoomMeme =
+    /(这下|有说法|绷|笑死|离谱|稳了|好家伙|来了|寄了?|赢了?|输了?|典|急了?|孝|乐|麻了?|草|牛|神|逆天|抽象|懂不懂|[?？!！]{2,}|(.)\1{2,})/u.test(text)
+  if (
+    text.length < 2 ||
+    text.length > 60 ||
+    !looksLikeRoomMeme ||
+    /(?:1[3-9]\d{9}|[\w.+-]+@[\w.-]+\.[a-z]{2,})/i.test(text)
+  ) {
+    return null
+  }
+  return {
+    id: `meme-${crypto.randomUUID()}`,
+    modeId: input.modeId,
+    text,
+    personaTags: input.personaTags,
+    sourceKinds: input.sourceKinds,
+    evidenceSummary: input.evidenceSummary.slice(0, 160),
+    createdAt: new Date().toISOString()
+  }
 }
 
 function SourcePicker({
@@ -164,6 +279,18 @@ export function App(): React.JSX.Element {
   const [sourcePickerOpen, setSourcePickerOpen] = useState(false)
   const [selectedSource, setSelectedSource] = useState<DesktopSource | null>(null)
   const [captureStream, setCaptureStream] = useState<MediaStream | null>(null)
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([])
+  const [cameraEnabled, setCameraEnabled] = useState(false)
+  const [cameraPermission, setCameraPermission] = useState<MediaAccessStatus>('unknown')
+  const [visualSettings, setVisualSettings] = useState<VisualSettings>(() =>
+    loadVisualSettings(window.localStorage)
+  )
+  const [visualPipelineStatus, setVisualPipelineStatus] =
+    useState<VisualPipelineStatus>('waiting-backend')
+  const [lastFrameBytes, setLastFrameBytes] = useState<number | null>(null)
+  const [lastFrameOverTarget, setLastFrameOverTarget] = useState(false)
+  const [lastVisualBatchAt, setLastVisualBatchAt] = useState<number | null>(null)
   const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([])
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState('')
   const [microphoneLevel, setMicrophoneLevel] = useState(0)
@@ -173,7 +300,12 @@ export function App(): React.JSX.Element {
   const [screenPermission, setScreenPermission] = useState<MediaAccessStatus>('unknown')
   const [mediaTransitioning, setMediaTransitioning] = useState(false)
   const [overlayVisible, setOverlayVisible] = useState(true)
-  const [audience, setAudience] = useState<AudienceMember[]>(initialAudience)
+  const [audienceWorkspace, setAudienceWorkspace] = useState<AudienceWorkspaceState>(
+    createInitialAudienceWorkspace
+  )
+  const [audienceWorkspaceReady, setAudienceWorkspaceReady] = useState(false)
+  const [audienceWorkspaceLoadError, setAudienceWorkspaceLoadError] = useState<string | null>(null)
+  const [audienceDocumentsNeedSync, setAudienceDocumentsNeedSync] = useState(false)
   const [activity, setActivity] = useState<ActivityItem[]>([
     {
       id: 'system-ready',
@@ -194,7 +326,10 @@ export function App(): React.JSX.Element {
   const [barrageTotal, setBarrageTotal] = useState(0)
 
   const videoRef = useRef<HTMLVideoElement>(null)
+  const cameraVideoRef = useRef<HTMLVideoElement>(null)
+  const compositeCanvasRef = useRef<HTMLCanvasElement>(null)
   const captureStreamRef = useRef<MediaStream | null>(null)
+  const cameraStreamRef = useRef<MediaStream | null>(null)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const meterFrameRef = useRef<number | null>(null)
@@ -207,13 +342,42 @@ export function App(): React.JSX.Element {
   const sessionStatusRef = useRef(session.status)
   const startedAtRef = useRef<number | null>(null)
   const chatListRef = useRef<HTMLDivElement>(null)
+  const audiencePersistenceErrorRef = useRef(false)
+  const audienceDocumentSyncErrorRef = useRef(false)
+  const audienceWorkspaceRef = useRef(audienceWorkspace)
+  const audienceWorkspaceReadyRef = useRef(audienceWorkspaceReady)
+  const audienceLoadRequestRef = useRef(0)
 
-  const activeAudience = useMemo(() => audience.filter((member) => member.active), [audience])
+  audienceWorkspaceRef.current = audienceWorkspace
+  audienceWorkspaceReadyRef.current = audienceWorkspaceReady
+  const visualSettingsRef = useRef(visualSettings)
+  const pendingVisualFramesRef = useRef<VisualFrame[]>([])
+  const visualRunRef = useRef(0)
+  const visualSampleBusyRef = useRef<number | null>(null)
+  const visualBatchBusyRef = useRef<number | null>(null)
+  const visualFrameSequenceRef = useRef(0)
+  const visualBatchSinkRef = useRef<VisualBatchSink>(createWaitingVisualBatchSink())
+
+  const audienceRuntime = useMemo(
+    () => compileAudienceWorkspaceSnapshot(audienceWorkspace),
+    [audienceWorkspace]
+  )
+  const activeAudience = audienceRuntime.personas
   const isSessionActive = ['starting', 'running', 'paused', 'stopping'].includes(session.status)
+  const requiredSources = requiredVisualSources(visualSettings.mode)
   const canStart =
-    session.status === 'idle' && selectedSource !== null && selectedMicrophoneId !== ''
+    session.status === 'idle' &&
+    selectedMicrophoneId !== '' &&
+    (!requiredSources.screen || selectedSource !== null) &&
+    (!requiredSources.camera || cameraEnabled)
   const goLiveBusy =
     session.status === 'starting' || session.status === 'stopping' || mediaTransitioning
+  const effectiveVisualMode =
+    resolveVisualMode(
+      visualSettings.mode,
+      captureStream !== null || selectedSource !== null,
+      cameraStream !== null
+    ) ?? visualSettings.mode
   const captureStatus =
     session.status === 'paused'
       ? '已暂停'
@@ -222,6 +386,16 @@ export function App(): React.JSX.Element {
         : selectedSource
           ? '待启动'
           : '未连接'
+  const cameraStatus =
+    session.status === 'paused'
+      ? '已暂停'
+      : cameraStream
+        ? '采集中'
+        : cameraPermission === 'denied' || cameraPermission === 'restricted'
+          ? '权限受限'
+          : cameraEnabled
+            ? '待启动'
+            : '已关闭'
   const microphoneStatus =
     session.status === 'paused'
       ? '已暂停'
@@ -232,6 +406,21 @@ export function App(): React.JSX.Element {
           : selectedMicrophoneId
             ? '待检测'
             : '待授权'
+
+  const pipPreviewStyle = useMemo(() => {
+    const rectangle = getPipRectangle(
+      1600,
+      900,
+      visualSettings.pipPosition,
+      visualSettings.pipSize
+    )
+    return {
+      left: `${(rectangle.x / 1600) * 100}%`,
+      top: `${(rectangle.y / 900) * 100}%`,
+      width: `${(rectangle.width / 1600) * 100}%`,
+      height: `${(rectangle.height / 900) * 100}%`
+    }
+  }, [visualSettings.pipPosition, visualSettings.pipSize])
 
   const beginMediaOperation = useCallback((replaceCurrent = false): number | null => {
     if (mediaTransitionRef.current && !replaceCurrent) return null
@@ -273,6 +462,11 @@ export function App(): React.JSX.Element {
   }, [session.status])
 
   useEffect(() => {
+    visualSettingsRef.current = visualSettings
+    saveVisualSettings(window.localStorage, visualSettings)
+  }, [visualSettings])
+
+  useEffect(() => {
     captureStreamRef.current = captureStream
     if (videoRef.current) {
       videoRef.current.srcObject = captureStream
@@ -280,17 +474,178 @@ export function App(): React.JSX.Element {
         void videoRef.current.play().catch(() => undefined)
       }
     }
-  }, [captureStream])
+  }, [captureStream, effectiveVisualMode])
+
+  useEffect(() => {
+    cameraStreamRef.current = cameraStream
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = cameraStream
+      if (cameraStream) {
+        void cameraVideoRef.current.play().catch(() => undefined)
+      }
+    }
+  }, [cameraStream, effectiveVisualMode])
 
   useEffect(() => {
     void window.advx
       .getMediaAccessStatus()
       .then((status) => {
         setMicrophonePermission(status.microphone)
+        setCameraPermission(status.camera)
         setScreenPermission(status.screen)
       })
       .catch(() => undefined)
   }, [])
+
+  const handleAudienceSaveResult = useCallback((result: SaveAudienceWorkspaceResult): void => {
+    audiencePersistenceErrorRef.current = false
+    if (result.personaDocumentsSynced) {
+      audienceDocumentSyncErrorRef.current = false
+      setAudienceDocumentsNeedSync(false)
+      return
+    }
+
+    setAudienceDocumentsNeedSync(true)
+    if (audienceDocumentSyncErrorRef.current) return
+    audienceDocumentSyncErrorRef.current = true
+    setActivity((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        source: 'system',
+        author: '系统',
+        text: result.personaDocumentsError
+          ? `观众配置已保存，但 personality.md 暂未同步：${result.personaDocumentsError}`
+          : '观众配置已保存，但 personality.md 暂未同步。'
+      }
+    ])
+  }, [])
+
+  const reportAudienceSaveFailure = useCallback((): void => {
+    if (audiencePersistenceErrorRef.current) return
+    audiencePersistenceErrorRef.current = true
+    setActivity((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        source: 'system',
+        author: '系统',
+        text: '模式与人格配置暂未保存，请检查本地数据目录。'
+      }
+    ])
+  }, [])
+
+  const loadAudienceWorkspace = useCallback(async (): Promise<void> => {
+    const requestId = audienceLoadRequestRef.current + 1
+    audienceLoadRequestRef.current = requestId
+    audienceWorkspaceReadyRef.current = false
+    setAudienceWorkspaceReady(false)
+    try {
+      const storedWorkspace = await window.advx.loadAudienceWorkspace()
+      if (audienceLoadRequestRef.current !== requestId) return
+      const workspace = storedWorkspace ?? createInitialAudienceWorkspace()
+      const hydratedWorkspace = {
+        ...workspace,
+        memes: archiveStaleMemes(workspace.memes, new Date().toISOString())
+      }
+      audienceWorkspaceRef.current = hydratedWorkspace
+      setAudienceWorkspace(hydratedWorkspace)
+      setAudienceWorkspaceLoadError(null)
+      audienceWorkspaceReadyRef.current = true
+      setAudienceWorkspaceReady(true)
+    } catch (error) {
+      if (audienceLoadRequestRef.current !== requestId) return
+      const message =
+        error instanceof Error
+          ? error.message
+          : '观众配置加载失败，原文件未被覆盖。'
+      audienceWorkspaceReadyRef.current = false
+      setAudienceWorkspaceLoadError(message)
+      setActivity((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          source: 'system',
+          author: '系统',
+          text: message
+        }
+      ])
+    }
+  }, [])
+
+  const resetRejectedAudienceWorkspace = useCallback((): void => {
+    audienceLoadRequestRef.current += 1
+    const workspace = createInitialAudienceWorkspace()
+    audienceWorkspaceRef.current = workspace
+    audienceWorkspaceReadyRef.current = true
+    setAudienceWorkspace(workspace)
+    setAudienceWorkspaceLoadError(null)
+    setAudienceWorkspaceReady(true)
+    setActivity((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        source: 'system',
+        author: '系统',
+        text: '已显式重置观众配置；受保护的拒绝文件仍保留在本地数据目录。'
+      }
+    ])
+  }, [])
+
+  useEffect(() => {
+    void loadAudienceWorkspace()
+    return () => {
+      audienceLoadRequestRef.current += 1
+    }
+  }, [loadAudienceWorkspace])
+
+  useEffect(() => {
+    if (!audienceWorkspaceReady) return
+    const timer = window.setTimeout(() => {
+      void window.advx
+        .saveAudienceWorkspace(audienceWorkspace)
+        .then(handleAudienceSaveResult)
+        .catch(reportAudienceSaveFailure)
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [
+    audienceWorkspace,
+    audienceWorkspaceReady,
+    handleAudienceSaveResult,
+    reportAudienceSaveFailure
+  ])
+
+  useEffect(() => {
+    if (!audienceWorkspaceReady || !audienceDocumentsNeedSync) return
+    const timer = window.setInterval(() => {
+      void window.advx
+        .saveAudienceWorkspace(audienceWorkspaceRef.current)
+        .then(handleAudienceSaveResult)
+        .catch(reportAudienceSaveFailure)
+    }, 10_000)
+    return () => window.clearInterval(timer)
+  }, [
+    audienceDocumentsNeedSync,
+    audienceWorkspaceReady,
+    handleAudienceSaveResult,
+    reportAudienceSaveFailure
+  ])
+
+  useEffect(
+    () =>
+      window.advx.onCloseRequested(() => {
+        if (!audienceWorkspaceReadyRef.current) {
+          void window.advx.confirmCloseAfterAudienceSave()
+          return
+        }
+        void window.advx
+          .saveAudienceWorkspace(audienceWorkspaceRef.current)
+          .then(handleAudienceSaveResult)
+          .catch(reportAudienceSaveFailure)
+          .finally(() => window.advx.confirmCloseAfterAudienceSave())
+      }),
+    [handleAudienceSaveResult, reportAudienceSaveFailure]
+  )
 
   useEffect(() => {
     if (session.status === 'running' || session.status === 'paused') {
@@ -391,6 +746,18 @@ export function App(): React.JSX.Element {
     setCaptureStream(null)
   }, [])
 
+  const stopCamera = useCallback(() => {
+    void window.advx.cancelCameraCaptureAuthorization().catch(() => undefined)
+    const stream = cameraStreamRef.current
+    cameraStreamRef.current = null
+    stopMediaStream(stream)
+    if (cameraVideoRef.current?.srcObject === stream) {
+      cameraVideoRef.current.pause()
+      cameraVideoRef.current.srcObject = null
+    }
+    setCameraStream(null)
+  }, [])
+
   const stopMicrophone = useCallback(async (): Promise<void> => {
     if (meterFrameRef.current !== null) {
       cancelAnimationFrame(meterFrameRef.current)
@@ -413,6 +780,11 @@ export function App(): React.JSX.Element {
       mediaOperationRef.current += 1
       mediaTransitionRef.current = false
       stopMediaStream(captureStreamRef.current)
+      stopMediaStream(cameraStreamRef.current)
+      void window.advx.cancelCameraCaptureAuthorization().catch(() => undefined)
+      releaseVisualFrames(pendingVisualFramesRef.current)
+      pendingVisualFramesRef.current = []
+      visualRunRef.current += 1
       void stopMicrophone()
     }
   }, [stopMicrophone])
@@ -452,10 +824,27 @@ export function App(): React.JSX.Element {
             captureStreamRef.current = null
             setCaptureStream(null)
             if (
+              visualSettingsRef.current.mode === 'pip' &&
+              cameraStreamRef.current !== null
+            ) {
+              setVisualSettings((current) => ({ ...current, mode: 'camera' }))
+              setActivity((current) => [
+                ...current,
+                {
+                  id: crypto.randomUUID(),
+                  source: 'system',
+                  author: '系统',
+                  text: '屏幕来源已断开，已自动切换为摄像头画面。'
+                }
+              ])
+              return
+            }
+            if (
               sessionStatusRef.current === 'running' ||
               sessionStatusRef.current === 'starting'
             ) {
               sessionStatusRef.current = 'error'
+              stopCamera()
               void stopMicrophone()
               void releaseOverlay()
               dispatch({ type: 'fail', error: '画面来源已结束，请重新选择。' })
@@ -469,7 +858,7 @@ export function App(): React.JSX.Element {
         throw error
       }
     },
-    [assertMediaOperationCurrent, releaseOverlay, stopMicrophone]
+    [assertMediaOperationCurrent, releaseOverlay, stopCamera, stopMicrophone]
   )
 
   const chooseSource = async (source: DesktopSource): Promise<void> => {
@@ -479,6 +868,9 @@ export function App(): React.JSX.Element {
       setSourcePickerOpen(false)
       await startCapture(operationId, source.id)
       setSelectedSource(source)
+      if (cameraEnabled && cameraStreamRef.current) {
+        setVisualSettings((current) => ({ ...current, mode: 'pip' }))
+      }
     } catch (error) {
       if (mediaOperationRef.current !== operationId) return
       const message = describeMediaError(error, 'display')
@@ -519,15 +911,135 @@ export function App(): React.JSX.Element {
     [assertMediaOperationCurrent]
   )
 
+  const refreshCameras = useCallback(
+    async (preferredDeviceId?: string, operationId?: number): Promise<void> => {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      if (operationId !== undefined) {
+        assertMediaOperationCurrent(operationId)
+      }
+      const inputs = devices.filter((device) => device.kind === 'videoinput')
+      setCameras(inputs)
+      setVisualSettings((current) => {
+        if (inputs.some((device) => device.deviceId === current.cameraDeviceId)) return current
+        const cameraDeviceId =
+          preferredDeviceId &&
+          inputs.some((device) => device.deviceId === preferredDeviceId)
+            ? preferredDeviceId
+            : inputs[0]?.deviceId ?? ''
+        return cameraDeviceId === current.cameraDeviceId
+          ? current
+          : { ...current, cameraDeviceId }
+      })
+    },
+    [assertMediaOperationCurrent]
+  )
+
   useEffect(() => {
     const handleDeviceChange = (): void => {
       void refreshMicrophones()
+      void refreshCameras()
     }
 
     void refreshMicrophones()
+    void refreshCameras()
     navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
     return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
-  }, [refreshMicrophones])
+  }, [refreshCameras, refreshMicrophones])
+
+  const startCamera = useCallback(
+    async (operationId: number, deviceId?: string): Promise<MediaStream> => {
+      const authorized = await window.advx.authorizeCameraCapture()
+      assertMediaOperationCurrent(operationId)
+      if (!authorized) {
+        throw new DOMException('Camera access is denied by the operating system.', 'NotAllowedError')
+      }
+
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: deviceId ? { exact: deviceId } : undefined,
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 15, max: 24 }
+          },
+          audio: false
+        })
+      } finally {
+        await window.advx.cancelCameraCaptureAuthorization().catch(() => undefined)
+      }
+      try {
+        assertMediaOperationCurrent(operationId)
+        const videoTrack = stream.getVideoTracks()[0]
+        if (!videoTrack) {
+          throw new DOMException('No camera video track was created.', 'NotReadableError')
+        }
+
+        const actualDeviceId = videoTrack.getSettings().deviceId
+        await refreshCameras(actualDeviceId, operationId)
+        assertMediaOperationCurrent(operationId)
+
+        const previousStream = cameraStreamRef.current
+        cameraStreamRef.current = stream
+        stopMediaStream(previousStream)
+        setCameraStream(stream)
+        setCameraEnabled(true)
+        setCameraPermission('granted')
+
+        videoTrack.addEventListener(
+          'ended',
+          () => {
+            if (cameraStreamRef.current !== stream) return
+            mediaOperationRef.current += 1
+            mediaTransitionRef.current = false
+            setMediaTransitioning(false)
+            cameraStreamRef.current = null
+            setCameraStream(null)
+            setCameraEnabled(false)
+            void refreshCameras()
+            if (
+              visualSettingsRef.current.mode === 'pip' &&
+              captureStreamRef.current !== null
+            ) {
+              setVisualSettings((current) => ({ ...current, mode: 'screen' }))
+              setActivity((current) => [
+                ...current,
+                {
+                  id: crypto.randomUUID(),
+                  source: 'system',
+                  author: '系统',
+                  text: '摄像头已断开，已自动切换为屏幕画面。'
+                }
+              ])
+              return
+            }
+            if (
+              sessionStatusRef.current === 'running' ||
+              sessionStatusRef.current === 'starting'
+            ) {
+              sessionStatusRef.current = 'error'
+              stopCapture()
+              void stopMicrophone()
+              void releaseOverlay()
+              dispatch({ type: 'fail', error: '摄像头连接已中断，请检查设备。' })
+            }
+          },
+          { once: true }
+        )
+        return stream
+      } catch (error) {
+        stopMediaStream(stream)
+        throw error
+      }
+    },
+    [
+      assertMediaOperationCurrent,
+      refreshCameras,
+      releaseOverlay,
+      stopCapture,
+      stopMicrophone
+    ]
+  )
 
   const startMicrophone = useCallback(
     async (operationId: number, deviceId?: string): Promise<MediaStream> => {
@@ -655,6 +1167,203 @@ export function App(): React.JSX.Element {
     stopMicrophone
   ])
 
+  const toggleCamera = useCallback(async (): Promise<void> => {
+    const operationId = beginMediaOperation(true)
+    if (operationId === null) return
+
+    if (cameraEnabled && cameraStreamRef.current) {
+      stopCamera()
+      setCameraEnabled(false)
+      if (captureStreamRef.current) {
+        setVisualSettings((current) => ({ ...current, mode: 'screen' }))
+        setActivity((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            source: 'system',
+            author: '系统',
+            text: '摄像头已关闭，继续使用屏幕画面。'
+          }
+        ])
+      } else if (
+        sessionStatusRef.current === 'running' ||
+        sessionStatusRef.current === 'starting'
+      ) {
+        sessionStatusRef.current = 'error'
+        void stopMicrophone()
+        void releaseOverlay()
+        dispatch({ type: 'fail', error: '唯一的摄像头画面已关闭，视觉采样已停止。' })
+      } else {
+        setVisualSettings((current) => ({ ...current, mode: 'screen' }))
+      }
+      finishMediaOperation(operationId)
+      return
+    }
+
+    let startedCamera: MediaStream | null = null
+    let startedDisplay: MediaStream | null = null
+    try {
+      const nativeStatus = await window.advx.requestCameraPermission()
+      assertMediaOperationCurrent(operationId)
+      setCameraPermission(nativeStatus)
+      if (nativeStatus === 'denied' || nativeStatus === 'restricted') {
+        throw new DOMException('Camera access is denied by the operating system.', 'NotAllowedError')
+      }
+      startedCamera = await startCamera(
+        operationId,
+        visualSettingsRef.current.cameraDeviceId || undefined
+      )
+      let hasScreen = captureStreamRef.current !== null
+      if (!hasScreen && selectedSource) {
+        try {
+          startedDisplay = await startCapture(operationId, selectedSource.id)
+          hasScreen = true
+        } catch (error) {
+          if (mediaOperationRef.current !== operationId) return
+          setActivity((current) => [
+            ...current,
+            {
+              id: crypto.randomUUID(),
+              source: 'system',
+              author: '系统',
+              text: `${describeMediaError(error, 'display')} 已改用摄像头全屏。`
+            }
+          ])
+        }
+      }
+      assertMediaOperationCurrent(operationId)
+      setCameraEnabled(true)
+      setVisualSettings((current) => ({ ...current, mode: hasScreen ? 'pip' : 'camera' }))
+    } catch (error) {
+      if (mediaOperationRef.current !== operationId) return
+      if (cameraStreamRef.current === startedCamera) stopCamera()
+      if (captureStreamRef.current === startedDisplay) stopCapture()
+      setCameraEnabled(false)
+      setActivity((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          source: 'system',
+          author: '系统',
+          text: describeMediaError(error, 'camera')
+        }
+      ])
+    } finally {
+      finishMediaOperation(operationId)
+    }
+  }, [
+    assertMediaOperationCurrent,
+    beginMediaOperation,
+    cameraEnabled,
+    finishMediaOperation,
+    releaseOverlay,
+    selectedSource,
+    startCamera,
+    startCapture,
+    stopCamera,
+    stopCapture,
+    stopMicrophone
+  ])
+
+  const changeCamera = useCallback(
+    async (deviceId: string): Promise<void> => {
+      const previousDeviceId = visualSettingsRef.current.cameraDeviceId
+      setVisualSettings((current) => ({ ...current, cameraDeviceId: deviceId }))
+      if (!cameraStreamRef.current) return
+
+      const operationId = beginMediaOperation()
+      if (operationId === null) return
+      try {
+        await startCamera(operationId, deviceId || undefined)
+      } catch (error) {
+        if (mediaOperationRef.current !== operationId) return
+        setVisualSettings((current) => ({ ...current, cameraDeviceId: previousDeviceId }))
+        setActivity((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            source: 'system',
+            author: '系统',
+            text: describeMediaError(error, 'camera')
+          }
+        ])
+      } finally {
+        finishMediaOperation(operationId)
+      }
+    },
+    [beginMediaOperation, finishMediaOperation, startCamera]
+  )
+
+  const changeVisualMode = useCallback(
+    async (nextMode: VisualMode): Promise<void> => {
+      if (nextMode === visualSettingsRef.current.mode) return
+      const requirements = requiredVisualSources(nextMode)
+      if (requirements.screen && !selectedSource) {
+        setSourcePickerOpen(true)
+        return
+      }
+      if (requirements.camera && !cameraEnabled) {
+        setActivity((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            source: 'system',
+            author: '系统',
+            text: '请先显式开启摄像头。'
+          }
+        ])
+        return
+      }
+
+      const operationId = beginMediaOperation()
+      if (operationId === null) return
+      const previousDisplay = captureStreamRef.current
+      const previousCamera = cameraStreamRef.current
+      try {
+        if (requirements.screen && !captureStreamRef.current) {
+          await startCapture(operationId, selectedSource?.id ?? '')
+        }
+        if (requirements.camera && !cameraStreamRef.current) {
+          await startCamera(
+            operationId,
+            visualSettingsRef.current.cameraDeviceId || undefined
+          )
+        }
+        assertMediaOperationCurrent(operationId)
+        setVisualSettings((current) => ({ ...current, mode: nextMode }))
+        if (!requirements.screen) stopCapture()
+        if (!requirements.camera) stopCamera()
+      } catch (error) {
+        if (mediaOperationRef.current !== operationId) return
+        if (!previousDisplay && captureStreamRef.current) stopCapture()
+        if (!previousCamera && cameraStreamRef.current) stopCamera()
+        const kind = requirements.camera && !previousCamera ? 'camera' : 'display'
+        setActivity((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            source: 'system',
+            author: '系统',
+            text: describeMediaError(error, kind)
+          }
+        ])
+      } finally {
+        finishMediaOperation(operationId)
+      }
+    },
+    [
+      assertMediaOperationCurrent,
+      beginMediaOperation,
+      cameraEnabled,
+      finishMediaOperation,
+      selectedSource,
+      startCamera,
+      startCapture,
+      stopCamera,
+      stopCapture
+    ]
+  )
+
   const changeMicrophone = useCallback(
     async (deviceId: string): Promise<void> => {
       setSelectedMicrophoneId(deviceId)
@@ -689,16 +1398,32 @@ export function App(): React.JSX.Element {
     ]
   )
 
+  const acceptDirectorMemeCandidate = useCallback(
+    (candidate: MemeCandidate): void => {
+      setAudienceWorkspace((current) => {
+        if (!current.modeState.modes.some((mode) => mode.id === candidate.modeId)) return current
+        const result = autoIngestMeme(current.memes, candidate)
+        return result.accepted ? { ...current, memes: result.entries } : current
+      })
+    },
+    []
+  )
+
   const emitBarrage = useCallback(
     (text?: string) => {
-      const member = activeAudience[barrageSequenceRef.current % Math.max(activeAudience.length, 1)]
+      const sequence = barrageSequenceRef.current
+      const member = selectWeightedPersona(activeAudience, sequence)
       if (!member) return
+      const learnedMeme =
+        text === undefined && audienceRuntime.memes.length > 0 && sequence % 3 === 2
+          ? audienceRuntime.memes[sequence % audienceRuntime.memes.length]
+          : undefined
 
       const event: BarrageEvent = {
-        barrageId: `demo-${Date.now()}-${barrageSequenceRef.current}`,
+        barrageId: `demo-${Date.now()}-${sequence}`,
         audienceId: member.id,
         audienceName: member.name,
-        text: text ?? demoLines[barrageSequenceRef.current % demoLines.length],
+        text: text ?? learnedMeme?.text ?? demoLines[sequence % demoLines.length],
         color: member.color,
         createdAt: Date.now()
       }
@@ -719,8 +1444,27 @@ export function App(): React.JSX.Element {
       if (overlayVisible) {
         void window.advx.pushBarrage(event)
       }
+
+      if (learnedMeme) {
+        setAudienceWorkspace((current) => {
+          if (!current.memes.some((meme) => meme.id === learnedMeme.id)) return current
+          return {
+            ...current,
+            memes: recordMemeUsage(current.memes, learnedMeme.id, new Date().toISOString())
+          }
+        })
+      } else if (sequence > 0 && sequence % 4 === 0) {
+        const candidate = proposeDemoMemeCandidate({
+          modeId: audienceRuntime.mode.id,
+          text: event.text,
+          sourceKinds: ['audience_barrage'],
+          evidenceSummary: `${member.name} 在直播互动中形成的房间短句`,
+          personaTags: [member.id]
+        })
+        if (candidate) acceptDirectorMemeCandidate(candidate)
+      }
     },
-    [activeAudience, overlayVisible]
+    [activeAudience, acceptDirectorMemeCandidate, audienceRuntime, overlayVisible]
   )
 
   useEffect(() => {
@@ -729,19 +1473,186 @@ export function App(): React.JSX.Element {
     return () => window.clearInterval(timer)
   }, [emitBarrage, session.status])
 
+  useEffect(() => {
+    const runId = visualRunRef.current + 1
+    visualRunRef.current = runId
+    releaseVisualFrames(pendingVisualFramesRef.current)
+    pendingVisualFramesRef.current = []
+
+    if (session.status !== 'running') {
+      setVisualPipelineStatus('waiting-backend')
+      return
+    }
+
+    setVisualPipelineStatus('waiting-backend')
+    const profile = COMPRESSION_PROFILES[visualSettings.compressionPreset]
+    const batchAbortController = new AbortController()
+
+    const sampleFrame = async (): Promise<void> => {
+      if (visualSampleBusyRef.current !== null) return
+      const requirements = requiredVisualSources(visualSettings.mode)
+      const screenVideo = videoRef.current
+      const cameraVideo = cameraVideoRef.current
+      if (
+        (requirements.screen &&
+          (!captureStreamRef.current || !screenVideo || screenVideo.videoWidth === 0)) ||
+        (requirements.camera &&
+          (!cameraStreamRef.current || !cameraVideo || cameraVideo.videoWidth === 0))
+      ) {
+        return
+      }
+
+      const canvas = compositeCanvasRef.current
+      if (!canvas) return
+      visualSampleBusyRef.current = runId
+      try {
+        const primaryVideo =
+          visualSettings.mode === 'camera' ? cameraVideo : screenVideo
+        const outputLongEdge = Math.min(
+          profile.maxLongEdge,
+          Math.max(primaryVideo?.videoWidth ?? 0, primaryVideo?.videoHeight ?? 0)
+        )
+        if (outputLongEdge <= 0) return
+        const drawn = drawCompositeFrame(canvas, {
+          mode: visualSettings.mode,
+          screen: requirements.screen ? screenVideo : null,
+          camera: requirements.camera ? cameraVideo : null,
+          mirrorCamera: visualSettings.mirrorCamera,
+          pipPosition: visualSettings.pipPosition,
+          pipSize: visualSettings.pipSize,
+          longEdge: outputLongEdge
+        })
+        if (!drawn) return
+
+        const encoded = await compressCompositeCanvas(canvas, profile)
+        if (visualRunRef.current !== runId || sessionStatusRef.current !== 'running') return
+        const sequence = visualFrameSequenceRef.current + 1
+        visualFrameSequenceRef.current = sequence
+        const frame: VisualFrame = {
+          frameId: `visual-${Date.now()}-${sequence}`,
+          capturedAt: Date.now(),
+          width: encoded.width,
+          height: encoded.height,
+          mode: visualSettings.mode,
+          bytes: encoded.blob.size,
+          overTarget: encoded.overTarget,
+          blob: encoded.blob
+        }
+        pendingVisualFramesRef.current.push(frame)
+        setLastFrameBytes(frame.bytes)
+        setLastFrameOverTarget(frame.overTarget)
+      } catch {
+        if (visualRunRef.current === runId) {
+          setVisualPipelineStatus('compression-failed')
+        }
+      } finally {
+        if (visualSampleBusyRef.current === runId) {
+          visualSampleBusyRef.current = null
+        }
+      }
+    }
+
+    const flushBatch = async (): Promise<void> => {
+      if (
+        visualBatchBusyRef.current !== null ||
+        pendingVisualFramesRef.current.length === 0
+      ) {
+        return
+      }
+      visualBatchBusyRef.current = runId
+      const pending = pendingVisualFramesRef.current
+      pendingVisualFramesRef.current = []
+      const selected = selectVisualBatchFrames(pending)
+      const selectedIds = new Set(selected.map((frame) => frame.frameId))
+      releaseVisualFrames(pending.filter((frame) => !selectedIds.has(frame.frameId)))
+      if (visualRunRef.current !== runId) {
+        releaseVisualFrames(selected)
+        visualBatchBusyRef.current = null
+        return
+      }
+
+      const createdAt = Date.now()
+      try {
+        const result = await deliverAndReleaseVisualBatch(
+          visualBatchSinkRef.current,
+          {
+            batchId: `visual-batch-${createdAt}`,
+            createdAt,
+            frames: selected
+          },
+          batchAbortController.signal
+        )
+        if (visualRunRef.current === runId) {
+          setLastVisualBatchAt(createdAt)
+          setVisualPipelineStatus(result === 'accepted' ? 'ready' : 'waiting-backend')
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        if (visualRunRef.current === runId) {
+          setVisualPipelineStatus('waiting-backend')
+        }
+      } finally {
+        if (visualBatchBusyRef.current === runId) {
+          visualBatchBusyRef.current = null
+        }
+      }
+    }
+
+    void sampleFrame()
+    const sampleTimer = window.setInterval(
+      () => void sampleFrame(),
+      visualSettings.sampleIntervalMs
+    )
+    const batchTimer = window.setInterval(() => void flushBatch(), 3000)
+    return () => {
+      window.clearInterval(sampleTimer)
+      window.clearInterval(batchTimer)
+      batchAbortController.abort()
+      if (visualRunRef.current === runId) visualRunRef.current += 1
+      if (visualSampleBusyRef.current === runId) visualSampleBusyRef.current = null
+      if (visualBatchBusyRef.current === runId) visualBatchBusyRef.current = null
+      releaseVisualFrames(pendingVisualFramesRef.current)
+      pendingVisualFramesRef.current = []
+    }
+  }, [
+    cameraStream,
+    captureStream,
+    session.status,
+    visualSettings.compressionPreset,
+    visualSettings.mirrorCamera,
+    visualSettings.mode,
+    visualSettings.pipPosition,
+    visualSettings.pipSize,
+    visualSettings.sampleIntervalMs
+  ])
+
   const startSession = async (): Promise<void> => {
     const operationId = beginMediaOperation()
     if (operationId === null) return
+    const requirements = requiredVisualSources(visualSettingsRef.current.mode)
     let displayStream: MediaStream | null = captureStreamRef.current
+    let activeCameraStream: MediaStream | null = cameraStreamRef.current
     let microphoneStream: MediaStream | null = microphoneStreamRef.current
     sessionStatusRef.current = 'starting'
     dispatch({ type: 'start' })
     try {
-      if (!displayStream) {
+      if (requirements.screen && !displayStream) {
         try {
           displayStream = await startCapture(operationId, selectedSource?.id ?? '')
         } catch (error) {
           throw new Error(describeMediaError(error, 'display'))
+        }
+      }
+      if (mediaOperationRef.current !== operationId) return
+
+      if (requirements.camera && !activeCameraStream) {
+        try {
+          activeCameraStream = await startCamera(
+            operationId,
+            visualSettingsRef.current.cameraDeviceId || undefined
+          )
+        } catch (error) {
+          throw new Error(describeMediaError(error, 'camera'))
         }
       }
       if (mediaOperationRef.current !== operationId) return
@@ -766,23 +1677,25 @@ export function App(): React.JSX.Element {
       setOverlayVisible(true)
       sessionStatusRef.current = 'running'
       dispatch({ type: 'started' })
-      emitBarrage('画面和声音都收到啦，今天从这里开始。')
+      emitBarrage('直播开始了，先热个场。')
     } catch (error) {
       if (mediaOperationRef.current !== operationId) return
       if (captureStreamRef.current === displayStream) stopCapture()
+      if (cameraStreamRef.current === activeCameraStream) stopCamera()
       if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
       const overlayError = await releaseOverlay()
       if (mediaOperationRef.current !== operationId) return
       sessionStatusRef.current = 'error'
       dispatch({
         type: 'fail',
-        error: `${error instanceof Error ? error.message : '启动失败，请检查屏幕和麦克风权限。'}${
+        error: `${error instanceof Error ? error.message : '启动失败，请检查视觉来源和麦克风权限。'}${
           overlayError ? ` ${overlayError}` : ''
         }`
       })
     } finally {
       if (mediaOperationRef.current !== operationId) {
         if (captureStreamRef.current === displayStream) stopCapture()
+        if (cameraStreamRef.current === activeCameraStream) stopCamera()
         if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
       }
       finishMediaOperation(operationId)
@@ -795,6 +1708,7 @@ export function App(): React.JSX.Element {
     sessionStatusRef.current = 'stopping'
     dispatch({ type: 'stop' })
     stopCapture()
+    stopCamera()
     await stopMicrophone()
     try {
       const overlayError = await releaseOverlay()
@@ -821,6 +1735,7 @@ export function App(): React.JSX.Element {
     beginMediaOperation,
     finishMediaOperation,
     releaseOverlay,
+    stopCamera,
     stopCapture,
     stopMicrophone
   ])
@@ -839,11 +1754,14 @@ export function App(): React.JSX.Element {
     const operationId = beginMediaOperation()
     if (operationId === null) return
     let displayStream: MediaStream | null = null
+    let activeCameraStream: MediaStream | null = null
     let microphoneStream: MediaStream | null = null
+    let resumeFailureKind: 'display' | 'camera' | 'microphone' = 'display'
     if (session.status === 'running') {
       sessionStatusRef.current = 'paused'
       dispatch({ type: 'pause' })
       stopCapture()
+      stopCamera()
       try {
         await stopMicrophone()
       } finally {
@@ -854,8 +1772,21 @@ export function App(): React.JSX.Element {
 
     if (session.status === 'paused') {
       try {
-        displayStream = await startCapture(operationId, selectedSource?.id ?? '')
-        if (mediaOperationRef.current !== operationId) return
+        const requirements = requiredVisualSources(visualSettingsRef.current.mode)
+        if (requirements.screen) {
+          resumeFailureKind = 'display'
+          displayStream = await startCapture(operationId, selectedSource?.id ?? '')
+          if (mediaOperationRef.current !== operationId) return
+        }
+        if (requirements.camera) {
+          resumeFailureKind = 'camera'
+          activeCameraStream = await startCamera(
+            operationId,
+            visualSettingsRef.current.cameraDeviceId || undefined
+          )
+          if (mediaOperationRef.current !== operationId) return
+        }
+        resumeFailureKind = 'microphone'
         microphoneStream = await startMicrophone(
           operationId,
           selectedMicrophoneId || undefined
@@ -866,21 +1797,21 @@ export function App(): React.JSX.Element {
       } catch (error) {
         if (mediaOperationRef.current !== operationId) return
         if (captureStreamRef.current === displayStream) stopCapture()
+        if (cameraStreamRef.current === activeCameraStream) stopCamera()
         if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
         const overlayError = await releaseOverlay()
         if (mediaOperationRef.current !== operationId) return
         sessionStatusRef.current = 'error'
         dispatch({
           type: 'fail',
-          error: `恢复采集失败：${
-            microphoneStream
-              ? describeMediaError(error, 'microphone')
-              : describeMediaError(error, displayStream ? 'microphone' : 'display')
-          }${overlayError ? ` ${overlayError}` : ''}`
+          error: `恢复采集失败：${describeMediaError(error, resumeFailureKind)}${
+            overlayError ? ` ${overlayError}` : ''
+          }`
         })
       } finally {
         if (mediaOperationRef.current !== operationId) {
           if (captureStreamRef.current === displayStream) stopCapture()
+          if (cameraStreamRef.current === activeCameraStream) stopCamera()
           if (microphoneStreamRef.current === microphoneStream) await stopMicrophone()
         }
         finishMediaOperation(operationId)
@@ -918,6 +1849,13 @@ export function App(): React.JSX.Element {
       }
     ])
     setMessage('')
+    const candidate = proposeDemoMemeCandidate({
+      modeId: audienceRuntime.mode.id,
+      text: trimmed,
+      sourceKinds: ['user_text'],
+      evidenceSummary: `用户在房间文字中主动说出：“${trimmed.slice(0, 72)}”`
+    })
+    if (candidate) acceptDirectorMemeCandidate(candidate)
     if (session.status === 'running') {
       window.setTimeout(() => emitBarrage(`听到了。关于“${trimmed.slice(0, 20)}”，我想再看一会儿。`), 550)
     }
@@ -936,12 +1874,6 @@ export function App(): React.JSX.Element {
     } catch {
       setConfigNotice('保存失败')
     }
-  }
-
-  const toggleAudience = (id: string): void => {
-    setAudience((current) =>
-      current.map((member) => (member.id === id ? { ...member, active: !member.active } : member))
-    )
   }
 
   return (
@@ -993,8 +1925,8 @@ export function App(): React.JSX.Element {
             <strong>AX-1024</strong>
           </div>
           <div className="compact-status">
-            <span>分区</span>
-            <strong>虚拟主播</strong>
+            <span>当前模式</span>
+            <strong title={audienceRuntime.mode.name}>{audienceRuntime.mode.name}</strong>
           </div>
           <div className="compact-status">
             <span>在线观众</span>
@@ -1041,10 +1973,25 @@ export function App(): React.JSX.Element {
                 <section className="stage-panel">
                   <div className="stage-toolbar">
                     <div className="stage-source">
-                      <MonitorUp size={17} />
+                      {effectiveVisualMode === 'pip' ? (
+                        <PictureInPicture2 size={17} />
+                      ) : effectiveVisualMode === 'camera' ? (
+                        <Camera size={17} />
+                      ) : (
+                        <MonitorUp size={17} />
+                      )}
                       <div>
-                        <span className="panel-title">画面预览</span>
-                        <span className="panel-subtitle">{selectedSource?.name ?? '尚未选择来源'}</span>
+                        <span className="panel-title">
+                          {visualModeLabels[effectiveVisualMode]}预览
+                        </span>
+                        <span className="panel-subtitle">
+                          {effectiveVisualMode === 'camera'
+                            ? cameras.find(
+                                (camera) =>
+                                  camera.deviceId === visualSettings.cameraDeviceId
+                              )?.label || '默认摄像头'
+                            : selectedSource?.name ?? '尚未选择屏幕来源'}
+                        </span>
                       </div>
                     </div>
                     <button
@@ -1058,19 +2005,232 @@ export function App(): React.JSX.Element {
                     </button>
                   </div>
 
+                  <div className="visual-toolbar" aria-label="视觉设置">
+                    <div className="segmented-control" aria-label="视觉模式">
+                      {(['screen', 'camera', 'pip'] as const).map((mode) => (
+                        <button
+                          className={visualSettings.mode === mode ? 'active' : ''}
+                          type="button"
+                          key={mode}
+                          disabled={
+                            mediaTransitioning ||
+                            session.status === 'paused' ||
+                            session.status === 'starting' ||
+                            session.status === 'stopping' ||
+                            (mode === 'camera' && !cameraEnabled) ||
+                            (mode === 'pip' && (!cameraEnabled || !selectedSource))
+                          }
+                          title={
+                            mode !== 'screen' && !cameraEnabled
+                              ? '请先开启摄像头'
+                              : `切换到${visualModeLabels[mode]}`
+                          }
+                          onClick={() => void changeVisualMode(mode)}
+                        >
+                          {mode === 'screen' ? (
+                            <MonitorUp size={14} />
+                          ) : mode === 'camera' ? (
+                            <Camera size={14} />
+                          ) : (
+                            <PictureInPicture2 size={14} />
+                          )}
+                          {visualModeLabels[mode]}
+                        </button>
+                      ))}
+                    </div>
+
+                    <label className="visual-select">
+                      <span>采样</span>
+                      <select
+                        aria-label="视觉采样频率"
+                        value={visualSettings.sampleIntervalMs}
+                        onChange={(event) =>
+                          setVisualSettings((current) => ({
+                            ...current,
+                            sampleIntervalMs: Number(
+                              event.target.value
+                            ) as VisualSettings['sampleIntervalMs']
+                          }))
+                        }
+                      >
+                        <option value={5000}>5 秒</option>
+                        <option value={2000}>2 秒</option>
+                        <option value={1000}>1 秒</option>
+                        <option value={500}>0.5 秒</option>
+                      </select>
+                    </label>
+
+                    <label className="visual-select">
+                      <span>压缩</span>
+                      <select
+                        aria-label="图像压缩档位"
+                        value={visualSettings.compressionPreset}
+                        onChange={(event) =>
+                          setVisualSettings((current) => ({
+                            ...current,
+                            compressionPreset: event.target.value as CompressionPreset
+                          }))
+                        }
+                      >
+                        {(
+                          Object.entries(COMPRESSION_PROFILES) as [
+                            CompressionPreset,
+                            (typeof COMPRESSION_PROFILES)[CompressionPreset]
+                          ][]
+                        ).map(([preset, profile]) => (
+                          <option value={preset} key={preset}>
+                            {profile.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    {visualSettings.mode === 'pip' && (
+                      <>
+                        <label className="visual-select">
+                          <span>位置</span>
+                          <select
+                            aria-label="画中画位置"
+                            value={visualSettings.pipPosition}
+                            onChange={(event) =>
+                              setVisualSettings((current) => ({
+                                ...current,
+                                pipPosition: event.target.value as PipPosition
+                              }))
+                            }
+                          >
+                            {(
+                              Object.entries(pipPositionLabels) as [PipPosition, string][]
+                            ).map(([position, label]) => (
+                              <option value={position} key={position}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="visual-select">
+                          <span>尺寸</span>
+                          <select
+                            aria-label="画中画尺寸"
+                            value={visualSettings.pipSize}
+                            onChange={(event) =>
+                              setVisualSettings((current) => ({
+                                ...current,
+                                pipSize: event.target.value as PipSize
+                              }))
+                            }
+                          >
+                            {(
+                              Object.entries(pipSizeLabels) as [PipSize, string][]
+                            ).map(([size, label]) => (
+                              <option value={size} key={size}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
+                    )}
+
+                    <label className="visual-toggle">
+                      <input
+                        type="checkbox"
+                        checked={visualSettings.mirrorCamera}
+                        disabled={!cameraEnabled}
+                        onChange={(event) =>
+                          setVisualSettings((current) => ({
+                            ...current,
+                            mirrorCamera: event.target.checked
+                          }))
+                        }
+                      />
+                      <FlipHorizontal2 size={14} />
+                      镜像
+                    </label>
+                  </div>
+
                   <div className="video-stage">
-                    {captureStream ? (
-                      <video ref={videoRef} autoPlay muted playsInline />
-                    ) : selectedSource ? (
-                      <img src={selectedSource.thumbnailUrl} alt={`${selectedSource.name} 预览`} />
-                    ) : (
+                    {effectiveVisualMode === 'screen' &&
+                      (captureStream ? (
+                        <video
+                          className="screen-video"
+                          ref={videoRef}
+                          autoPlay
+                          muted
+                          playsInline
+                        />
+                      ) : selectedSource ? (
+                        <img
+                          className="screen-preview-image"
+                          src={selectedSource.thumbnailUrl}
+                          alt={`${selectedSource.name} 预览`}
+                        />
+                      ) : null)}
+                    {effectiveVisualMode === 'camera' && cameraStream && (
+                      <video
+                        className="camera-video camera-primary"
+                        ref={cameraVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        style={{
+                          transform: cameraPreviewTransform(visualSettings.mirrorCamera)
+                        }}
+                      />
+                    )}
+                    {effectiveVisualMode === 'pip' && (
+                      <>
+                        {captureStream ? (
+                          <video
+                            className="screen-video"
+                            ref={videoRef}
+                            autoPlay
+                            muted
+                            playsInline
+                          />
+                        ) : selectedSource ? (
+                          <img
+                            className="screen-preview-image"
+                            src={selectedSource.thumbnailUrl}
+                            alt={`${selectedSource.name} 预览`}
+                          />
+                        ) : null}
+                        {cameraStream && (
+                          <div className="camera-pip" style={pipPreviewStyle}>
+                            <video
+                              className="camera-video"
+                              ref={cameraVideoRef}
+                              autoPlay
+                              muted
+                              playsInline
+                              style={{
+                                transform: cameraPreviewTransform(
+                                  visualSettings.mirrorCamera
+                                )
+                              }}
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {!captureStream &&
+                      !cameraStream &&
+                      !(effectiveVisualMode === 'screen' && selectedSource) && (
                       <div className="stage-empty">
-                        <MonitorUp size={30} />
-                        <strong>等待画面来源</strong>
-                        <span>选择屏幕或窗口后开始预览</span>
+                        {cameraEnabled ? <Camera size={30} /> : <MonitorUp size={30} />}
+                        <strong>等待视觉来源</strong>
+                        <span>选择屏幕或显式开启摄像头</span>
                       </div>
                     )}
-                    <div className={`stage-badge ${session.status === 'running' ? 'rec' : ''}`}>
+                    <canvas ref={compositeCanvasRef} className="composite-canvas" aria-hidden="true" />
+                    <div
+                      className={`stage-badge ${session.status === 'running' ? 'rec' : ''} ${
+                        visualSettings.mode === 'pip' &&
+                        visualSettings.pipPosition === 'top-left'
+                          ? 'avoid-pip'
+                          : ''
+                      }`}
+                    >
                       {session.status === 'running' ? 'REC' : 'PREVIEW'}
                     </div>
                     {session.status === 'paused' && <div className="paused-overlay">观察已暂停</div>}
@@ -1199,11 +2359,18 @@ export function App(): React.JSX.Element {
                     <div className="mixer-row">
                       <span>
                         <Radio size={14} />
-                        画面采集
+                        屏幕采集
                       </span>
                       <strong className={captureStream ? 'ok' : ''}>
                         {captureStatus}
                       </strong>
+                    </div>
+                    <div className="mixer-row">
+                      <span>
+                        <Camera size={14} />
+                        摄像头
+                      </span>
+                      <strong className={cameraStream ? 'ok' : ''}>{cameraStatus}</strong>
                     </div>
                     <div className="mixer-row">
                       <span>
@@ -1223,93 +2390,158 @@ export function App(): React.JSX.Element {
                     </div>
                     <div className="mixer-row">
                       <span>
-                        <Sparkles size={14} />
-                        多模态模型
+                        <ImageIcon size={14} />
+                        合成压缩
                       </span>
-                      <strong>演示模式</strong>
+                      <strong className={lastFrameOverTarget ? 'warning' : ''}>
+                        {COMPRESSION_PROFILES[visualSettings.compressionPreset].label}
+                        {lastFrameBytes !== null
+                          ? ` · ${formatFrameKilobytes(lastFrameBytes)}`
+                          : ''}
+                        {lastFrameOverTarget ? ' · 超出目标' : ''}
+                      </strong>
+                    </div>
+                    <div className="mixer-row">
+                      <span>
+                        <Clock size={14} />
+                        最近批次
+                      </span>
+                      <strong>{formatBatchTime(lastVisualBatchAt)}</strong>
+                    </div>
+                    <div className="mixer-row">
+                      <span>
+                        <Sparkles size={14} />
+                        图像适配器
+                      </span>
+                      <strong
+                        className={
+                          visualPipelineStatus === 'ready'
+                            ? 'ok'
+                            : visualPipelineStatus === 'compression-failed'
+                              ? 'warning'
+                              : ''
+                        }
+                      >
+                        {visualPipelineLabels[visualPipelineStatus]}
+                      </strong>
                     </div>
                   </section>
                 </aside>
               </div>
 
               <section className="device-strip">
-                <div className="device-control">
-                  <Mic size={16} />
-                  <div>
-                    <label htmlFor="microphone">麦克风</label>
-                    <select
-                      id="microphone"
-                      value={selectedMicrophoneId}
-                      onChange={(event) => void changeMicrophone(event.target.value)}
+                <div className="device-grid">
+                  <div className="device-control">
+                    <Mic size={16} />
+                    <div>
+                      <label htmlFor="microphone">麦克风</label>
+                      <select
+                        id="microphone"
+                        value={selectedMicrophoneId}
+                        onChange={(event) => void changeMicrophone(event.target.value)}
+                        disabled={isSessionActive || mediaTransitioning}
+                      >
+                        {microphones.length === 0 && <option value="">未授权设备</option>}
+                        {microphones.map((device, index) => (
+                          <option key={device.deviceId} value={device.deviceId}>
+                            {device.label || `麦克风 ${index + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      className="ghost-button"
+                      type="button"
                       disabled={isSessionActive || mediaTransitioning}
+                      onClick={() => void requestMicrophoneAccess()}
                     >
-                      {microphones.length === 0 && <option value="">未授权设备</option>}
-                      {microphones.map((device, index) => (
-                        <option key={device.deviceId} value={device.deviceId}>
-                          {device.label || `麦克风 ${index + 1}`}
-                        </option>
-                      ))}
-                    </select>
+                      <Volume2 size={15} />
+                      {mediaTransitioning
+                        ? '检测中...'
+                        : microphoneReady
+                          ? '重新检测'
+                          : '授权并检测'}
+                    </button>
                   </div>
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    disabled={isSessionActive || mediaTransitioning}
-                    onClick={() => void requestMicrophoneAccess()}
-                  >
-                    <Volume2 size={15} />
-                    {mediaTransitioning
-                      ? '检测中...'
-                      : microphoneReady
-                        ? '重新检测'
-                        : '授权并检测'}
-                  </button>
+
+                  <div className="device-control">
+                    <Camera size={16} />
+                    <div>
+                      <label htmlFor="camera">摄像头</label>
+                      <select
+                        id="camera"
+                        value={visualSettings.cameraDeviceId}
+                        onChange={(event) => void changeCamera(event.target.value)}
+                        disabled={
+                          mediaTransitioning ||
+                          session.status === 'paused' ||
+                          session.status === 'starting' ||
+                          session.status === 'stopping'
+                        }
+                      >
+                        {cameras.length === 0 && <option value="">未检测到设备</option>}
+                        {cameras.map((device, index) => (
+                          <option key={device.deviceId || `camera-${index}`} value={device.deviceId}>
+                            {device.label || `摄像头 ${index + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      className={`ghost-button ${cameraStream ? 'camera-active' : ''}`}
+                      type="button"
+                      disabled={
+                        mediaTransitioning ||
+                        session.status === 'paused' ||
+                        session.status === 'starting' ||
+                        session.status === 'stopping'
+                      }
+                      onClick={() => void toggleCamera()}
+                    >
+                      {cameraStream ? <CameraOff size={15} /> : <Camera size={15} />}
+                      {cameraStream
+                        ? '关闭摄像头'
+                        : cameraEnabled
+                          ? '重新开启'
+                          : '开启摄像头'}
+                    </button>
+                  </div>
                 </div>
-                <div className="privacy-note">
-                  <KeyRound size={14} />
-                  {microphonePermission === 'denied' || microphonePermission === 'restricted'
-                    ? '系统麦克风权限受限'
-                    : microphoneReady
-                      ? '正在进行本地音量检测'
-                      : '授权后可实时检测麦克风音量'}
+                <div className="privacy-stack">
+                  <div className="privacy-note">
+                    <KeyRound size={14} />
+                    {microphonePermission === 'denied' ||
+                    microphonePermission === 'restricted'
+                      ? '系统麦克风权限受限'
+                      : microphoneReady
+                        ? '正在进行本地音量检测'
+                        : '授权后可实时检测麦克风音量'}
+                  </div>
+                  <div className="privacy-note">
+                    <Camera size={14} />
+                    {cameraPermission === 'denied' || cameraPermission === 'restricted'
+                      ? '系统摄像头权限受限'
+                      : cameraStream
+                        ? '摄像头视频仅保存在内存'
+                        : cameraEnabled
+                          ? '当前视觉模式未使用摄像头'
+                          : '摄像头默认关闭'}
+                  </div>
                 </div>
               </section>
             </div>
           )}
 
           {activeView === 'audience' && (
-            <section className="settings-surface">
-              <div className="section-intro">
-                <div>
-                  <p className="eyebrow">本场参与者</p>
-                  <h2>{activeAudience.length} 位 AI 观众已启用</h2>
-                </div>
-                <Users size={24} />
-              </div>
-              <div className="audience-list">
-                {audience.map((member) => (
-                  <article className="audience-row" key={member.id}>
-                    <div className="audience-avatar" style={{ backgroundColor: member.color }}>
-                      {member.initials}
-                    </div>
-                    <div className="audience-identity">
-                      <strong>{member.name}</strong>
-                      <span>AI · {member.role}</span>
-                    </div>
-                    <p>{member.memory}</p>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={member.active}
-                        onChange={() => toggleAudience(member.id)}
-                      />
-                      <span aria-hidden="true" />
-                      <em>{member.active ? '参与' : '安静'}</em>
-                    </label>
-                  </article>
-                ))}
-              </div>
-            </section>
+            <AudienceWorkspace
+              workspace={audienceWorkspace}
+              sessionStatus={session.status}
+              persistenceReady={audienceWorkspaceReady}
+              persistenceIssue={audienceWorkspaceLoadError}
+              onChange={setAudienceWorkspace}
+              onRetryLoad={() => void loadAudienceWorkspace()}
+              onResetRejected={resetRejectedAudienceWorkspace}
+            />
           )}
 
           {activeView === 'settings' && (
@@ -1546,16 +2778,20 @@ export function App(): React.JSX.Element {
         <footer className="status-bar">
           <span className="status-item">
             <i className={`status-dot ${captureStream ? 'online' : ''}`} />
-            画面 {captureStatus}
+            屏幕 {captureStatus}
             {screenPermission === 'denied' || screenPermission === 'restricted' ? ' · 权限受限' : ''}
+          </span>
+          <span className="status-item">
+            <i className={`status-dot ${cameraStream ? 'online' : ''}`} />
+            摄像头 {cameraStatus}
           </span>
           <span className="status-item">
             <i className={`status-dot ${microphoneReady ? 'online' : ''}`} />
             麦克风 {microphoneStatus}
           </span>
           <span className="status-item">
-            <i className="status-dot demo" />
-            AI 核心 · 演示模式
+            <i className={`status-dot ${visualPipelineStatus === 'ready' ? 'online' : 'demo'}`} />
+            图像 · {visualPipelineLabels[visualPipelineStatus]}
           </span>
           <span className="status-spacer" />
           <span className="status-item muted">紧急停止 Ctrl/⌘ + Shift + X</span>

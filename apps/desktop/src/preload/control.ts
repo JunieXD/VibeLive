@@ -6,6 +6,10 @@ const api: ControlApi = {
   selectDesktopSource: (sourceId) => ipcRenderer.invoke("desktop:select-source", sourceId),
   getMediaAccessStatus: () => ipcRenderer.invoke("media:get-access-status"),
   requestMicrophonePermission: () => ipcRenderer.invoke("media:request-microphone"),
+  requestCameraPermission: () => ipcRenderer.invoke("media:request-camera"),
+  authorizeCameraCapture: () => ipcRenderer.invoke("media:authorize-camera-capture"),
+  cancelCameraCaptureAuthorization: () =>
+    ipcRenderer.invoke("media:cancel-camera-capture-authorization"),
   listOverlayTargets: () => ipcRenderer.invoke("overlay:list-targets"),
   getOverlaySettings: () => ipcRenderer.invoke("overlay:get-settings"),
   setOverlaySettings: (settings) => ipcRenderer.invoke("overlay:set-settings", settings),
@@ -14,6 +18,15 @@ const api: ControlApi = {
   clearOverlay: () => ipcRenderer.invoke("overlay:clear"),
   pushBarrage: (event) => ipcRenderer.invoke("overlay:push", event),
   saveModelConfig: (config: ModelConfig) => ipcRenderer.invoke("config:save-model", config),
+  loadAudienceWorkspace: () => ipcRenderer.invoke("audience:load-workspace"),
+  saveAudienceWorkspace: (workspace) =>
+    ipcRenderer.invoke("audience:save-workspace", workspace),
+  confirmCloseAfterAudienceSave: () => ipcRenderer.invoke("app:confirm-close"),
+  onCloseRequested: (listener) => {
+    const handler = (): void => listener();
+    ipcRenderer.on("app:request-close", handler);
+    return () => ipcRenderer.removeListener("app:request-close", handler);
+  },
   onEmergencyStop: (listener) => {
     const handler = (): void => listener();
     ipcRenderer.on("session:emergency-stop", handler);
