@@ -81,7 +81,7 @@ class UnsafeTraceArtifactError(ValueError):
 
 
 def assert_redacted_artifact(value: Any) -> None:
-    """Reject secrets, raw media, full prompts, and raw provider responses."""
+    """Reject secrets, raw media, full prompts, and full provider response envelopes."""
 
     _scan_artifact(_json_value(value), path="$")
 

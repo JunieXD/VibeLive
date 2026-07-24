@@ -36,10 +36,7 @@ from advx_backend.application.room_event_persistence import (
     PersistentRuntimeRoomEventStore,
 )
 from advx_backend.application.room_service import RoomService
-from advx_backend.application.runtime_capability_probe import (
-    ProductionRuntimeCapabilityProbe,
-    create_stepfun_final_audio_probe,
-)
+from advx_backend.application.runtime_capability_probe import ProductionRuntimeCapabilityProbe
 from advx_backend.application.runtime_config_service import RuntimeCapabilityProbe
 from advx_backend.application.runtime_provider import (
     RuntimeProviderController,
@@ -665,7 +662,6 @@ def build_runtime(
         capability_probe=(
             ProductionRuntimeCapabilityProbe(
                 configuration_provider=provider_configuration_store.current,
-                asr_probe=create_stepfun_final_audio_probe(),
             )
             if runtime_capability_probe is None
             else runtime_capability_probe

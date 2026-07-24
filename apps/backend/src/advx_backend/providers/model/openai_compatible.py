@@ -277,6 +277,23 @@ class OpenAICompatibleProvider:
             checks=checks,
         )
 
+    async def probe_startup_capabilities(
+        self,
+        *,
+        role_models: dict[str, str],
+    ) -> CapabilityProbeResult:
+        """Verify the active Viewer model with one request before a live session starts."""
+
+        viewer_check = await self._probe_chat(
+            capability="viewer_json_output",
+            model_id=role_models["viewer"],
+        )
+        return CapabilityProbeResult(
+            status=viewer_check.status,
+            discovered_model_ids=(),
+            checks=(viewer_check,),
+        )
+
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         task = await self._register_request(request.request_id)
         try:
