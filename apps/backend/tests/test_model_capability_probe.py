@@ -25,6 +25,7 @@ from advx_backend.providers.model.openai_compatible import (
 from advx_backend.providers.model.viewer_runtime import (
     _VIEWER_BARRAGE_JSON_EXAMPLE,
     _VIEWER_SILENCE_JSON_EXAMPLE,
+    _VIEWER_SYSTEM_PROMPT,
     OpenAICompatibleViewerRuntimeConfig,
     OpenAICompatibleViewerRuntimeProvider,
 )
@@ -93,9 +94,13 @@ def test_viewer_json_examples_satisfy_the_runtime_contract() -> None:
     assert barrage.action is ViewerAction.BARRAGE
     assert barrage.target is None
     assert barrage.text == "这波漂亮"
+    assert barrage.decision_reason == "主播的提问符合当前人设"
     assert silence.action is ViewerAction.SILENCE
     assert silence.target is None
     assert silence.text is None
+    assert silence.decision_reason == "普通问候未触发当前人设"
+    assert "Include decision_reason for every result" in _VIEWER_SYSTEM_PROMPT
+    assert "Do not include hidden reasoning" in _VIEWER_SYSTEM_PROMPT
     assert default_reasoning_options(
         "https://models.example/v1",
         "step-3.7-flash",

@@ -99,12 +99,14 @@ _VIEWER_BARRAGE_JSON_EXAMPLE: Final = (
     '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
     '"viewer_sequence":1,"action":"barrage","intent":"react_to_host",'
     '"target":null,"text":"这波漂亮","reaction_type":"comment",'
-    '"evidence_refs":[]}'
+    '"decision_reason":"主播的提问符合当前人设",'
+    '"evidence_refs":[{"source":"event","event_id":"event-id"}]}'
 )
 _VIEWER_SILENCE_JSON_EXAMPLE: Final = (
     '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
     '"viewer_sequence":1,"action":"silence","intent":"silence",'
-    '"target":null,"text":null,"reaction_type":"silence","evidence_refs":[]}'
+    '"target":null,"text":null,"reaction_type":"silence",'
+    '"decision_reason":"普通问候未触发当前人设","evidence_refs":[]}'
 )
 _SUMMARY_JSON_EXAMPLE: Final = '{"summary":"画面中的关键变化"}'
 _VIEWER_SYSTEM_PROMPT: Final = (
@@ -113,7 +115,14 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "natural barrage reaction. You may react to the host, scene, or a replyable public Viewer "
     "event, but may target only IDs explicitly allowed by the request. Shared room memory is "
     "public background, not proof that you personally attended an earlier stream. Use only "
-    "evidence references present in the input. Prefer a natural Chinese message of "
+    "evidence references present in the input. evidence_refs must be a JSON array of objects, "
+    "never bare IDs or numbers. Use [] when no citation is needed. An event reference is "
+    '{"source":"event","event_id":"allowed-event-id"}; a frame reference is '
+    '{"source":"frame","frame_index":0}. Use only allowed event IDs and zero-based frame '
+    "indexes from the input. Include decision_reason for every result: one concise Chinese "
+    "sentence of 40 characters or fewer stating the visible persona or evidence basis for the "
+    "barrage or silence decision. Do not include hidden reasoning, probabilities, or chain of "
+    "thought. Prefer a natural Chinese message of "
     "20 characters or fewer. Return exactly one JSON object, with no Markdown or prose. "
     f"For a barrage use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE} "
     f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE} "
@@ -179,8 +188,15 @@ class OpenAICompatibleViewerRuntimeProvider:
                 content=content,
             )
             lifecycle.sent(build_openai_request_summary(payload))
-            response = await self._send(self._viewer, payload, lifecycle=lifecycle)
-            lifecycle.received(build_http_response_summary(response))
+            response = await self._send(
+                self._viewer,
+                payload,
+                lifecycle=lifecycle,
+                capture_model_output=True,
+            )
+            lifecycle.received(
+                build_http_response_summary(response, include_model_output=True)
+            )
             output = self._structured_output(response)
             output.update(
                 {
@@ -348,6 +364,7 @@ class OpenAICompatibleViewerRuntimeProvider:
         payload: dict[str, object],
         *,
         lifecycle: AiCallLifecycle,
+        capture_model_output: bool = False,
     ) -> httpx.Response:
         self._ensure_available(provider)
         assert provider is not None
@@ -364,7 +381,12 @@ class OpenAICompatibleViewerRuntimeProvider:
                 isinstance(error, OpenAICompatibleHttpError)
                 and error.response is not None
             ):
-                lifecycle.received(build_http_response_summary(error.response))
+                lifecycle.received(
+                    build_http_response_summary(
+                        error.response,
+                        include_model_output=capture_model_output,
+                    )
+                )
             status_code = (
                 error.status_code
                 if isinstance(error, OpenAICompatibleHttpError)

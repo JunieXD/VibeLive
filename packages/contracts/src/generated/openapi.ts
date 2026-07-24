@@ -902,6 +902,8 @@ export interface components {
             output_tokens?: number | null;
             /** Total Tokens */
             total_tokens?: number | null;
+            /** Model Output */
+            model_output?: string | null;
             parsed_output?: components["schemas"]["JsonValue"];
         };
         /**
@@ -3187,6 +3189,11 @@ export interface components {
             text: string | null;
             /** Reaction Type */
             reaction_type: string;
+            /**
+             * Decision Reason
+             * @default null
+             */
+            decision_reason: string | null;
             /** Evidence Refs */
             evidence_refs?: components["schemas"]["EvidenceRef"][];
         };

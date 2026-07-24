@@ -201,6 +201,7 @@ class AiCallResponseSummary(DebugContractModel):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
+    model_output: str | None = None
     parsed_output: JsonValue = None
 
 

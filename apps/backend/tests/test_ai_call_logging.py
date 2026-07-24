@@ -13,14 +13,19 @@ from advx_backend.application.ai_call_logging import (
 from advx_backend.application.memory_extractor import OpenAICompatibleMemoryExtractor
 from advx_backend.application.ports.memory import MemoryEvidence
 from advx_backend.contracts.debug import AiCallRole, AiCallStatus, AiCallTrace
-from advx_backend.contracts.viewer_runtime import ProviderRuntimeSpec
+from advx_backend.contracts.viewer_runtime import ProviderRuntimeSpec, ViewerGenerationRequest
+from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation_wave import (
     FrameBundle,
     FrameBundleItem,
     FrameBundleSettings,
     ObservationTrigger,
     ObservationWave,
+    ViewerVisualInputMode,
 )
+from advx_backend.domain.persona import PersonaTemplate
+from advx_backend.domain.scene_assessment import SceneAssessment
+from advx_backend.domain.viewer import ViewerInstanceVariant, ViewerPrivateState
 from advx_backend.infrastructure.logging.trace_store import assert_redacted_artifact
 from advx_backend.providers.asr.stepfun import (
     StepFunAsrConfig,
@@ -31,6 +36,7 @@ from advx_backend.providers.asr.stepfun import (
 from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeConfig,
     OpenAICompatibleViewerRuntimeProvider,
+    ViewerRuntimeProtocolError,
     ViewerRuntimeProviderBlockedError,
     ViewerRuntimeProviderError,
 )
@@ -177,7 +183,7 @@ def test_lifecycle_records_sent_received_and_parsed_output() -> None:
             },
         },
     )
-    lifecycle.received(build_http_response_summary(response))
+    lifecycle.received(build_http_response_summary(response, include_model_output=True))
     lifecycle.succeeded({"action": "barrage", "text": "稳"})
 
     assert [trace.status for trace in sink.traces] == [
@@ -191,8 +197,131 @@ def test_lifecycle_records_sent_received_and_parsed_output() -> None:
     assert final.response is not None
     assert final.response.provider_request_id == "provider-1"
     assert final.response.total_tokens == 15
+    assert final.response.model_output == "{}"
     assert final.response.parsed_output == {"action": "barrage", "text": "稳"}
     assert [event.stage for event in final.timeline][-2:] == ["parsed", "completed"]
+
+
+def _viewer_request() -> ViewerGenerationRequest:
+    assessment = SceneAssessment(
+        assessment_id="assessment-1",
+        room_id="room-1",
+        session_id="session-1",
+        audience_epoch=1,
+        observation_id="observation-1",
+        salience=1,
+        novelty=1,
+        emotional_intensity=0,
+        replyable_event_ids=["event-1"],
+        evidence_event_ids=["event-1"],
+        maximum_responses=1,
+        created_at_ms=1,
+        expires_at_ms=10_000,
+    )
+    persona = PersonaTemplate(
+        persona_id="persona-1",
+        document_version=1,
+        revision=1,
+        content_hash="1" * 64,
+        display_name="观众",
+        role="viewer",
+        silence_bias=0.2,
+        burst_bias=0.2,
+        repetition_bias=0.2,
+        cooldown_ms=0,
+    )
+    return ViewerGenerationRequest(
+        room_id="room-1",
+        session_id="session-1",
+        audience_epoch=1,
+        observation_id="observation-1",
+        generation_request_id="generation-1",
+        viewer_instance_id="viewer-1",
+        viewer_sequence=1,
+        username="viewer-1",
+        display_name="观众",
+        persona=persona,
+        persona_revision=1,
+        presence_revision=1,
+        moderation_revision=1,
+        behavior_revision=1,
+        scene_assessment=assessment,
+        instance_variant=ViewerInstanceVariant(
+            expression_length=0.5,
+            skepticism=0.5,
+            encouragement=0.5,
+            meme_affinity=0.5,
+            focus="game",
+            silence_tendency=0.5,
+        ),
+        mode_context={},
+        visual_input_mode=ViewerVisualInputMode.TEXT_ONLY,
+        input_event_ids=["event-1"],
+        viewer_private_state=ViewerPrivateState(),
+        room_memory_slice=RoomMemorySlice(room_id="room-1", memory_revision=0),
+        deadline_at_ms=10_000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_viewer_failure_records_unparsed_model_output() -> None:
+    invalid_output = json.dumps(
+        {
+            "action": "barrage",
+            "intent": "react_to_host",
+            "target": None,
+            "text": "哈喽",
+            "reaction_type": "comment",
+            "evidence_refs": ["event-1"],
+        },
+        ensure_ascii=False,
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert '"source":"event","event_id":"allowed-event-id"' in payload["messages"][
+            0
+        ]["content"]
+        assert '"source":"frame","frame_index":0' in payload["messages"][0]["content"]
+        assert 'never bare IDs or numbers' in payload["messages"][0]["content"]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": invalid_output},
+                    }
+                ]
+            },
+        )
+
+    sink = RecordingSink()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            OpenAICompatibleViewerRuntimeConfig(
+                base_url="https://example.com/v1",
+                provider=ProviderRuntimeSpec(
+                    provider_profile_id="profile-1",
+                    viewer_model="viewer",
+                    memory_model="memory",
+                    visual_summary_model="visual",
+                ),
+                api_key="test-key",
+            ),
+            client=client,
+            ai_call_sink=sink,
+        )
+        with pytest.raises(ViewerRuntimeProtocolError, match="evidence_refs.0:model_type"):
+            await provider.generate(_viewer_request())
+        await provider.aclose()
+
+    final = sink.traces[-1]
+    assert final.status is AiCallStatus.FAILED
+    assert final.response is not None
+    assert final.response.model_output == invalid_output
+    assert final.response.parsed_output is None
+    assert_redacted_artifact(final)
 
 
 @pytest.mark.asyncio
