@@ -39,6 +39,8 @@ const INGEST_ACK_TIMEOUT_MS = 10_000;
 const CONNECT_TIMEOUT_MS = 8_000;
 // The probe has four sequential upstream phases, each bounded at 30 seconds.
 const PROVIDER_PROBE_TIMEOUT_MS = 130_000;
+// Starting a runtime repeats the model probe and adds a final-ASR check (35 seconds).
+const RUNTIME_SESSION_START_TIMEOUT_MS = 180_000;
 
 type RequestOptions = {
   timeoutMs?: number;
@@ -189,11 +191,20 @@ export class BackendClient {
         "请先在设置中保存模型和语音识别配置。"
       );
     }
-    const started = await this.request<RuntimeQuerySnapshot>("/runtime/sessions", "POST", {
-      client_request_id: clientRequestId,
-      canonical_runtime_spec: runtime.spec,
-      client_config_hash: runtime.configHash
-    });
+    const started = await this.request<RuntimeQuerySnapshot>(
+      "/runtime/sessions",
+      "POST",
+      {
+        client_request_id: clientRequestId,
+        canonical_runtime_spec: runtime.spec,
+        client_config_hash: runtime.configHash
+      },
+      {
+        timeoutMs: RUNTIME_SESSION_START_TIMEOUT_MS,
+        timeoutCode: "runtime_session_start_timeout",
+        timeoutMessage: "AI 观众初始化超时，请检查 Provider 和 ASR 服务连接。"
+      }
+    );
     this.runtimeProvidersByRevision.clear();
     this.rememberRuntime(started);
     this.recoverableRuntimeSessionId = null;

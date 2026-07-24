@@ -208,6 +208,85 @@ describe("BackendClient runtime v2", () => {
     }
   });
 
+  it("gives runtime startup enough time for the model and ASR capability checks", async () => {
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(new AbortController().signal);
+    const compiled = compileCanonicalRuntimeSpec(createInitialAudienceWorkspace(), {
+      configRevision: 1,
+      provider: {
+        providerProfileId: "default",
+        directorModel: "viewer-model",
+        viewerModel: "viewer-model",
+        memoryModel: "viewer-model",
+        visualSummaryModel: "viewer-model"
+      }
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ configured: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    ).mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        room_id: "default-room",
+        session_id: "session-1",
+        audience_epoch: 1,
+        config_revision: 1,
+        config_hash: compiled.configHash,
+        canonical_runtime_spec: compiled.spec,
+        viewers: [],
+        recovered: false
+      }), { status: 201, headers: { "Content-Type": "application/json" } })
+    );
+    const client = new BackendClient({ baseUrl: "http://127.0.0.1:9999", localToken: "token" });
+    const bridge = client as unknown as { ensureConnected(): Promise<void> };
+    bridge.ensureConnected = async () => undefined;
+
+    try {
+      await client.startSession("request-1", compiled);
+      expect(timeoutSpy).toHaveBeenNthCalledWith(1, 8_000);
+      expect(timeoutSpy).toHaveBeenNthCalledWith(2, 180_000);
+    } finally {
+      fetchMock.mockRestore();
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("reports a runtime startup timeout as a provider or ASR issue", async () => {
+    const timeoutError = new Error("The operation was aborted due to timeout");
+    timeoutError.name = "TimeoutError";
+    const compiled = compileCanonicalRuntimeSpec(createInitialAudienceWorkspace(), {
+      configRevision: 1,
+      provider: {
+        providerProfileId: "default",
+        directorModel: "viewer-model",
+        viewerModel: "viewer-model",
+        memoryModel: "viewer-model",
+        visualSummaryModel: "viewer-model"
+      }
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ configured: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    ).mockRejectedValueOnce(timeoutError);
+    const client = new BackendClient({ baseUrl: "http://127.0.0.1:9999", localToken: "token" });
+    const bridge = client as unknown as { ensureConnected(): Promise<void> };
+    bridge.ensureConnected = async () => undefined;
+
+    try {
+      await expect(client.startSession("request-1", compiled)).rejects.toMatchObject({
+        name: "BackendClientError",
+        code: "runtime_session_start_timeout",
+        message: "AI 观众初始化超时，请检查 Provider 和 ASR 服务连接。"
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("keeps the last runtime session as an explicit recovery candidate after restart", () => {
     const client = new BackendClient({ localToken: "token" });
     const bridge = client as unknown as {
