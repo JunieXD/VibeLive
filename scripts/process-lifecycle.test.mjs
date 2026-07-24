@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
+import { createServer } from "node:net";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 const lifecycleModuleUrl = pathToFileURL(resolve("scripts/process-lifecycle.mjs")).href;
 
-const { terminateWithFallback } = await import(lifecycleModuleUrl);
+const { requestShutdownViaSocket, terminateWithFallback } = await import(lifecycleModuleUrl);
 
 test("clears a fallback timer after completion", async () => {
   const child = spawn(
@@ -26,6 +28,29 @@ test("clears a fallback timer after completion", async () => {
   assert.equal(code, 0);
   assert.equal(signal, null);
   assert.ok(elapsedMs < 1_000, `fallback timer kept the process alive for ${elapsedMs}ms`);
+});
+
+test("requests graceful shutdown through the local control socket", async () => {
+  const socketPath =
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\advx-live-test-${randomBytes(8).toString("hex")}`
+      : `/tmp/advx-live-test-${randomBytes(8).toString("hex")}.sock`;
+  const server = createServer((socket) => {
+    socket.once("data", (data) => {
+      assert.equal(data.toString("utf8"), "quit\n");
+      socket.end("ok\n");
+    });
+  });
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(socketPath, resolveListen);
+  });
+
+  try {
+    assert.equal(await requestShutdownViaSocket(socketPath), true);
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+  }
 });
 
 test("uses SIGTERM without forcing a process that exits during its grace period", async () => {

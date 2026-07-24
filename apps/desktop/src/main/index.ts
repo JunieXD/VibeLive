@@ -1,5 +1,6 @@
 import { app, BrowserWindow, globalShortcut, screen } from "electron";
 import { randomBytes } from "node:crypto";
+import { createServer, type Server } from "node:net";
 import { join, resolve } from "node:path";
 import type { BackendRuntimeStatus } from "../shared/contracts";
 import {
@@ -47,6 +48,7 @@ let backendRestartTimer: NodeJS.Timeout | null = null;
 let backendRestartAttempts = 0;
 let appShutdownPromise: Promise<void> | null = null;
 let appShutdownComplete = false;
+let developmentShutdownServer: Server | null = null;
 const backendBaseUrl = process.env.ADVX_BACKEND_URL ?? "http://127.0.0.1:8765";
 const localToken = process.env.ADVX_LOCAL_TOKEN ?? randomBytes(32).toString("base64url");
 const backendClient = new BackendClient({
@@ -61,6 +63,44 @@ function requestApplicationQuitFromSignal(signal: NodeJS.Signals): void {
 
 process.once("SIGINT", () => requestApplicationQuitFromSignal("SIGINT"));
 process.once("SIGTERM", () => requestApplicationQuitFromSignal("SIGTERM"));
+
+function startDevelopmentShutdownControl(): Promise<void> {
+  const socketPath = process.env.ADVX_DESKTOP_SHUTDOWN_SOCKET;
+  if (!socketPath) return Promise.resolve();
+
+  return new Promise((resolveStart, rejectStart) => {
+    const server = createServer((socket) => {
+      socket.once("error", () => socket.destroy());
+      socket.once("data", (data) => {
+        if (data.toString("utf8").trim() !== "quit") {
+          socket.end("invalid\n");
+          return;
+        }
+        socket.end("ok\n", () => {
+          logger.info("app.shutdown.control-requested");
+          app.quit();
+        });
+      });
+    });
+    const onStartError = (error: Error) => {
+      developmentShutdownServer = null;
+      rejectStart(error);
+    };
+    server.once("error", onStartError);
+    server.listen(socketPath, () => {
+      server.removeListener("error", onStartError);
+      server.on("error", (error) => logger.error("app.shutdown.control-failed", { error }));
+      developmentShutdownServer = server;
+      resolveStart();
+    });
+  });
+}
+
+function stopDevelopmentShutdownControl(): void {
+  const server = developmentShutdownServer;
+  developmentShutdownServer = null;
+  server?.close();
+}
 
 type TraySmokeHandle = ApplicationTray & {
   quitMenuItemId: typeof TRAY_MENU_ITEM_IDS.quit;
@@ -241,6 +281,7 @@ function confirmControlWindowClose(): void {
 function prepareApplicationShutdown(): void {
   if (hasSingleInstanceLock) logger.info("app.shutdown.started");
   quitRequested = true;
+  stopDevelopmentShutdownControl();
   globalShortcut.unregisterAll();
   screen.removeListener("display-added", syncOverlayToDisplays);
   screen.removeListener("display-removed", syncOverlayToDisplays);
@@ -353,7 +394,14 @@ if (!hasSingleInstanceLock) {
   });
   void app
     .whenReady()
-    .then(initializeApplication)
+    .then(async () => {
+      try {
+        await startDevelopmentShutdownControl();
+      } catch (error) {
+        logger.warn("app.shutdown.control-unavailable", { error });
+      }
+      await initializeApplication();
+    })
     .catch((error: unknown) => {
       console.error("Failed to initialize ADVX Live", error);
       app.quit();

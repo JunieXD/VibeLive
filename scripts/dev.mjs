@@ -2,7 +2,11 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
-import { terminateWithFallback } from "./process-lifecycle.mjs";
+import {
+  requestShutdownViaSocket,
+  terminateWithFallback,
+  waitForCompletionOrTimeout
+} from "./process-lifecycle.mjs";
 
 const useProcessGroups = process.platform !== "win32";
 const backendProtocolVersion = 3;
@@ -11,6 +15,10 @@ const localToken = process.env.ADVX_LOCAL_TOKEN ?? randomBytes(32).toString("bas
 const configuredBackendUrl = process.env.ADVX_BACKEND_URL;
 const backendPort = configuredBackendUrl ? null : await findAvailablePort();
 const backendUrl = configuredBackendUrl ?? `http://127.0.0.1:${backendPort}`;
+const desktopShutdownSocket =
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\advx-live-${randomBytes(12).toString("hex")}`
+    : `/tmp/advx-live-${randomBytes(12).toString("hex")}.sock`;
 const {
   ELECTRON_RUN_AS_NODE: _electronRunAsNode,
   ...inheritedEnvironment
@@ -20,7 +28,8 @@ const childEnvironment = {
   ADVX_BACKEND_EXTERNAL: "1",
   ADVX_BACKEND_URL: backendUrl,
   ADVX_DATA_DIR: resolve(".advx-data"),
-  ADVX_LOCAL_TOKEN: localToken
+  ADVX_LOCAL_TOKEN: localToken,
+  ADVX_DESKTOP_SHUTDOWN_SOCKET: desktopShutdownSocket
 };
 let backendChild = null;
 let desktopChild = null;
@@ -46,7 +55,7 @@ if (!configuredBackendUrl) {
       String(backendPort)
     ],
     {
-      stdio: "inherit",
+      stdio: ["ignore", "inherit", "inherit"],
       detached: useProcessGroups,
       env: childEnvironment
     }
@@ -58,8 +67,8 @@ if (!configuredBackendUrl) {
   observeChild(backend, "Backend");
 }
 
-process.once("SIGINT", () => void shutdown(0, "SIGINT"));
-process.once("SIGTERM", () => void shutdown(0, "SIGTERM"));
+process.once("SIGINT", () => void shutdown(0));
+process.once("SIGTERM", () => void shutdown(0));
 
 try {
   console.log(`Waiting for ADVX backend at ${backendUrl}...`);
@@ -69,7 +78,7 @@ try {
 
   const desktopCommand = resolvePnpmCommand(["--filter", "@advx/desktop", "dev"]);
   const desktop = spawn(desktopCommand.executable, desktopCommand.arguments, {
-    stdio: "inherit",
+    stdio: ["ignore", "inherit", "inherit"],
     shell: desktopCommand.useShell,
     detached: useProcessGroups,
     env: childEnvironment
@@ -112,21 +121,40 @@ function shutdown(exitCode = 0) {
   if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
   shutdownPromise = (async () => {
-    await stopChildTree(desktopChild, "Desktop");
+    await stopDesktopChild();
     await stopChildTree(backendChild, "Backend");
     process.exitCode = exitCode;
   })();
   return shutdownPromise;
 }
 
-async function stopChildTree(child, label) {
+async function stopDesktopChild() {
+  const child = desktopChild;
+  if (!child || !isChildTreeRunning(child)) return;
+
+  console.log("Requesting graceful Desktop shutdown...");
+  const accepted = await requestShutdownViaSocket(desktopShutdownSocket);
+  if (!accepted) {
+    console.warn("Desktop shutdown control was unavailable; falling back to SIGTERM.");
+    await stopChildTree(child, "Desktop");
+    return;
+  }
+
+  await waitForCompletionOrTimeout(waitForChildTreeExit(child), shutdownGraceMs);
+  if (!isChildTreeRunning(child)) return;
+
+  console.error(`Desktop did not exit within ${shutdownGraceMs}ms; falling back to SIGTERM.`);
+  await stopChildTree(child, "Desktop", 1_000);
+}
+
+async function stopChildTree(child, label, gracefulTimeoutMs = shutdownGraceMs) {
   if (!child || !isChildTreeRunning(child)) return;
   console.log(`Requesting graceful ${label} shutdown...`);
   await terminateWithFallback({
     isRunning: () => isChildTreeRunning(child),
     requestTermination: (signal) => terminateChildTree(child, signal),
     waitForExit: () => waitForChildTreeExit(child),
-    gracefulTimeoutMs: shutdownGraceMs,
+    gracefulTimeoutMs,
     forceTimeoutMs: 1_000,
     onForce: () =>
       console.error(`${label} did not exit within ${shutdownGraceMs}ms; forcing termination.`)

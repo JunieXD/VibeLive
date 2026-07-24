@@ -1,3 +1,5 @@
+import { connect } from "node:net";
+
 export async function waitForCompletionOrTimeout(completion, timeoutMs) {
   let timeoutId;
   const timeout = new Promise((resolveTimeout) => {
@@ -9,6 +11,28 @@ export async function waitForCompletionOrTimeout(completion, timeoutMs) {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export function requestShutdownViaSocket(socketPath, timeoutMs = 500) {
+  return new Promise((resolveRequest) => {
+    let completed = false;
+    const socket = connect(socketPath);
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+    timeout.unref();
+
+    function finish(accepted) {
+      if (completed) return;
+      completed = true;
+      clearTimeout(timeout);
+      socket.destroy();
+      resolveRequest(accepted);
+    }
+
+    socket.once("connect", () => socket.write("quit\n"));
+    socket.once("data", (data) => finish(data.toString("utf8").trim() === "ok"));
+    socket.once("error", () => finish(false));
+    socket.once("close", () => finish(false));
+  });
 }
 
 export async function terminateWithFallback({
