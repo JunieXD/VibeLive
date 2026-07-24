@@ -76,7 +76,7 @@ from advx_backend.application.viewer_runtime_coordinator import (
 )
 from advx_backend.contracts.configuration import ProviderConfigurationRequest
 from advx_backend.domain.barrage import BarragePolicy
-from advx_backend.infrastructure.logging import TraceStore
+from advx_backend.infrastructure.logging import AiCallStore, TraceStore
 from advx_backend.infrastructure.persistence.sqlite import (
     DatabaseConfig,
     SQLiteDatabase,
@@ -421,7 +421,8 @@ class BackendRuntime:
                     api_key=external_config.asr_api_key,
                     base_url=external_config.asr_base_url,
                     model=external_config.asr_model,
-                )
+                ),
+                ai_call_sink=self.debug_service,
             )
             if asr_provider_override is None
             else None
@@ -624,6 +625,10 @@ def build_runtime(
             path=resolved_data_directory / "debug" / "viewer-traces.jsonl",
         ),
         runtime_state=runtime_state,
+        ai_call_store=AiCallStore(
+            max_items=1_000,
+            path=resolved_data_directory / "debug" / "ai-calls.jsonl",
+        ),
     )
     replay_service = ReplayService()
     shared_brain_service = SharedBrainService(
@@ -638,6 +643,7 @@ def build_runtime(
     provider_controller = RuntimeProviderController(
         frame_resolver=frame_store,
         configuration_committer=provider_configuration_store.set,
+        ai_call_sink=debug_service,
     )
     provider_router = RuntimeProviderRouter(runtime_state)
     session_service = SessionService(

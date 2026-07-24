@@ -1,5 +1,6 @@
 import {
   Activity,
+  BrainCircuit,
   Clock,
   LayoutDashboard,
   MessageSquareText,
@@ -14,7 +15,7 @@ import type { JSX, ReactNode } from 'react'
 import type { ColorTheme } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
 
-export type AppShellView = 'live' | 'viewers' | 'audience' | 'settings'
+export type AppShellView = 'live' | 'viewers' | 'audience' | 'ai-calls' | 'settings'
 
 export type AppShellStatusTone = 'offline' | 'online' | 'warning' | 'failed'
 
@@ -58,6 +59,7 @@ const viewLabels: Record<AppShellView, string> = {
   live: '直播控制台',
   viewers: '直播观众',
   audience: '观众配置',
+  'ai-calls': 'AI 调用',
   settings: '设置'
 }
 
@@ -122,6 +124,7 @@ export function AppShell({
     { view: 'live' as const, label: viewLabels.live, icon: LayoutDashboard },
     { view: 'viewers' as const, label: viewLabels.viewers, icon: Users },
     { view: 'audience' as const, label: viewLabels.audience, icon: SlidersHorizontal },
+    { view: 'ai-calls' as const, label: viewLabels['ai-calls'], icon: BrainCircuit },
     { view: 'settings' as const, label: viewLabels.settings, icon: Settings }
   ]
   const themeSwitchLabel =
@@ -268,7 +271,9 @@ export function AppShell({
         <main
           className={[
             'min-h-0 min-w-0 px-4.5 py-4',
-            activeView === 'live' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
+            activeView === 'live' || activeView === 'ai-calls'
+              ? 'flex flex-col overflow-hidden'
+              : 'overflow-auto'
           ].join(' ')}
           data-control-workspace
         >
@@ -299,7 +304,15 @@ export function AppShell({
               )}
             </section>
           )}
-          <div className={activeView === 'live' ? 'min-h-0 flex-1' : undefined}>{children}</div>
+          <div
+            className={
+              activeView === 'live' || activeView === 'ai-calls'
+                ? 'min-h-0 flex-1'
+                : undefined
+            }
+          >
+            {children}
+          </div>
         </main>
 
         <footer className="flex h-7.5 items-center gap-4.5 border-t border-[var(--border)] bg-[var(--chrome)] px-4 text-[11px]">

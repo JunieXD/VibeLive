@@ -192,6 +192,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/debug/ai-calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query Ai Calls */
+        get: operations["query_ai_calls_debug_ai_calls_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/debug/runtime/{session_id}": {
         parameters: {
             query?: never;
@@ -828,6 +845,131 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AiCallError */
+        AiCallError: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Http Status */
+            http_status?: number | null;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+        };
+        /** AiCallQueryResponse */
+        AiCallQueryResponse: {
+            /** Items */
+            items: components["schemas"]["AiCallTrace"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /** AiCallRequestSummary */
+        AiCallRequestSummary: {
+            /** Wire Sha256 */
+            wire_sha256?: string | null;
+            /** Wire Bytes */
+            wire_bytes?: number | null;
+            /** Schema Name */
+            schema_name?: string | null;
+            /** Max Output Tokens */
+            max_output_tokens?: number | null;
+            input_preview?: components["schemas"]["JsonValue"];
+            /** Redacted Fields */
+            redacted_fields?: string[];
+        };
+        /** AiCallResponseSummary */
+        AiCallResponseSummary: {
+            /** Http Status */
+            http_status?: number | null;
+            /** Provider Request Id */
+            provider_request_id?: string | null;
+            /** Body Sha256 */
+            body_sha256?: string | null;
+            /** Body Bytes */
+            body_bytes?: number | null;
+            /** Finish Reason */
+            finish_reason?: string | null;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            parsed_output?: components["schemas"]["JsonValue"];
+        };
+        /**
+         * AiCallRole
+         * @enum {string}
+         */
+        AiCallRole: "director" | "viewer" | "visual_summary" | "memory" | "asr";
+        /**
+         * AiCallStatus
+         * @enum {string}
+         */
+        AiCallStatus: "preparing" | "sent" | "streaming" | "received" | "succeeded" | "failed" | "blocked" | "cancelled" | "interrupted";
+        /** AiCallTimelineEvent */
+        AiCallTimelineEvent: {
+            /** Stage */
+            stage: string;
+            /** At Ms */
+            at_ms: number;
+            detail?: components["schemas"]["JsonValue"];
+        };
+        /** AiCallTrace */
+        AiCallTrace: {
+            /** Call Id */
+            call_id: string;
+            /** Correlation Id */
+            correlation_id: string;
+            role: components["schemas"]["AiCallRole"];
+            status: components["schemas"]["AiCallStatus"];
+            /** Provider */
+            provider: string;
+            /** Model Id */
+            model_id: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Room Id */
+            room_id?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /** Audience Epoch */
+            audience_epoch?: number | null;
+            /** Observation Id */
+            observation_id?: string | null;
+            /** Generation Request Id */
+            generation_request_id?: string | null;
+            /** Viewer Instance Id */
+            viewer_instance_id?: string | null;
+            /** Utterance Id */
+            utterance_id?: string | null;
+            /** Started At Ms */
+            started_at_ms: number;
+            /** Updated At Ms */
+            updated_at_ms: number;
+            /** Completed At Ms */
+            completed_at_ms?: number | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /** Timeline */
+            timeline?: components["schemas"]["AiCallTimelineEvent"][];
+            request?: components["schemas"]["AiCallRequestSummary"] | null;
+            response?: components["schemas"]["AiCallResponseSummary"] | null;
+            error?: components["schemas"]["AiCallError"] | null;
+            /**
+             * Redacted
+             * @default true
+             * @constant
+             */
+            redacted: true;
+        };
         /**
          * AmbienceMode
          * @enum {string}
@@ -3456,6 +3598,44 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_ai_calls_debug_ai_calls_get: {
+        parameters: {
+            query?: {
+                session_id?: string | null;
+                role?: components["schemas"]["AiCallRole"] | null;
+                status?: components["schemas"]["AiCallStatus"] | null;
+                correlation_id?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                "X-ADVX-Protocol-Version": "3";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiCallQueryResponse"];
                 };
             };
             /** @description Validation Error */

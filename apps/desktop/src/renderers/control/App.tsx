@@ -3,6 +3,7 @@ import type { BackendConnectionState, ColorTheme } from '../../shared/contracts'
 import { AppShell, type AppShellStatusItem } from './app/AppShell'
 import { AudienceWorkspace } from './AudienceWorkspace'
 import { LiveView } from './features/live/LiveView'
+import { AiCallLog } from './features/ai-calls/AiCallLog'
 import { SettingsView } from './features/settings/SettingsView'
 import { ViewerManagementView } from './features/viewers/ViewerManagementView'
 import { SourcePickerDialog } from './features/source-picker/SourcePickerDialog'
@@ -412,6 +413,13 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             onSaveModelConfig={() => void modelConfig.save()}
             onOverlaySettingsChange={overlay.updateSettings}
             onPreviewBarrage={(mode) => void barrage.previewBarrage(mode)}
+          />
+        )}
+
+        {activeView === 'ai-calls' && (
+          <AiCallLog
+            active
+            currentSessionId={backend.status?.session.sessionId ?? null}
           />
         )}
       </AppShell>

@@ -7,12 +7,23 @@ from typing import Final, Protocol
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from advx_backend.application.ai_call_logging import (
+    AiCallLifecycle,
+    AiCallScope,
+    AiCallSink,
+    build_http_response_summary,
+    build_openai_request_summary,
+)
 from advx_backend.application.ports.memory import MemoryEvidence, RoomMemoryCandidate
+from advx_backend.contracts.debug import AiCallRole
 from advx_backend.domain.memory import RoomMemoryType
 from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleConfig,
+    OpenAICompatibleHttpError,
     OpenAICompatibleProvider,
     OpenAICompatibleProviderError,
+    OpenAICompatibleTimeoutError,
+    OpenAICompatibleTransportError,
 )
 from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeConfig,
@@ -139,6 +150,7 @@ class OpenAICompatibleMemoryExtractor:
         *,
         client: httpx.AsyncClient | None = None,
         max_concurrency: int = 1,
+        ai_call_sink: AiCallSink | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least one")
@@ -146,6 +158,7 @@ class OpenAICompatibleMemoryExtractor:
         self._client = client if client is not None else httpx.AsyncClient()
         self._owns_client = client is None
         self._provider = self._role_provider()
+        self._ai_call_sink = ai_call_sink
         self._slots = asyncio.Semaphore(max_concurrency)
         self._close_lock = asyncio.Lock()
         self._closed = False
@@ -159,10 +172,6 @@ class OpenAICompatibleMemoryExtractor:
         events: Sequence[MemoryEvidence],
         current_revision: int,
     ) -> tuple[RoomMemoryCandidate, ...]:
-        if self._closed:
-            raise ViewerRuntimeProviderError("Memory extractor is closed")
-        if self._provider is None:
-            raise ViewerRuntimeProviderBlockedError("Model provider credentials are not configured")
         if not room_id or not session_id or audience_epoch < 1 or current_revision < 0:
             raise ViewerRuntimeProtocolError("Memory extraction scope is invalid")
         event_ids = tuple(event.event_id for event in events)
@@ -211,41 +220,137 @@ class OpenAICompatibleMemoryExtractor:
                 },
             },
         }
-        async with self._slots:
-            try:
-                response = await self._provider._send(
-                    "POST",
-                    self._provider._chat_completions_endpoint(),
-                    payload=payload,
-                )
-            except asyncio.CancelledError:
-                raise
-            except OpenAICompatibleProviderError as error:
-                raise ViewerRuntimeProviderError(str(error)) from None
-        output = self._structured_output(response)
+        correlation_source = json.dumps(
+            {
+                "session_id": session_id,
+                "audience_epoch": audience_epoch,
+                "current_revision": current_revision,
+                "event_ids": list(event_ids),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        lifecycle = AiCallLifecycle(
+            sink=self._ai_call_sink,
+            role=AiCallRole.MEMORY,
+            correlation_id=(
+                "memory-"
+                f"{hashlib.sha256(correlation_source.encode('utf-8')).hexdigest()[:32]}"
+            ),
+            provider="openai_compatible",
+            model_id=self.config.provider.memory_model,
+            endpoint=f"{self.config.base_url.rstrip('/')}/chat/completions",
+            scope=AiCallScope(
+                room_id=room_id,
+                session_id=session_id,
+                audience_epoch=audience_epoch,
+            ),
+        )
         try:
-            parsed = _MemoryExtractionOutput.model_validate(output)
-        except ValidationError:
-            raise ViewerRuntimeProtocolError(
-                "Memory response violated the candidate contract"
-            ) from None
-
-        allowed_evidence = set(event_ids)
-        candidates: list[RoomMemoryCandidate] = []
-        for index, item in enumerate(parsed.candidates):
-            if not set(item.evidence_event_ids).issubset(allowed_evidence):
-                raise ViewerRuntimeProtocolError("Memory candidate referenced a non-public event")
-            candidates.append(
-                self._candidate(
-                    room_id=room_id,
-                    session_id=session_id,
-                    audience_epoch=audience_epoch,
-                    current_revision=current_revision,
-                    index=index,
-                    output=item,
+            if self._closed:
+                raise ViewerRuntimeProviderError("Memory extractor is closed")
+            if self._provider is None:
+                raise ViewerRuntimeProviderBlockedError(
+                    "Model provider credentials are not configured"
                 )
+            lifecycle.sent(build_openai_request_summary(payload))
+            async with self._slots:
+                try:
+                    response = await self._provider._send(
+                        "POST",
+                        self._provider._chat_completions_endpoint(),
+                        payload=payload,
+                    )
+                except OpenAICompatibleProviderError as error:
+                    if (
+                        isinstance(error, OpenAICompatibleHttpError)
+                        and error.response is not None
+                    ):
+                        lifecycle.received(
+                            build_http_response_summary(error.response)
+                        )
+                    status_code = (
+                        error.status_code
+                        if isinstance(error, OpenAICompatibleHttpError)
+                        else None
+                    )
+                    raise ViewerRuntimeProviderError(
+                        str(error),
+                        status_code=status_code,
+                        retryable=(
+                            isinstance(
+                                error,
+                                (
+                                    OpenAICompatibleTimeoutError,
+                                    OpenAICompatibleTransportError,
+                                ),
+                            )
+                            or status_code == 429
+                            or (
+                                isinstance(status_code, int)
+                                and 500 <= status_code <= 599
+                            )
+                        ),
+                        retry_after_seconds=(
+                            error.retry_after_seconds
+                            if isinstance(error, OpenAICompatibleHttpError)
+                            else None
+                        ),
+                    ) from None
+            lifecycle.received(build_http_response_summary(response))
+            output = self._structured_output(response)
+            try:
+                parsed = _MemoryExtractionOutput.model_validate(output)
+            except ValidationError:
+                raise ViewerRuntimeProtocolError(
+                    "Memory response violated the candidate contract"
+                ) from None
+
+            allowed_evidence = set(event_ids)
+            candidates: list[RoomMemoryCandidate] = []
+            for index, item in enumerate(parsed.candidates):
+                if not set(item.evidence_event_ids).issubset(allowed_evidence):
+                    raise ViewerRuntimeProtocolError(
+                        "Memory candidate referenced a non-public event"
+                    )
+                candidates.append(
+                    self._candidate(
+                        room_id=room_id,
+                        session_id=session_id,
+                        audience_epoch=audience_epoch,
+                        current_revision=current_revision,
+                        index=index,
+                        output=item,
+                    )
+                )
+            lifecycle.succeeded(
+                {
+                    "candidate_count": len(parsed.candidates),
+                    "candidates": [
+                        {
+                            "memory_type": item.memory_type.value,
+                            "evidence_event_ids": item.evidence_event_ids,
+                            "importance": item.importance,
+                            "confidence": item.confidence,
+                            "content_ref": {
+                                "chars": len(item.content),
+                                "sha256": hashlib.sha256(
+                                    item.content.encode("utf-8")
+                                ).hexdigest(),
+                            },
+                        }
+                        for item in parsed.candidates
+                    ],
+                }
             )
-        return tuple(candidates)
+            return tuple(candidates)
+        except asyncio.CancelledError:
+            lifecycle.cancelled()
+            raise
+        except Exception as error:
+            lifecycle.failed(error)
+            raise
 
     async def aclose(self) -> None:
         async with self._close_lock:

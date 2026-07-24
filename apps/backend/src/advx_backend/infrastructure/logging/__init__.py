@@ -1,3 +1,4 @@
+from advx_backend.infrastructure.logging.ai_call_store import AiCallStore
 from advx_backend.infrastructure.logging.configure import configure_logging
 from advx_backend.infrastructure.logging.trace_store import (
     TraceStore,
@@ -6,6 +7,7 @@ from advx_backend.infrastructure.logging.trace_store import (
 )
 
 __all__ = [
+    "AiCallStore",
     "TraceStore",
     "UnsafeTraceArtifactError",
     "assert_redacted_artifact",

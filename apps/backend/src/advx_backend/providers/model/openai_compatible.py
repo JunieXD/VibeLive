@@ -44,9 +44,16 @@ class OpenAICompatibleTransportError(OpenAICompatibleProviderError):
 class OpenAICompatibleHttpError(OpenAICompatibleProviderError):
     """Raised when the upstream endpoint returns a non-success status."""
 
-    def __init__(self, status_code: int, *, retry_after_seconds: float | None = None) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        retry_after_seconds: float | None = None,
+        response: httpx.Response | None = None,
+    ) -> None:
         self.status_code = status_code
         self.retry_after_seconds = retry_after_seconds
+        self.response = response
         super().__init__(f"OpenAI-compatible provider returned HTTP {status_code}")
 
 
@@ -453,6 +460,7 @@ class OpenAICompatibleProvider:
             raise OpenAICompatibleHttpError(
                 response.status_code,
                 retry_after_seconds=self._retry_after_seconds(response.headers.get("Retry-After")),
+                response=response,
             )
         return response
 

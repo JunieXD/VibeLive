@@ -24,6 +24,9 @@ describe('control store', () => {
     selectSetActiveView(state)('viewers')
     state = useControlStore.getState()
     expect(selectActiveView(state)).toBe('viewers')
+
+    selectSetActiveView(state)('ai-calls')
+    expect(selectActiveView(useControlStore.getState())).toBe('ai-calls')
   })
 
   it('uses the shared session transitions and ignores invalid actions', () => {

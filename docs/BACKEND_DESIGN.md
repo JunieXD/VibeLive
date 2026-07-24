@@ -459,6 +459,23 @@ Repository 返回 Domain 对象或 Application DTO，不返回 SQLAlchemy Sessio
 - Provider、ASR 或数据库错误不得阻止 Session Service 执行停止和清理。
 - 日志和 Debug Trace 可以记录 ID、revision、hash、事件/帧引用、时序、状态、重试、stale reason 和副作用结果，不记录凭据、原始音频、完整私密截图、完整 Prompt/Provider 响应或思维链。
 
+### 12.1 AI 调用回路日志
+
+Director、Viewer、视觉摘要、记忆提取和 ASR 的每次外部调用都写入同一套有界
+`AiCallTrace`。一次重试是新的 `call_id`，但沿用原业务 `correlation_id`；
+Viewer 使用 `generation_request_id`，Director 和视觉摘要使用 `observation_id`，ASR
+使用与 final transcript 一致的 `utterance_id`。时间线至少区分准备、发送、收到响应、
+流式接收、解析完成、失败、阻止、取消和后端重启中断。
+
+`AiCallTrace` 保存模型、端点、HTTP 状态、Provider request ID、Token、字节数、hash、
+耗时、错误类型、可重试性、关联 ID、脱敏后的输入摘要和严格解析后的业务输出。图片和
+音频正文只保留大小与 hash；输入中的 Room memory 只保留 revision/ID；记忆提取结果
+只保留候选数量、类型、证据 ID、评分和正文 hash。System instruction 只记录长度与
+hash；Viewer private state 只保留 revision、事件引用和状态 hash。凭据、完整 Prompt、
+Provider 原始响应和隐藏推理始终不进入日志。日志以有界 JSONL 保存在本地
+`debug/ai-calls.jsonl`，通过 `GET /debug/ai-calls` 查询；Electron 的“AI 调用”页只消费
+该接口，不维护第二份调用状态。
+
 ## 13. 测试要求
 
 - Domain 单元测试覆盖 Session/epoch 转换、Hamilton Viewer 池分配、稳定别名/微变体、ObservationWave 冻结、TTL、latest-wins、去重和记忆状态转换。

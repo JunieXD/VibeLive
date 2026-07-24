@@ -6,7 +6,7 @@ import {
   type SessionState
 } from '../../../shared/session'
 
-export type ActiveView = 'live' | 'viewers' | 'audience' | 'settings'
+export type ActiveView = 'live' | 'viewers' | 'audience' | 'ai-calls' | 'settings'
 
 export type ControlStore = {
   activeView: ActiveView

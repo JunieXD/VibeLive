@@ -65,6 +65,19 @@ export type RuntimeViewer = NonNullable<RuntimeSessionSnapshot['viewers']>[numbe
 export type ProviderProbeResult = ProviderCapabilityProbeResult
 export type DebugTraceSummary = ViewerRequestTrace
 export type DebugTraceQueryResult = TraceQueryResponse
+export type AiCallTrace = import('@advx/contracts').components['schemas']['AiCallTrace']
+export type AiCallQueryResponse =
+  import('@advx/contracts').components['schemas']['AiCallQueryResponse']
+export type AiCallRole = import('@advx/contracts').components['schemas']['AiCallRole']
+export type AiCallStatus = import('@advx/contracts').components['schemas']['AiCallStatus']
+export type AiCallQuery = {
+  sessionId?: string
+  role?: AiCallRole
+  status?: AiCallStatus
+  correlationId?: string
+  cursor?: string
+  limit?: number
+}
 export type RoomLongTermMemory = import('@advx/contracts').components['schemas']['RoomLongTermMemory']
 export type RoomMemoryType = import('@advx/contracts').components['schemas']['RoomMemoryType']
 export type MemoryCandidateRequest = import('@advx/contracts').components['schemas']['MemoryCandidateRequest']

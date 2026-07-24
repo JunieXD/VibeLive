@@ -45,6 +45,35 @@ describe("BackendClient startup state", () => {
 });
 
 describe("BackendClient runtime v2", () => {
+  it("queries AI calls with the complete debug filter set", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [], next_cursor: null, metadata: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    const client = new BackendClient({
+      baseUrl: "http://127.0.0.1:9999",
+      localToken: "token"
+    });
+
+    await client.queryAiCalls({
+      sessionId: "session/a",
+      role: "viewer",
+      status: "failed",
+      correlationId: "corr/a",
+      cursor: "cursor/a",
+      limit: 250
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:9999/debug/ai-calls?" +
+      "session_id=session%2Fa&role=viewer&status=failed&" +
+      "correlation_id=corr%2Fa&cursor=cursor%2Fa&limit=250"
+    );
+    fetchMock.mockRestore();
+  });
+
   it("treats an already-gone backend session as an idempotent stop", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

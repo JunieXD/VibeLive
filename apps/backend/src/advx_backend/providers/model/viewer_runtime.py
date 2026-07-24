@@ -12,8 +12,16 @@ from typing import Final, Protocol, cast
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from advx_backend.application.ai_call_logging import (
+    AiCallLifecycle,
+    AiCallScope,
+    AiCallSink,
+    build_http_response_summary,
+    build_openai_request_summary,
+)
 from advx_backend.application.director_service import DirectorOutcome, DirectorRequest
 from advx_backend.application.ports.ingest import FrameResolver
+from advx_backend.contracts.debug import AiCallRole
 from advx_backend.contracts.viewer_runtime import (
     ProviderRuntimeSpec,
     ViewerGenerationRequest,
@@ -337,11 +345,13 @@ class OpenAICompatibleViewerRuntimeProvider:
         *,
         client: httpx.AsyncClient | None = None,
         frame_resolver: FrameResolver | None = None,
+        ai_call_sink: AiCallSink | None = None,
     ) -> None:
         self.config = config
         self._client = client if client is not None else httpx.AsyncClient()
         self._owns_client = client is None
         self._frame_resolver = frame_resolver
+        self._ai_call_sink = ai_call_sink
         self._director = self._role_provider(config.provider.director_model)
         self._viewer = self._role_provider(config.provider.viewer_model)
         self._visual_summary = self._role_provider(config.provider.visual_summary_model)
@@ -351,68 +361,126 @@ class OpenAICompatibleViewerRuntimeProvider:
     async def decide(self, request: object) -> DirectorOutcome:
         if not isinstance(request, DirectorRequest):
             raise ViewerRuntimeProtocolError("Director request has an invalid contract")
-        content = await self._director_content(request)
-        frame_count = (
-            0 if request.wave.frame_bundle is None else len(request.wave.frame_bundle.frames)
-        )
-        payload = self._structured_payload(
+        lifecycle = self._call_lifecycle(
+            role=AiCallRole.DIRECTOR,
+            correlation_id=request.wave.observation_id,
             model_id=self.config.provider.director_model,
-            system_prompt=_DIRECTOR_SYSTEM_PROMPT,
-            content=content,
-            schema_name="scene_assessment",
-            schema=_director_schema(frame_count),
-        )
-        response = await self._send(self._director, payload)
-        output = self._structured_output(response)
-        raw_meme_candidate = output.pop("meme_candidate", None)
-        output.update(
-            {
-                "room_id": request.wave.room_id,
-                "session_id": request.wave.session_id,
-                "audience_epoch": request.wave.audience_epoch,
-                "observation_id": request.wave.observation_id,
-                "decision_source": "director",
-                "created_at_ms": request.wave.created_at_ms,
-                "expires_at_ms": request.wave.deadline_at_ms,
-            }
+            scope=AiCallScope(
+                room_id=request.wave.room_id,
+                session_id=request.wave.session_id,
+                audience_epoch=request.wave.audience_epoch,
+                observation_id=request.wave.observation_id,
+            ),
         )
         try:
-            assessment = SceneAssessment.model_validate(output)
-        except ValidationError as error:
-            raise ViewerRuntimeProtocolError(
-                "Director response violated the SceneAssessment contract: "
-                f"{self._validation_codes(error)}"
-            ) from None
-        candidate = self._meme_candidate(request, raw_meme_candidate)
-        return DirectorOutcome(assessment=assessment, meme_candidate=candidate)
+            self._ensure_available(self._director)
+            content = await self._director_content(request)
+            frame_count = (
+                0
+                if request.wave.frame_bundle is None
+                else len(request.wave.frame_bundle.frames)
+            )
+            payload = self._structured_payload(
+                model_id=self.config.provider.director_model,
+                system_prompt=_DIRECTOR_SYSTEM_PROMPT,
+                content=content,
+                schema_name="scene_assessment",
+                schema=_director_schema(frame_count),
+            )
+            lifecycle.sent(build_openai_request_summary(payload))
+            response = await self._send(self._director, payload, lifecycle=lifecycle)
+            lifecycle.received(build_http_response_summary(response))
+            output = self._structured_output(response)
+            raw_meme_candidate = output.pop("meme_candidate", None)
+            output.update(
+                {
+                    "room_id": request.wave.room_id,
+                    "session_id": request.wave.session_id,
+                    "audience_epoch": request.wave.audience_epoch,
+                    "observation_id": request.wave.observation_id,
+                    "decision_source": "director",
+                    "created_at_ms": request.wave.created_at_ms,
+                    "expires_at_ms": request.wave.deadline_at_ms,
+                }
+            )
+            try:
+                assessment = SceneAssessment.model_validate(output)
+            except ValidationError as error:
+                raise ViewerRuntimeProtocolError(
+                    "Director response violated the SceneAssessment contract: "
+                    f"{self._validation_codes(error)}"
+                ) from None
+            candidate = self._meme_candidate(request, raw_meme_candidate)
+            outcome = DirectorOutcome(assessment=assessment, meme_candidate=candidate)
+            lifecycle.succeeded(
+                {
+                    "assessment": assessment.model_dump(mode="json"),
+                    "meme_candidate": (
+                        None
+                        if candidate is None
+                        else candidate.model_dump(mode="json")
+                    ),
+                }
+            )
+            return outcome
+        except asyncio.CancelledError:
+            lifecycle.cancelled()
+            raise
+        except Exception as error:
+            lifecycle.failed(error)
+            raise
 
     async def generate(self, request: ViewerGenerationRequest) -> ViewerGenerationResponse:
-        content = await self._viewer_content(request)
-        payload = self._structured_payload(
+        lifecycle = self._call_lifecycle(
+            role=AiCallRole.VIEWER,
+            correlation_id=request.generation_request_id,
             model_id=self.config.provider.viewer_model,
-            system_prompt=_VIEWER_SYSTEM_PROMPT,
-            content=content,
-            schema_name="viewer_generation_response",
-            schema=_VIEWER_SCHEMA,
+            scope=AiCallScope(
+                room_id=request.room_id,
+                session_id=request.session_id,
+                audience_epoch=request.audience_epoch,
+                observation_id=request.observation_id,
+                generation_request_id=request.generation_request_id,
+                viewer_instance_id=request.viewer_instance_id,
+            ),
         )
-        response = await self._send(self._viewer, payload)
-        output = self._structured_output(response)
-        output.update(
-            {
-                "generation_request_id": request.generation_request_id,
-                "viewer_instance_id": request.viewer_instance_id,
-                "viewer_sequence": request.viewer_sequence,
-            }
-        )
-        self._canonicalize_evidence_refs(output)
         try:
-            result = ViewerGenerationResponse.model_validate(output)
-        except ValidationError as error:
-            raise ViewerRuntimeProtocolError(
-                "Viewer response violated the ViewerGenerationResponse contract: "
-                f"{self._validation_codes(error)}"
-            ) from None
-        return result
+            self._ensure_available(self._viewer)
+            content = await self._viewer_content(request)
+            payload = self._structured_payload(
+                model_id=self.config.provider.viewer_model,
+                system_prompt=_VIEWER_SYSTEM_PROMPT,
+                content=content,
+                schema_name="viewer_generation_response",
+                schema=_VIEWER_SCHEMA,
+            )
+            lifecycle.sent(build_openai_request_summary(payload))
+            response = await self._send(self._viewer, payload, lifecycle=lifecycle)
+            lifecycle.received(build_http_response_summary(response))
+            output = self._structured_output(response)
+            output.update(
+                {
+                    "generation_request_id": request.generation_request_id,
+                    "viewer_instance_id": request.viewer_instance_id,
+                    "viewer_sequence": request.viewer_sequence,
+                }
+            )
+            self._canonicalize_evidence_refs(output)
+            try:
+                result = ViewerGenerationResponse.model_validate(output)
+            except ValidationError as error:
+                raise ViewerRuntimeProtocolError(
+                    "Viewer response violated the ViewerGenerationResponse contract: "
+                    f"{self._validation_codes(error)}"
+                ) from None
+            lifecycle.succeeded(result.model_dump(mode="json"))
+            return result
+        except asyncio.CancelledError:
+            lifecycle.cancelled()
+            raise
+        except Exception as error:
+            lifecycle.failed(error)
+            raise
 
     async def summarize(
         self,
@@ -420,37 +488,62 @@ class OpenAICompatibleViewerRuntimeProvider:
         frame_bundle: FrameBundle,
         runtime: object,
     ) -> str:
-        if self._closed:
-            raise ViewerRuntimeProviderError("Viewer runtime provider is closed")
-        if self._visual_summary is None:
-            raise ViewerRuntimeProviderBlockedError("Model provider credentials are not configured")
-        if wave.frame_bundle != frame_bundle:
-            raise ViewerRuntimeProtocolError("Visual summary FrameBundle did not match the wave")
-        context = {
-            "wave": wave.model_dump(mode="json"),
-            "runtime": self._json_value(runtime),
-        }
-        self._remove_data_refs(context)
-        content = await self._content(context, wave.session_id, frame_bundle)
-        if not isinstance(content, list) or len(content) < 2:
-            raise ViewerRuntimeProviderBlockedError(
-                "Visual summary requires a resolvable FrameBundle"
-            )
-        payload = self._structured_payload(
+        lifecycle = self._call_lifecycle(
+            role=AiCallRole.VISUAL_SUMMARY,
+            correlation_id=wave.observation_id,
             model_id=self.config.provider.visual_summary_model,
-            system_prompt=_VISUAL_SUMMARY_SYSTEM_PROMPT,
-            content=content,
-            schema_name="visual_summary",
-            schema=_VISUAL_SUMMARY_SCHEMA,
+            scope=AiCallScope(
+                room_id=wave.room_id,
+                session_id=wave.session_id,
+                audience_epoch=wave.audience_epoch,
+                observation_id=wave.observation_id,
+            ),
         )
-        response = await self._send(self._visual_summary, payload)
-        output = self._structured_output(response)
-        summary = output.get("summary")
-        if not isinstance(summary, str) or not summary.strip() or len(summary) > 8_000:
-            raise ViewerRuntimeProtocolError(
-                "Visual summary response violated the summary contract"
+        try:
+            self._ensure_available(self._visual_summary)
+            if wave.frame_bundle != frame_bundle:
+                raise ViewerRuntimeProtocolError(
+                    "Visual summary FrameBundle did not match the wave"
+                )
+            context = {
+                "wave": wave.model_dump(mode="json"),
+                "runtime": self._json_value(runtime),
+            }
+            self._remove_data_refs(context)
+            content = await self._content(context, wave.session_id, frame_bundle)
+            if not isinstance(content, list) or len(content) < 2:
+                raise ViewerRuntimeProviderBlockedError(
+                    "Visual summary requires a resolvable FrameBundle"
+                )
+            payload = self._structured_payload(
+                model_id=self.config.provider.visual_summary_model,
+                system_prompt=_VISUAL_SUMMARY_SYSTEM_PROMPT,
+                content=content,
+                schema_name="visual_summary",
+                schema=_VISUAL_SUMMARY_SCHEMA,
             )
-        return summary.strip()
+            lifecycle.sent(build_openai_request_summary(payload))
+            response = await self._send(
+                self._visual_summary,
+                payload,
+                lifecycle=lifecycle,
+            )
+            lifecycle.received(build_http_response_summary(response))
+            output = self._structured_output(response)
+            summary = output.get("summary")
+            if not isinstance(summary, str) or not summary.strip() or len(summary) > 8_000:
+                raise ViewerRuntimeProtocolError(
+                    "Visual summary response violated the summary contract"
+                )
+            normalized_summary = summary.strip()
+            lifecycle.succeeded({"summary": normalized_summary})
+            return normalized_summary
+        except asyncio.CancelledError:
+            lifecycle.cancelled()
+            raise
+        except Exception as error:
+            lifecycle.failed(error)
+            raise
 
     async def aclose(self) -> None:
         async with self._close_lock:
@@ -479,15 +572,33 @@ class OpenAICompatibleViewerRuntimeProvider:
             client=self._client,
         )
 
+    def _call_lifecycle(
+        self,
+        *,
+        role: AiCallRole,
+        correlation_id: str,
+        model_id: str,
+        scope: AiCallScope,
+    ) -> AiCallLifecycle:
+        return AiCallLifecycle(
+            sink=self._ai_call_sink,
+            role=role,
+            correlation_id=correlation_id,
+            provider="openai_compatible",
+            model_id=model_id,
+            endpoint=f"{self.config.base_url.rstrip('/')}/chat/completions",
+            scope=scope,
+        )
+
     async def _send(
         self,
         provider: OpenAICompatibleProvider | None,
         payload: dict[str, object],
+        *,
+        lifecycle: AiCallLifecycle,
     ) -> httpx.Response:
-        if self._closed:
-            raise ViewerRuntimeProviderError("Viewer runtime provider is closed")
-        if provider is None:
-            raise ViewerRuntimeProviderBlockedError("Model provider credentials are not configured")
+        self._ensure_available(provider)
+        assert provider is not None
         try:
             return await provider._send(
                 "POST",
@@ -497,6 +608,11 @@ class OpenAICompatibleViewerRuntimeProvider:
         except asyncio.CancelledError:
             raise
         except OpenAICompatibleProviderError as error:
+            if (
+                isinstance(error, OpenAICompatibleHttpError)
+                and error.response is not None
+            ):
+                lifecycle.received(build_http_response_summary(error.response))
             status_code = (
                 error.status_code
                 if isinstance(error, OpenAICompatibleHttpError)
@@ -526,6 +642,15 @@ class OpenAICompatibleViewerRuntimeProvider:
                     else None
                 ),
             ) from error
+
+    def _ensure_available(
+        self,
+        provider: OpenAICompatibleProvider | None,
+    ) -> None:
+        if self._closed:
+            raise ViewerRuntimeProviderError("Viewer runtime provider is closed")
+        if provider is None:
+            raise ViewerRuntimeProviderBlockedError("Model provider credentials are not configured")
 
     async def _director_content(
         self,

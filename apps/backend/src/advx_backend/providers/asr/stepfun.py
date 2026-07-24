@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -8,11 +9,30 @@ from typing import Final
 
 import httpx
 
+from advx_backend.application.ai_call_logging import (
+    AiCallLifecycle,
+    AiCallScope,
+    AiCallSink,
+    build_audio_request_summary,
+    build_http_response_summary,
+)
 from advx_backend.application.ports.asr import AudioChunk, TranscriptSegment
+from advx_backend.contracts.debug import AiCallRole
 
 
 class StepFunAsrError(RuntimeError):
     """Normalized failure returned by the StepFun ASR adapter."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool = False,
+    ) -> None:
+        self.status_code = status_code
+        self.retryable = retryable
+        super().__init__(message)
 
 
 @dataclass(frozen=True)
@@ -64,9 +84,11 @@ class StepFunAsrProvider:
         config: StepFunAsrConfig,
         *,
         client: httpx.AsyncClient | None = None,
+        ai_call_sink: AiCallSink | None = None,
     ) -> None:
         self.config = config
         self._client = client
+        self._ai_call_sink = ai_call_sink
         self._owns_client = client is None
         self._segments: asyncio.Queue[_AudioSegment] = asyncio.Queue()
         self._results: asyncio.Queue[_ResultItem] = asyncio.Queue()
@@ -194,9 +216,40 @@ class StepFunAsrProvider:
                 },
             }
         }
+        wire_body = httpx.Request("POST", url, json=payload).content
+        pcm_digest = hashlib.sha256(segment.pcm).hexdigest()
+        utterance_id = (
+            f"asr-{segment.started_at_ms}-{segment.ended_at_ms}-{pcm_digest[:16]}"
+        )
+        lifecycle = AiCallLifecycle(
+            sink=self._ai_call_sink,
+            role=AiCallRole.ASR,
+            correlation_id=utterance_id,
+            provider="stepfun",
+            model_id=self.config.model,
+            endpoint=url,
+            scope=AiCallScope(
+                session_id=segment.session_id,
+                utterance_id=utterance_id,
+            ),
+        )
 
         try:
             received_done = False
+            final_text = ""
+            partial_count = 0
+            lifecycle.sent(
+                build_audio_request_summary(
+                    pcm=segment.pcm,
+                    wire_body=wire_body,
+                    started_at_ms=segment.started_at_ms,
+                    ended_at_ms=segment.ended_at_ms,
+                    sample_rate=segment.sample_rate,
+                    channels=segment.channels,
+                    sample_width_bits=segment.sample_width_bits,
+                    language=self.config.language,
+                )
+            )
             async with self._client.stream(
                 "POST",
                 url,
@@ -204,6 +257,12 @@ class StepFunAsrProvider:
                 json=payload,
                 timeout=self.config.request_timeout_seconds,
             ) as response:
+                lifecycle.received(
+                    build_http_response_summary(
+                        response,
+                        include_body_digest=False,
+                    )
+                )
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     event = self._parse_sse_line(line)
@@ -213,6 +272,15 @@ class StepFunAsrProvider:
                     if event_type == "transcript.text.delta":
                         text = event.get("delta")
                         if isinstance(text, str) and text:
+                            partial_count += 1
+                            if partial_count == 1:
+                                lifecycle.streaming(
+                                    {
+                                        "partial_text": text,
+                                        "partial_count": partial_count,
+                                    },
+                                    detail={"event_type": event_type},
+                                )
                             yield TranscriptSegment(
                                 session_id=segment.session_id,
                                 text=text,
@@ -229,6 +297,7 @@ class StepFunAsrProvider:
                                     segment.ended_at_ms,
                                 ),
                                 final=False,
+                                utterance_id=utterance_id,
                             )
                     elif event_type == "transcript.text.done":
                         text = event.get("text")
@@ -240,7 +309,9 @@ class StepFunAsrProvider:
                             started_at_ms=segment.started_at_ms,
                             ended_at_ms=segment.ended_at_ms,
                             final=True,
+                            utterance_id=utterance_id,
                         )
+                        final_text = text
                         received_done = True
                     elif event_type == "error":
                         message = event.get("message")
@@ -249,8 +320,38 @@ class StepFunAsrProvider:
                         )
             if not received_done:
                 raise StepFunAsrError("StepFun ASR stream ended without a final transcript")
+            lifecycle.succeeded(
+                {
+                    "final": True,
+                    "text": final_text,
+                    "partial_count": partial_count,
+                }
+            )
+        except asyncio.CancelledError:
+            lifecycle.cancelled()
+            raise
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            error = StepFunAsrError(
+                f"StepFun ASR returned HTTP {status_code}",
+                status_code=status_code,
+                retryable=(
+                    status_code in {408, 429}
+                    or 500 <= status_code <= 599
+                ),
+            )
+            lifecycle.failed(error)
+            raise error from exc
         except httpx.HTTPError as exc:
-            raise StepFunAsrError(f"StepFun ASR transport failed: {exc}") from exc
+            error = StepFunAsrError(
+                "StepFun ASR transport failed",
+                retryable=True,
+            )
+            lifecycle.failed(error)
+            raise error from exc
+        except Exception as error:
+            lifecycle.failed(error)
+            raise
 
     @staticmethod
     def _parse_sse_line(line: str) -> dict[str, object] | None:

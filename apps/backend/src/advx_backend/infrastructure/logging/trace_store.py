@@ -55,9 +55,25 @@ _SENSITIVE_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----"),
     re.compile(r"(?i)\bbearer\s+[a-z0-9._~+/=-]{8,}"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
-    re.compile(r"(?i)\b(?:api[_-]?key|password|secret|token)\s*[:=]\s*\S+"),
+    re.compile(
+        r"(?i)\b[a-z0-9._-]*(?:api[_-]?key|access[_-]?token|"
+        r"refresh[_-]?token|client[_-]?secret|password|credential|secret)"
+        r"[a-z0-9._-]*\s*[:=]\s*\S+"
+    ),
     re.compile(r"(?i)^data:(?:audio|image|video)/"),
 )
+_FORBIDDEN_KEY_MARKERS = {
+    "accesstoken",
+    "apikey",
+    "authorization",
+    "clientsecret",
+    "cookie",
+    "credential",
+    "credentials",
+    "password",
+    "refreshtoken",
+    "secret",
+}
 
 
 class UnsafeTraceArtifactError(ValueError):
@@ -93,7 +109,10 @@ def _scan_artifact(value: Any, *, path: str) -> None:
             )
         for key, item in value.items():
             normalized = str(key).strip().lower().replace("-", "_")
-            if normalized in _FORBIDDEN_KEYS:
+            compact = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+            if normalized in _FORBIDDEN_KEYS or any(
+                marker in compact for marker in _FORBIDDEN_KEY_MARKERS
+            ):
                 raise UnsafeTraceArtifactError(f"forbidden artifact field at {path}.{key}")
             _scan_artifact(item, path=f"{path}.{key}")
         return

@@ -17,6 +17,8 @@ import type {
   RuntimeModelProviderCandidate
 } from "../../shared/contracts";
 import type {
+  AiCallQuery,
+  AiCallQueryResponse,
   AutoIngestResponse,
   CandidateCommitResponse,
   CompiledRuntimeSpec,
@@ -407,6 +409,18 @@ export class BackendClient {
     const query = new URLSearchParams({ session_id: sessionId });
     if (cursor) query.set("cursor", cursor);
     return this.request(`/debug/traces?${query.toString()}`, "GET");
+  }
+
+  async queryAiCalls(filters: AiCallQuery): Promise<AiCallQueryResponse> {
+    const query = new URLSearchParams();
+    if (filters.sessionId) query.set("session_id", filters.sessionId);
+    if (filters.role) query.set("role", filters.role);
+    if (filters.status) query.set("status", filters.status);
+    if (filters.correlationId) query.set("correlation_id", filters.correlationId);
+    if (filters.cursor) query.set("cursor", filters.cursor);
+    if (filters.limit !== undefined) query.set("limit", String(filters.limit));
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.request(`/debug/ai-calls${suffix}`, "GET");
   }
 
   async pauseSession(): Promise<BackendSessionSnapshot> {

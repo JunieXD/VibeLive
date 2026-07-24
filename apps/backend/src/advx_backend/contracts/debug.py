@@ -167,6 +167,105 @@ class TraceQueryResponse(DebugContractModel):
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class AiCallRole(StrEnum):
+    DIRECTOR = "director"
+    VIEWER = "viewer"
+    VISUAL_SUMMARY = "visual_summary"
+    MEMORY = "memory"
+    ASR = "asr"
+
+
+class AiCallStatus(StrEnum):
+    PREPARING = "preparing"
+    SENT = "sent"
+    STREAMING = "streaming"
+    RECEIVED = "received"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    BLOCKED = "blocked"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
+
+
+class AiCallTimelineEvent(DebugContractModel):
+    stage: str = Field(min_length=1, max_length=64)
+    at_ms: int = Field(ge=0)
+    detail: JsonValue = None
+
+
+class AiCallRequestSummary(DebugContractModel):
+    wire_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    wire_bytes: int | None = Field(default=None, ge=0)
+    schema_name: str | None = Field(default=None, min_length=1, max_length=128)
+    max_output_tokens: int | None = Field(default=None, ge=1)
+    input_preview: JsonValue = None
+    redacted_fields: list[str] = Field(default_factory=list, max_length=128)
+
+
+class AiCallResponseSummary(DebugContractModel):
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    provider_request_id: str | None = Field(default=None, min_length=1, max_length=256)
+    body_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    body_bytes: int | None = Field(default=None, ge=0)
+    finish_reason: str | None = Field(default=None, min_length=1, max_length=128)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    parsed_output: JsonValue = None
+
+
+class AiCallError(DebugContractModel):
+    code: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=1024)
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    retryable: bool = False
+
+
+class AiCallTrace(DebugContractModel):
+    call_id: str = Field(min_length=1, max_length=128)
+    correlation_id: str = Field(min_length=1, max_length=128)
+    role: AiCallRole
+    status: AiCallStatus
+    provider: str = Field(min_length=1, max_length=128)
+    model_id: str = Field(min_length=1, max_length=256)
+    endpoint: str = Field(min_length=1, max_length=2048)
+    room_id: str | None = Field(default=None, min_length=1, max_length=128)
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
+    audience_epoch: int | None = Field(default=None, ge=1)
+    observation_id: str | None = Field(default=None, min_length=1, max_length=128)
+    generation_request_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+    )
+    viewer_instance_id: str | None = Field(default=None, min_length=1, max_length=128)
+    utterance_id: str | None = Field(default=None, min_length=1, max_length=128)
+    started_at_ms: int = Field(ge=0)
+    updated_at_ms: int = Field(ge=0)
+    completed_at_ms: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
+    timeline: list[AiCallTimelineEvent] = Field(default_factory=list, max_length=256)
+    request: AiCallRequestSummary | None = None
+    response: AiCallResponseSummary | None = None
+    error: AiCallError | None = None
+    redacted: Literal[True] = True
+
+
+class AiCallQuery(DebugContractModel):
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
+    role: AiCallRole | None = None
+    status: AiCallStatus | None = None
+    correlation_id: str | None = Field(default=None, min_length=1, max_length=128)
+    cursor: str | None = Field(default=None, min_length=1, max_length=512)
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class AiCallQueryResponse(DebugContractModel):
+    items: list[AiCallTrace]
+    next_cursor: str | None = None
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class DebugQueueSnapshot(DebugContractModel):
     depth: int | None = Field(default=None, ge=0)
     capacity: int | None = Field(default=None, ge=1)

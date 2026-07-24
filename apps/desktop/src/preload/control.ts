@@ -145,6 +145,7 @@ const api: ControlApi = {
   probeAudienceProvider: () => ipcRenderer.invoke("backend:provider-probe"),
   queryDebugTraces: (sessionId, cursor) =>
     ipcRenderer.invoke("backend:debug-traces", sessionId, cursor),
+  queryAiCalls: (query) => ipcRenderer.invoke("backend:ai-calls", query),
   submitUserText: (text, target) => ipcRenderer.invoke("backend:submit-text", text, target),
   submitAudioSegment: (input) => ipcRenderer.invoke("backend:submit-audio", input),
   submitVisualFrame: (input) => ipcRenderer.invoke("backend:submit-frame", input),

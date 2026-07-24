@@ -8,6 +8,10 @@ from advx_backend.api.dependencies import (
     RuntimeProtocolVersionGuard,
 )
 from advx_backend.contracts.debug import (
+    AiCallQuery,
+    AiCallQueryResponse,
+    AiCallRole,
+    AiCallStatus,
     DebugRuntimeSnapshot,
     TraceQuery,
     TraceQueryResponse,
@@ -23,6 +27,8 @@ from advx_backend.infrastructure.logging.trace_store import (
 
 class DebugServiceApi(Protocol):
     def query(self, query: TraceQuery) -> TraceQueryResponse: ...
+
+    def query_ai_calls(self, query: AiCallQuery) -> AiCallQueryResponse: ...
 
     def export_artifact(self, query: TraceQuery) -> dict[str, object]: ...
 
@@ -92,6 +98,36 @@ def create_debug_router(*, local_token: str) -> APIRouter:
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"code": "unsafe_trace_artifact", "message": str(error)},
+            ) from error
+
+    @router.get("/ai-calls", response_model=AiCallQueryResponse)
+    async def query_ai_calls(
+        request: Request,
+        session_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        role: AiCallRole | None = None,
+        status: AiCallStatus | None = None,
+        correlation_id: Annotated[
+            str | None,
+            Query(min_length=1, max_length=128),
+        ] = None,
+        cursor: Annotated[str | None, Query(min_length=1, max_length=512)] = None,
+        limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    ) -> AiCallQueryResponse:
+        try:
+            return _debug_service(request).query_ai_calls(
+                AiCallQuery(
+                    session_id=session_id,
+                    role=role,
+                    status=status,
+                    correlation_id=correlation_id,
+                    cursor=cursor,
+                    limit=limit,
+                )
+            )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "invalid_ai_call_query", "message": str(error)},
             ) from error
 
     @router.get("/runtime/{session_id}", response_model=DebugRuntimeSnapshot)

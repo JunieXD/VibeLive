@@ -13,6 +13,15 @@ const repositoryRoot = resolve(desktopRoot, '..', '..')
 const artifactDirectory = resolve(desktopRoot, 'artifacts', 'runtime-smoke')
 const proofPath = resolve(artifactDirectory, 'proof.json')
 const screenshotPath = resolve(artifactDirectory, 'overlay.png')
+const aiCallsScreenshotPath = resolve(artifactDirectory, 'ai-calls.png')
+const aiCallsTimelineScreenshotPath = resolve(
+  artifactDirectory,
+  'ai-calls-timeline.png'
+)
+const aiCallsOnly = process.argv.includes('--ai-calls-only')
+const proofScope = aiCallsOnly
+  ? 'deterministic-no-external-electron-fastapi-ai-call-log'
+  : 'deterministic-no-external-electron-fastapi-overlay-ai-call-log'
 const syntheticFrameBase64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
@@ -22,7 +31,7 @@ await mkdir(artifactDirectory, { recursive: true })
 if (process.platform !== 'win32') {
   const skipped = {
     status: 'skipped',
-    proof_scope: 'deterministic-no-external-electron-fastapi-overlay',
+    proof_scope: proofScope,
     reason: 'The Electron overlay integration smoke is currently supported on Windows only.',
     platform: process.platform
   }
@@ -181,7 +190,8 @@ try {
     ...ready.provider
   })
   assert.equal(saved.ok, true)
-  assert.equal(saved.backendConfigured, true)
+  assert.equal(saved.providerProfileId, ready.provider.providerProfileId)
+  assert.equal(saved.runtimeApplyRequired, false)
 
   const workspace = await waitFor('persisted initial audience workspace', () =>
     controlPage.evaluate(() => window.advx.loadAudienceWorkspace())
@@ -197,7 +207,15 @@ try {
   sessionStarted = true
   assert.equal(started.state, 'running')
   assert.ok(started.sessionId)
-  await controlPage.evaluate(() => window.advx.showOverlay())
+  let overlayPage
+  if (!aiCallsOnly) {
+    await controlPage.evaluate(() => window.advx.showOverlay())
+    overlayPage = await waitFor('real Overlay BrowserWindow', async () => {
+      const windows = electronApp.windows()
+      return windows.find((page) => page.url().replaceAll('\\', '/').includes('/overlay/')) ?? null
+    })
+    await overlayPage.waitForLoadState('domcontentloaded')
+  }
   const syntheticFrameInputId = 'desktop-runtime-smoke-frame'
   await controlPage.evaluate(
     ({ inputId, encoded, capturedAtMs }) => {
@@ -231,24 +249,65 @@ try {
   assert.equal(barrage.sessionId, started.sessionId)
   assert.equal(barrage.text, ready.expected_barrage_text)
 
-  const overlayPage = await waitFor('real Overlay BrowserWindow', async () => {
-    const windows = electronApp.windows()
-    return windows.find((page) => page.url().replaceAll('\\', '/').includes('/overlay/')) ?? null
+  let overlayText = null
+  if (overlayPage) {
+    const overlayBarrage = overlayPage.locator('.overlay-barrage', {
+      hasText: ready.expected_barrage_text
+    })
+    await overlayBarrage.waitFor({ state: 'visible', timeout: 10_000 })
+    await waitFor('fully visible Overlay barrage', async () => {
+      const [box, viewportWidth] = await Promise.all([
+        overlayBarrage.boundingBox(),
+        overlayPage.evaluate(() => window.innerWidth)
+      ])
+      return box && box.x >= 0 && box.x + box.width <= viewportWidth ? box : null
+    })
+    await overlayPage.screenshot({ path: screenshotPath })
+    overlayText = (await overlayBarrage.textContent())?.trim()
+    assert.equal(overlayText, ready.expected_barrage_text)
+  }
+
+  const aiCallSeedResponse = await fetch(`${backendUrl}/__runtime-smoke/ai-call`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${localToken}`,
+      'Content-Type': 'application/json',
+      'X-ADVX-Protocol-Version': String(ready.runtime_protocol)
+    },
+    body: JSON.stringify({ session_id: started.sessionId })
   })
-  const overlayBarrage = overlayPage.locator('.overlay-barrage', {
-    hasText: ready.expected_barrage_text
+  assert.equal(aiCallSeedResponse.ok, true)
+  const seededAiCall = await aiCallSeedResponse.json()
+  assert.match(seededAiCall.correlation_id, /^memory-[0-9a-f]{32}$/)
+
+  await controlPage.getByRole('button', { name: 'AI 调用', exact: true }).click()
+  await controlPage.getByRole('heading', { name: 'AI 调用', exact: true }).waitFor()
+  const aiCallArticle = controlPage.getByRole('article')
+  await aiCallArticle.getByText('发送摘要', { exact: true }).waitFor({ timeout: 10_000 })
+  await aiCallArticle.getByText('接收与解析结果', { exact: true }).waitFor()
+  await aiCallArticle.getByText(seededAiCall.correlation_id, { exact: true }).waitFor()
+  await aiCallArticle.locator('pre').filter({ hasText: seededAiCall.visible_text }).waitFor()
+  const aiCallsPanel = aiCallArticle.getByRole('heading', {
+    name: '发送摘要',
+    exact: true
   })
-  await overlayBarrage.waitFor({ state: 'visible', timeout: 10_000 })
-  await waitFor('fully visible Overlay barrage', async () => {
-    const [box, viewportWidth] = await Promise.all([
-      overlayBarrage.boundingBox(),
-      overlayPage.evaluate(() => window.innerWidth)
-    ])
-    return box && box.x >= 0 && box.x + box.width <= viewportWidth ? box : null
+  await waitFor('visible AI call log detail', async () => {
+    const box = await aiCallsPanel.boundingBox()
+    return box && box.width > 0 && box.height > 0 ? box : null
   })
-  await overlayPage.screenshot({ path: screenshotPath })
-  const overlayText = (await overlayBarrage.textContent())?.trim()
-  assert.equal(overlayText, ready.expected_barrage_text)
+  await controlPage.screenshot({ path: aiCallsScreenshotPath })
+  const timelineHeading = aiCallArticle.getByRole('heading', {
+    name: '完整 Timeline',
+    exact: true
+  })
+  await timelineHeading.scrollIntoViewIfNeeded()
+  await timelineHeading.waitFor()
+  const timeline = aiCallArticle.locator('ol')
+  await timeline.getByText('preparing', { exact: true }).waitFor()
+  await timeline.getByText('sent', { exact: true }).waitFor()
+  await timeline.getByText('received', { exact: true }).waitFor()
+  await timeline.getByText('completed', { exact: true }).waitFor()
+  await controlPage.screenshot({ path: aiCallsTimelineScreenshotPath })
 
   const runtime = await controlPage.evaluate((sessionId) =>
     window.advx.queryAudienceRuntime(sessionId), started.sessionId)
@@ -259,7 +318,7 @@ try {
   const backendProofResponse = await fetch(`${backendUrl}/__runtime-smoke/proof`, {
     headers: {
       Authorization: `Bearer ${localToken}`,
-      'X-ADVX-Protocol-Version': '2'
+      'X-ADVX-Protocol-Version': String(ready.runtime_protocol)
     }
   })
   assert.equal(backendProofResponse.ok, true)
@@ -271,7 +330,7 @@ try {
 
   proof = {
     status: 'passed',
-    proof_scope: 'deterministic-no-external-electron-fastapi-overlay',
+    proof_scope: proofScope,
     platform: process.platform,
     backend: {
       pid: backendProof.backend_pid,
@@ -287,7 +346,7 @@ try {
       electron_backend_client: true,
       fastapi_http: true,
       realtime_websocket: true,
-      real_overlay_ipc: true,
+      real_overlay_ipc: !aiCallsOnly,
       manual_barrage_push: false,
       synthetic_frame_input_id: syntheticFrameInputId,
       synthetic_frame_hash: frameTrace.frame_hashes[0],
@@ -305,10 +364,20 @@ try {
       viewer_sequence: barrage.viewerSequence
     },
     overlay: {
-      rendered: true,
+      rendered: Boolean(overlayPage),
       text: overlayText,
-      window_url: overlayPage.url(),
-      screenshot: screenshotPath
+      window_url: overlayPage?.url() ?? null,
+      screenshot: overlayPage ? screenshotPath : null
+    },
+    ai_call_log: {
+      rendered: true,
+      call_id: seededAiCall.call_id,
+      correlation_id: seededAiCall.correlation_id,
+      request_summary_visible: true,
+      parsed_response_visible: true,
+      timeline_visible: true,
+      screenshot: aiCallsScreenshotPath,
+      timeline_screenshot: aiCallsTimelineScreenshotPath
     },
     calls: {
       director: backendProof.director_calls,
@@ -336,4 +405,6 @@ proof.cleanup = {
 }
 await writeFile(proofPath, `${JSON.stringify(proof, null, 2)}\n`)
 console.log(`Runtime smoke proof: ${proofPath}`)
-console.log(`Overlay screenshot: ${screenshotPath}`)
+if (!aiCallsOnly) console.log(`Overlay screenshot: ${screenshotPath}`)
+console.log(`AI call log screenshot: ${aiCallsScreenshotPath}`)
+console.log(`AI call timeline screenshot: ${aiCallsTimelineScreenshotPath}`)

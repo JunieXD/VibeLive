@@ -4,6 +4,9 @@ from pathlib import Path
 from typing import Protocol
 
 from advx_backend.contracts.debug import (
+    AiCallQuery,
+    AiCallQueryResponse,
+    AiCallTrace,
     DebugContextReferences,
     DebugMemeSnapshot,
     DebugMemorySnapshot,
@@ -16,6 +19,7 @@ from advx_backend.contracts.debug import (
 )
 from advx_backend.contracts.protocol import TRACE_SCHEMA_VERSION
 from advx_backend.contracts.viewer_runtime import ViewerRuntimeTelemetry
+from advx_backend.infrastructure.logging.ai_call_store import AiCallStore
 from advx_backend.infrastructure.logging.trace_store import (
     TraceStore,
     assert_redacted_artifact,
@@ -41,10 +45,12 @@ class DebugService:
         *,
         runtime_state: RuntimeDebugState | None = None,
         runtime_agent: RuntimeAgentDebugProvider | object | None = None,
+        ai_call_store: AiCallStore | None = None,
     ) -> None:
         self._trace_store = trace_store
         self._runtime_state = runtime_state
         self._runtime_agent = runtime_agent
+        self._ai_call_store = ai_call_store or AiCallStore()
 
     def bind_runtime_state(self, runtime_state: RuntimeDebugState) -> None:
         self._runtime_state = runtime_state
@@ -57,6 +63,15 @@ class DebugService:
 
     def query(self, query: TraceQuery | None = None) -> TraceQueryResponse:
         return self._trace_store.query(query)
+
+    def record_ai_call(self, trace: AiCallTrace) -> None:
+        self._ai_call_store.upsert(trace)
+
+    def query_ai_calls(
+        self,
+        query: AiCallQuery | None = None,
+    ) -> AiCallQueryResponse:
+        return self._ai_call_store.query(query)
 
     def observation_wave(
         self,

@@ -34,6 +34,7 @@ import type {
 } from "../../shared/contracts";
 import {
   compileCanonicalRuntimeSpec,
+  type AiCallQuery,
   type ModeMemeEdit,
   type RoomMemoryEdit,
   type TextSubmitTarget
@@ -1050,6 +1051,10 @@ export function registerDesktopIpc(
   ipcMain.handle("backend:debug-traces", (event, sessionId: string, cursor?: string) => {
     assertControlSender(event);
     return backendClient.queryDebugTraces(sessionId, cursor);
+  });
+  ipcMain.handle("backend:ai-calls", (event, query: AiCallQuery) => {
+    assertControlSender(event);
+    return backendClient.queryAiCalls(query);
   });
   ipcMain.handle("shared-brain:memory-list", (event, roomId: string) => {
     assertControlSender(event);

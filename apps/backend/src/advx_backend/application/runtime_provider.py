@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from advx_backend.application.ai_call_logging import AiCallSink
 from advx_backend.application.memory_extractor import (
     OpenAICompatibleMemoryExtractor,
     RoomMemoryExtractor,
@@ -141,9 +142,11 @@ class RuntimeProviderController:
         *,
         frame_resolver: FrameResolver,
         configuration_committer: Callable[[ProviderConfigurationRequest], None],
+        ai_call_sink: AiCallSink | None = None,
     ) -> None:
         self._frame_resolver = frame_resolver
         self._configuration_committer = configuration_committer
+        self._ai_call_sink = ai_call_sink
         self._active: RuntimeProviderGeneration | None = None
 
     def install_initial(
@@ -194,12 +197,16 @@ class RuntimeProviderController:
             OpenAICompatibleViewerRuntimeProvider(
                 config,
                 frame_resolver=self._frame_resolver,
+                ai_call_sink=self._ai_call_sink,
             )
             if viewer_provider is None
             else viewer_provider
         )
         owned_memory = (
-            OpenAICompatibleMemoryExtractor(config)
+            OpenAICompatibleMemoryExtractor(
+                config,
+                ai_call_sink=self._ai_call_sink,
+            )
             if memory_extractor is None
             else memory_extractor
         )
