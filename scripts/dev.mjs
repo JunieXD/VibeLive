@@ -67,8 +67,8 @@ if (!configuredBackendUrl) {
   observeChild(backend, "Backend");
 }
 
-process.once("SIGINT", () => void shutdown(0));
-process.once("SIGTERM", () => void shutdown(0));
+process.on("SIGINT", () => void shutdown(0));
+process.on("SIGTERM", () => void shutdown(0));
 
 try {
   console.log(`Waiting for ADVX backend at ${backendUrl}...`);

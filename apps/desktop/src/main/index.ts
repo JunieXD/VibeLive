@@ -61,8 +61,8 @@ function requestApplicationQuitFromSignal(signal: NodeJS.Signals): void {
   app.quit();
 }
 
-process.once("SIGINT", () => requestApplicationQuitFromSignal("SIGINT"));
-process.once("SIGTERM", () => requestApplicationQuitFromSignal("SIGTERM"));
+process.on("SIGINT", () => requestApplicationQuitFromSignal("SIGINT"));
+process.on("SIGTERM", () => requestApplicationQuitFromSignal("SIGTERM"));
 
 function startDevelopmentShutdownControl(): Promise<void> {
   const socketPath = process.env.ADVX_DESKTOP_SHUTDOWN_SOCKET;
