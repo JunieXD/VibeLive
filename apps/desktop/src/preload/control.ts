@@ -120,6 +120,8 @@ const api: ControlApi = {
   pauseBackendSession: () => ipcRenderer.invoke("backend:session-pause"),
   resumeBackendSession: () => ipcRenderer.invoke("backend:session-resume"),
   stopBackendSession: () => ipcRenderer.invoke("backend:session-stop"),
+  reportSessionLifecycle: (event) =>
+    electronIpcRenderer.send("logging:session-lifecycle", event),
   queryAudienceRuntime: (sessionId) =>
     ipcRenderer.invoke("backend:runtime-query", sessionId),
   queryLiveAudience: (sessionId) =>

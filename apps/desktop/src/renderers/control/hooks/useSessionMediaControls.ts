@@ -102,7 +102,12 @@ export function useSessionMediaControls({
     return '悬浮层未能完全关闭，请使用紧急停止快捷键后重试。'
   }, [])
 
-  fatalMediaRef.current = (_kind, error) => {
+  fatalMediaRef.current = (kind, error) => {
+    window.advx.reportSessionLifecycle({
+      reason: 'media-failure',
+      mediaKind: kind,
+      error
+    })
     sessionStatusRef.current = 'error'
     void releaseOverlay()
     dispatchSession({ type: 'fail', error })
@@ -179,12 +184,17 @@ export function useSessionMediaControls({
         } catch (error) {
           if (!devices.operation.isCurrent(operationId)) return
           startClientRequestIdRef.current = null
+          const errorMessage = describeBackendError(error, '连接异常。')
+          window.advx.reportSessionLifecycle({
+            reason: 'backend-start-failed',
+            error: errorMessage
+          })
           const cleanupFailed = await stopUnconfirmedBackendSession().then(
             () => false,
             () => true
           )
           onSystemActivityRef.current(
-            `AI 观众未能接入：${describeBackendError(error, '连接异常。')}${
+            `AI 观众未能接入：${errorMessage}${
               cleanupFailed ? ' 后端 Session 可能仍在运行，请结束直播后重试。' : ''
             } 继续进行仅画面直播。`
           )
@@ -262,13 +272,17 @@ export function useSessionMediaControls({
     syncBackendSession
   ])
 
-  const stopSession = useCallback(async (releaseVisualPreview = false): Promise<void> => {
+  const stopSession = useCallback(async (
+    releaseVisualPreview = false,
+    reason: 'backend-stop-requested' | 'emergency-stop' = 'backend-stop-requested'
+  ): Promise<void> => {
     const devices = devicesRef.current
     const operationId = devices.operation.begin(true)
     if (operationId === null) return
     let backendSessionActive = backendSessionActiveRef.current
     sessionStatusRef.current = 'stopping'
     dispatchSession({ type: 'stop' })
+    window.advx.reportSessionLifecycle({ reason })
     if (releaseVisualPreview) {
       devices.stopCapture()
       devices.stopCamera()
@@ -291,7 +305,12 @@ export function useSessionMediaControls({
         syncBackendSession(backendSession)
       }
     } catch (error) {
-      stopError = `后端 Session 未能确认停止：${describeBackendError(error, '连接异常。')}`
+      const errorMessage = describeBackendError(error, '连接异常。')
+      window.advx.reportSessionLifecycle({
+        reason: 'backend-stop-failed',
+        error: errorMessage
+      })
+      stopError = `后端 Session 未能确认停止：${errorMessage}`
     }
     try {
       const overlayError = await releaseOverlay()
@@ -318,7 +337,10 @@ export function useSessionMediaControls({
     syncBackendSession
   ])
 
-  useEffect(() => window.advx.onEmergencyStop(() => void stopSession(true)), [stopSession])
+  useEffect(
+    () => window.advx.onEmergencyStop(() => void stopSession(true, 'emergency-stop')),
+    [stopSession]
+  )
 
   const toggleGoLive = useCallback((): void => {
     const active = ['starting', 'running', 'paused', 'stopping'].includes(sessionStatus)

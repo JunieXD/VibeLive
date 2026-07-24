@@ -284,10 +284,19 @@ class SessionService:
                 else SessionOutcome.COMPLETED
             )
 
+        logger.info(
+            "session.stop.requested",
+            extra={"session_id": session_id, "previous_state": current.state.value},
+        )
+
         try:
             await self._publisher.publish_session_status(stopping)
         finally:
             idle = await asyncio.shield(self._complete_stop(session_id, tasks, outcome=outcome))
+        logger.info(
+            "session.stop.completed",
+            extra={"session_id": session_id, "outcome": outcome.value},
+        )
         return idle
 
     async def mark_error(self, session_id: str) -> SessionStatus:
@@ -308,6 +317,11 @@ class SessionService:
                 return current
             failed = self._transition(SessionState.ERROR)
             tasks = self._detach_tasks()
+
+        logger.warning(
+            "session.marked_error",
+            extra={"session_id": session_id, "previous_state": current.state.value},
+        )
 
         try:
             await self._publisher.publish_session_status(failed)

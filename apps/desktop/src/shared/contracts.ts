@@ -106,6 +106,17 @@ export type BackendSessionSnapshot = {
   revision: number
 }
 
+export type SessionLifecycleLogEvent = {
+  reason:
+    | 'backend-start-failed'
+    | 'backend-stop-failed'
+    | 'backend-stop-requested'
+    | 'emergency-stop'
+    | 'media-failure'
+  mediaKind?: 'camera' | 'display' | 'microphone'
+  error?: string
+}
+
 export type BackendRuntimeStatus = {
   connection: BackendConnectionState
   providersConfigured: boolean
@@ -280,6 +291,7 @@ export type ControlApi = {
   pauseBackendSession: () => Promise<BackendSessionSnapshot>
   resumeBackendSession: () => Promise<BackendSessionSnapshot>
   stopBackendSession: () => Promise<BackendSessionSnapshot>
+  reportSessionLifecycle: (event: SessionLifecycleLogEvent) => void
   queryAudienceRuntime: (sessionId: string) => Promise<RuntimeQuerySnapshot>
   queryLiveAudience: (sessionId: string) => Promise<BackendAudienceSnapshot>
   muteViewer: (
