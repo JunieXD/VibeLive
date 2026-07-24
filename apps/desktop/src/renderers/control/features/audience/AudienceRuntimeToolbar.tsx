@@ -19,6 +19,7 @@ export type AudienceRuntimeToolbarProps = {
   probing: boolean
   loadingTraces: boolean
   probe: ProviderProbeResult | null
+  probeError: string | null
   traces: readonly DebugTraceSummary[]
   issue: string | null
   onAutoApplyChange(enabled: boolean): void
@@ -42,6 +43,7 @@ export function AudienceRuntimeToolbar({
   probing,
   loadingTraces,
   probe,
+  probeError,
   traces,
   issue,
   onAutoApplyChange,
@@ -97,7 +99,7 @@ export function AudienceRuntimeToolbar({
         </button>
         <button type="button" disabled={probing} onClick={onProbe}>
           <TestTube2 size={14} />
-          {probe ? `Probe ${probe.status}` : 'Probe'}
+          {probing ? 'Probe 检测中' : probe ? `Probe ${probe.status}` : probeError ? 'Probe 失败' : 'Probe'}
         </button>
         <button type="button" disabled={!runtime || loadingTraces} onClick={onLoadTraces}>
           <Bug size={14} />

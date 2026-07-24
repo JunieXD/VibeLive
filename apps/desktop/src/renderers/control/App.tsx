@@ -243,7 +243,13 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               microphoneLevel: media.microphoneLevel,
               message: activityFeed.message,
               messageSending: barrage.messageSending,
-              providerProbe: audienceRuntime.probe,
+              providerProbeState: {
+                backendConnected: backend.connection === 'connected',
+                providerConfigured: backend.status?.providersConfigured ?? false,
+                probing: audienceRuntime.probing,
+                probe: audienceRuntime.probe,
+                error: audienceRuntime.probeError
+              },
               targetSuggestions: barrage.targetSuggestions,
               pipPreviewStyle: media.pipPreviewStyle,
               videoRef: media.videoRef,
@@ -325,6 +331,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               probing: audienceRuntime.probing,
               loadingTraces: audienceRuntime.loadingTraces,
               probe: audienceRuntime.probe,
+              probeError: audienceRuntime.probeError,
               traces: audienceRuntime.traces,
               issue: audienceRuntime.issue,
               onAutoApplyChange: audienceRuntime.setAutoApply,

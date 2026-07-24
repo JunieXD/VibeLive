@@ -47,7 +47,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     microphoneLevel,
     message,
     messageSending,
-    providerProbe,
+    providerProbeState,
     targetSuggestions,
     pipPreviewStyle,
     videoRef,
@@ -69,6 +69,8 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
   }, [cameraStream, cameraVideoRef, captureStream, effectiveVisualMode, videoRef])
 
   const canMessage = session.status === 'running' && audienceSessionActive
+  const providerDisplay = getProviderProbeDisplay(providerProbeState)
+  const providerProbe = providerProbeState.probe
 
   return (
     <section className="stage-panel">
@@ -332,9 +334,10 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           {session.status === 'idle' && '开始直播'}
         </button>
         <details className="provider-capability">
-          <summary>Provider · {providerProbe?.status ?? '未检测'}</summary>
+          <summary>Provider · {providerDisplay.label}</summary>
           <div>
-            <strong>{providerProbe?.provider_profile_id ?? '尚无检测结果'}</strong>
+            <strong>{providerDisplay.heading}</strong>
+            <span>{providerDisplay.detail}</span>
             {providerProbe && (
               <>
                 <span>模型：{providerProbe.discovered_model_ids.join('、') || '未发现'}</span>
@@ -439,4 +442,58 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
       </p>
     </section>
   )
+}
+
+export function getProviderProbeDisplay(state: LiveStageProps['providerProbeState']): {
+  label: string
+  heading: string
+  detail: string
+} {
+  if (!state.backendConnected) {
+    return {
+      label: '后端未连接',
+      heading: '等待本地后端连接',
+      detail: '后端连接完成后才会检测 Provider。'
+    }
+  }
+  if (!state.providerConfigured) {
+    return {
+      label: '未配置',
+      heading: 'Provider 尚未配置',
+      detail: '请在设置中保存模型和语音识别配置。'
+    }
+  }
+  if (state.probing) {
+    return {
+      label: '检测中',
+      heading: '正在验证 Provider 能力',
+      detail: '检测会请求模型列表、文本、图片和并发能力，最长约两分钟。'
+    }
+  }
+  if (state.error) {
+    return {
+      label: '检测失败',
+      heading: 'Provider 能力检测失败',
+      detail: state.error
+    }
+  }
+  if (state.probe?.status === 'passed') {
+    return {
+      label: '已通过',
+      heading: state.probe.provider_profile_id,
+      detail: 'Provider 能力检测已通过。'
+    }
+  }
+  if (state.probe) {
+    return {
+      label: '检测失败',
+      heading: state.probe.provider_profile_id,
+      detail: `Provider 返回 ${state.probe.status}。请展开查看各项能力结果。`
+    }
+  }
+  return {
+    label: '等待检测',
+    heading: '等待 Provider 能力检测',
+    detail: 'Provider 配置恢复后将自动开始检测。'
+  }
 }

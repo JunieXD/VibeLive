@@ -17,6 +17,14 @@ export type LiveActivityItem = {
   color?: string
 }
 
+export type ProviderProbeDisplayState = {
+  backendConnected: boolean
+  providerConfigured: boolean
+  probing: boolean
+  probe: ProviderProbeResult | null
+  error: string | null
+}
+
 export type LiveStageProps = {
   session: SessionState
   effectiveVisualMode: VisualMode
@@ -37,7 +45,7 @@ export type LiveStageProps = {
   microphoneLevel: number
   message: string
   messageSending: boolean
-  providerProbe: ProviderProbeResult | null
+  providerProbeState: ProviderProbeDisplayState
   targetSuggestions: readonly MessageTarget[]
   pipPreviewStyle: CSSProperties
   videoRef: RefObject<HTMLVideoElement | null>

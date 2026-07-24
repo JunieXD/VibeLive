@@ -42,6 +42,7 @@ export function useAudienceRuntimeControl({
   const [probing, setProbing] = useState(false)
   const [loadingTraces, setLoadingTraces] = useState(false)
   const [probe, setProbe] = useState<ProviderProbeResult | null>(null)
+  const [probeError, setProbeError] = useState<string | null>(null)
   const [traces, setTraces] = useState<readonly DebugTraceSummary[]>([])
   const [issue, setIssue] = useState<string | null>(null)
   const workspaceFingerprint = useMemo(() => JSON.stringify(workspace), [workspace])
@@ -202,6 +203,8 @@ export function useAudienceRuntimeControl({
   const runProbe = useCallback(async (): Promise<void> => {
     if (probing) return
     setProbing(true)
+    setProbe(null)
+    setProbeError(null)
     setIssue(null)
     try {
       const result = await window.advx.probeAudienceProvider()
@@ -209,6 +212,7 @@ export function useAudienceRuntimeControl({
       onSystemActivity(`Provider capability probe：${result.status}。`)
     } catch (error) {
       const message = describeError(error, 'Provider capability probe 失败。')
+      setProbeError(message)
       setIssue(message)
       onSystemActivity(message)
     } finally {
@@ -219,6 +223,8 @@ export function useAudienceRuntimeControl({
   useEffect(() => {
     if (!backendConnected || !providerConfigured) {
       automaticProbeKeyRef.current = null
+      setProbe(null)
+      setProbeError(null)
       return
     }
     const key = sessionId ? `session:${sessionId}` : 'backend-ready'
@@ -274,6 +280,7 @@ export function useAudienceRuntimeControl({
     probing,
     loadingTraces,
     probe,
+    probeError,
     traces,
     issue,
     pending,
