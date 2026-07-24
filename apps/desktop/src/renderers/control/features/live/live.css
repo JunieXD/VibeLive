@@ -36,7 +36,7 @@
 
 .stage-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(340px, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
   min-width: 0;
   overflow: hidden;
 }
@@ -170,8 +170,8 @@
   position: relative;
   display: grid;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  align-self: center;
+  height: 100%;
+  align-self: stretch;
   min-height: 0;
   place-items: center;
   overflow: hidden;
@@ -796,11 +796,5 @@
 
   .visual-toolbar {
     padding-right: 8px;
-  }
-}
-
-@media (max-height: 780px) {
-  .stage-panel {
-    grid-template-rows: auto auto minmax(280px, 1fr) auto auto;
   }
 }
