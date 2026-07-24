@@ -278,7 +278,7 @@ async function loadRuntimeProviderConfig(
 ): Promise<ModelConfig> {
   const store = await loadStoredModelConfigStore();
   if (!store) {
-    throw new Error(`缺少 Provider ${target.provider_profile_id} 的安全凭据快照，已阻止运行时切换。`);
+    throw new Error(`缺少供应商 ${target.provider_profile_id} 的安全凭据快照，已阻止运行时切换。`);
   }
   return selectRuntimeProviderConfig(store.profiles, target);
 }
@@ -999,7 +999,7 @@ export function registerDesktopIpc(
         targetRevision
       );
       if (!targetProvider) {
-        throw new Error(`无法读取 runtime revision ${targetRevision} 的 Provider，已阻止回滚。`);
+        throw new Error(`无法读取 runtime revision ${targetRevision} 的供应商，已阻止回滚。`);
       }
       return backendClient.rollbackRuntime(
         sessionId,

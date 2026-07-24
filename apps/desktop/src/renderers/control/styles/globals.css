@@ -38,6 +38,13 @@
   --warning-text-dim: #d8c39f;
   --warning-control-border: rgb(245 201 124 / 35%);
   --control-hover-border: #434754;
+  --control-bg: #101116;
+  --control-bg-hover: #252730;
+  --control-border: #353842;
+  --focus-ring: rgb(213 255 85 / 18%);
+  --popover-bg: #1c1e24;
+  --popover-shadow: 0 12px 34px rgb(0 0 0 / 42%);
+  --radius: 8px;
   --avatar-bg: #33363f;
   --avatar-ink: #ffffff;
   --text-on-dark: #e8eaf0;
@@ -83,6 +90,12 @@
   --warning-text-dim: #765f33;
   --warning-control-border: rgb(146 95 0 / 30%);
   --control-hover-border: #9aa3af;
+  --control-bg: #ffffff;
+  --control-bg-hover: #f1f3f6;
+  --control-border: #cbd1d8;
+  --focus-ring: rgb(83 107 0 / 14%);
+  --popover-bg: #ffffff;
+  --popover-shadow: 0 12px 30px rgb(37 42 49 / 16%);
   --avatar-bg: #d8dde4;
   --avatar-ink: #252a31;
   --scrollbar: #b9c0c9;
@@ -105,6 +118,7 @@ body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
+  font-size: 13px;
 }
 
 .media-capture-sink {
@@ -133,6 +147,14 @@ textarea {
   letter-spacing: 0;
 }
 
+button,
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+select,
+textarea,
+details {
+  border-radius: var(--radius);
+}
+
 button {
   cursor: pointer;
 }
@@ -153,7 +175,7 @@ button:disabled {
 
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--scrollbar);
   background-clip: padding-box;
 }

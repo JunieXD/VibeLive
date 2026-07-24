@@ -1,8 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, RefreshCw, UserMinus, Volume2, VolumeX, X } from 'lucide-react'
+import { SelectDropdown } from '../../components/SelectDropdown'
+import {
+  selectLiveAudienceViewers,
+  type LiveAudienceFilter
+} from './liveAudienceSelectors'
 import type { LiveAudienceProps } from './liveTypes'
-
-type Filter = 'active' | 'muted' | 'all'
 
 export function LiveAudience({
   audience,
@@ -17,32 +20,30 @@ export function LiveAudience({
   onUnmute,
   onKick
 }: LiveAudienceProps): React.JSX.Element {
-  const [filter, setFilter] = useState<Filter>('active')
+  const [filter, setFilter] = useState<LiveAudienceFilter>('active')
   const [muteDurationMs, setMuteDurationMs] = useState(60_000)
-  const now = Date.now()
-  const viewers = useMemo(() => {
-    const items = audience?.viewers ?? []
-    if (filter === 'muted') {
-      return items.filter((viewer) => (viewer.muted_until_ms ?? 0) > now)
-    }
-    if (filter === 'active') {
-      return items.filter((viewer) => viewer.presence_state === 'active')
-    }
-    return items.filter(
-      (viewer) =>
-        viewer.joined_at_ms !== null &&
-        viewer.presence_state !== 'removed' &&
-        viewer.presence_state !== 'ended'
-    )
-  }, [audience, filter, now])
+  const [now, setNow] = useState(Date.now)
+  const viewers = useMemo(
+    () => selectLiveAudienceViewers(audience, filter, now),
+    [audience, filter, now]
+  )
   const notice = audienceError ?? operationError
   const emptyMessage = audience
-    ? '暂无观众'
+    ? {
+        active: '暂无在线观众',
+        muted: '暂无禁言观众',
+        all: '本场暂无观众'
+      }[filter]
     : audienceLoading
       ? '正在同步直播观众...'
       : audienceError
         ? '观众数据暂不可用'
         : '等待观众数据'
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(interval)
+  }, [])
 
   return (
     <section className="viewer-panel">
@@ -77,15 +78,17 @@ export function LiveAudience({
             </button>
           ))}
         </div>
-        <select
-          aria-label="禁言时长"
+        <SelectDropdown
+          ariaLabel="禁言时长"
+          compact
           value={muteDurationMs}
-          onChange={(event) => setMuteDurationMs(Number(event.target.value))}
-        >
-          <option value={60_000}>1 分钟</option>
-          <option value={300_000}>5 分钟</option>
-          <option value={600_000}>10 分钟</option>
-        </select>
+          options={[
+            { value: 60_000, label: '1 分钟' },
+            { value: 300_000, label: '5 分钟' },
+            { value: 600_000, label: '10 分钟' }
+          ]}
+          onChange={setMuteDurationMs}
+        />
       </div>
       <div className="viewer-list">
         {notice && (

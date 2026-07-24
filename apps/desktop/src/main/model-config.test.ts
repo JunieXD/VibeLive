@@ -68,7 +68,7 @@ describe("model configuration", () => {
       viewer_model: "model-a",
       memory_model: "model-a",
       visual_summary_model: "model-a"
-    })).toThrow("缺少 Provider profile-a")
+    })).toThrow("缺少供应商 profile-a")
   });
 
   it("reuses safely stored credentials when replacement fields are blank", () => {

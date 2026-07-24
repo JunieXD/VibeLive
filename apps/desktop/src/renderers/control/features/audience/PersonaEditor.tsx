@@ -2,6 +2,7 @@ import { FileText, RotateCcw, Save, SlidersHorizontal, Trash2, X } from 'lucide-
 import type { Dispatch, SetStateAction } from 'react'
 import type { AudienceMode, Persona } from '../../../../shared/audience'
 import { serializePersonaMarkdown } from '../../../../shared/audience'
+import { SelectDropdown } from '../../components/SelectDropdown'
 import { IconButton } from './IconButton'
 import { cx } from './styles'
 
@@ -265,16 +266,17 @@ export function PersonaEditor({
               </label>
               <label>
                 <span>单次条数</span>
-                <select
+                <SelectDropdown
+                  ariaLabel="单次评论条数"
+                  compact
                   value={draft.maxCommentsPerDecision}
                   disabled={structureLocked}
-                  onChange={(event) =>
-                    update({ maxCommentsPerDecision: Number(event.target.value) as 1 | 2 })
-                  }
-                >
-                  <option value={1}>1</option>
-                  <option value={2}>2</option>
-                </select>
+                  options={[
+                    { value: 1, label: '1' },
+                    { value: 2, label: '2' }
+                  ]}
+                  onChange={(maxCommentsPerDecision) => update({ maxCommentsPerDecision })}
+                />
               </label>
             </div>
           </details>

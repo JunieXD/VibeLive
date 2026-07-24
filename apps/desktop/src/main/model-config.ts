@@ -162,8 +162,8 @@ export function selectRuntimeProviderConfig(
   if (matches.length !== 1) {
     throw new Error(
       matches.length === 0
-        ? `缺少 Provider ${target.provider_profile_id} 的安全凭据快照，已阻止运行时切换。`
-        : `Provider ${target.provider_profile_id} 存在多个凭据快照，无法安全判定，已阻止运行时切换。`
+        ? `缺少供应商 ${target.provider_profile_id} 的安全凭据快照，已阻止运行时切换。`
+        : `供应商 ${target.provider_profile_id} 存在多个凭据快照，无法安全判定，已阻止运行时切换。`
     );
   }
   return matches[0];

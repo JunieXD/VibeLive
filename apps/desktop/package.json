@@ -11,6 +11,7 @@
     "smoke:tray": "pnpm build && node scripts/tray-smoke.mjs",
     "smoke:runtime": "pnpm build && node scripts/runtime-smoke.mjs",
     "smoke:ai-calls": "pnpm build && node scripts/runtime-smoke.mjs --ai-calls-only",
+    "smoke:ui": "pnpm build && node scripts/ui-polish-smoke.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run"
   },

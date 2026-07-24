@@ -436,7 +436,7 @@ export function useMediaDevices({
         }
         if (meterFrameRef.current !== null) cancelAnimationFrame(meterFrameRef.current)
         meterFrameRef.current = null
-        void flushAudioSegment(true)
+        void flushAudioSegment()
         void context?.close()
         audioContextRef.current = null
         setMicrophoneLevel(0)

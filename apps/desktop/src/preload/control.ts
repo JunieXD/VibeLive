@@ -86,12 +86,13 @@ const invoke: typeof electronIpcRenderer.invoke = async (channel, ...args) => {
 
 const ipcRenderer: Pick<
   typeof electronIpcRenderer,
-  "invoke" | "on" | "removeListener"
+  "invoke" | "on" | "removeListener" | "send"
 > = {
   invoke,
   on: (channel, listener) => electronIpcRenderer.on(channel, listener),
   removeListener: (channel, listener) =>
-    electronIpcRenderer.removeListener(channel, listener)
+    electronIpcRenderer.removeListener(channel, listener),
+  send: (channel, ...args) => electronIpcRenderer.send(channel, ...args)
 };
 
 const api: ControlApi = {

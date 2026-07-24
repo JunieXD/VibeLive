@@ -288,7 +288,7 @@ export function AppShell({
           {notice && (
             <section
               className={[
-                'mb-4 flex min-h-14 items-center justify-between gap-4 border px-4 py-3',
+                'mb-4 flex min-h-14 items-center justify-between gap-4 rounded-lg border px-4 py-3',
                 notice.tone === 'failed'
                   ? 'border-[var(--danger-border)] bg-[var(--danger-soft)]'
                   : 'border-[var(--border-strong)] bg-[var(--panel)]'
@@ -301,7 +301,7 @@ export function AppShell({
               </div>
               {notice.action && (
                 <button
-                  className="inline-flex min-h-8 shrink-0 items-center gap-2 border border-[var(--border-strong)] bg-[var(--panel-raise)] px-3 text-xs font-bold text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex min-h-8 shrink-0 items-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--panel-raise)] px-3 text-xs font-bold text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
                   type="button"
                   disabled={notice.action.busy}
                   onClick={notice.action.onClick}

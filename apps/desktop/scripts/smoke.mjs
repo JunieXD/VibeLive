@@ -89,6 +89,29 @@ async function setRange(page, label, value) {
   await input.evaluate((element) => {
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
+  await page.waitForTimeout(50)
+}
+
+async function openDropdown(page, label) {
+  const trigger = page.getByRole('combobox', { name: label, exact: true })
+  if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click()
+  const listbox = page.getByRole('listbox', { name: label, exact: true })
+  await listbox.waitFor()
+  return { trigger, listbox }
+}
+
+async function dropdownValues(page, label) {
+  const { trigger, listbox } = await openDropdown(page, label)
+  const values = await listbox
+    .getByRole('option')
+    .evaluateAll((options) => options.map((option) => option.dataset.value ?? ''))
+  await trigger.press('Escape')
+  return values
+}
+
+async function selectDropdown(page, label, value) {
+  const { listbox } = await openDropdown(page, label)
+  await listbox.locator(`[role="option"][data-value="${String(value)}"]`).click()
 }
 
 let electronApp = await launchApp()
@@ -113,7 +136,7 @@ try {
   await page.getByLabel('模型 API Key', { exact: true }).fill('smoke-model-key')
   await page.getByLabel('StepFun ASR API Key', { exact: true }).fill('smoke-asr-key')
   await page.getByRole('button', { name: '保存连接', exact: true }).click()
-  await page.getByText('模型与语音识别配置已安全保存并接入后端', { exact: true }).waitFor()
+  await page.getByText(/模型与语音识别配置已安全保存/).waitFor()
 
   const modelApiKeyInput = page.getByLabel(/模型 API Key/)
   const asrApiKeyInput = page.getByLabel(/StepFun ASR API Key/)
@@ -126,22 +149,40 @@ try {
   const saveChangesButton = page.getByRole('button', { name: '保存更改', exact: true })
   assert.equal(await saveChangesButton.isEnabled(), true)
   await saveChangesButton.click()
-  await page.getByText('模型与语音识别配置已安全保存并接入后端', { exact: true }).waitFor()
+  await page.getByText(/模型与语音识别配置已安全保存/).waitFor()
   await page.screenshot({
     path: resolve(artifactDirectory, 'model-config-saved.png'),
     fullPage: true
   })
 
-  await page.getByRole('button', { name: /AI 观众/ }).click()
-  await page.getByRole('heading', { name: 'AI 观众', exact: true }).waitFor()
-  const modeSelect = page.getByLabel('观众模式')
-  if ((await modeSelect.locator('option').count()) !== 6) {
+  await page.getByRole('button', { name: '直播控制台', exact: true }).click()
+  const configuredIdleComposer = page.locator('.composer input')
+  await configuredIdleComposer.waitFor()
+  assert.equal(
+    await configuredIdleComposer.getAttribute('placeholder'),
+    '开始直播后可与 AI 观众互动'
+  )
+  assert.equal(
+    await page.locator('.provider-disclosure').count(),
+    0,
+    'Idle live view still shows the removed supplier disclosure.'
+  )
+  assert.equal(
+    (await page.locator('body').innerText()).includes('Provider'),
+    false,
+    'English Provider copy is still visible after configuration.'
+  )
+
+  await page.getByRole('button', { name: /观众配置/ }).click()
+  await page.getByRole('heading', { name: '观众配置', exact: true }).waitFor()
+  const modeValues = await dropdownValues(page, '观众模式')
+  if (modeValues.length !== 6) {
     throw new Error('Expected six built-in audience modes.')
   }
   if ((await page.locator('[data-audience-persona-row]').count()) !== 32) {
     throw new Error('Expected the complete 32-persona catalog.')
   }
-  await modeSelect.selectOption('room-6657')
+  await selectDropdown(page, '观众模式', 'room-6657')
   await page.waitForFunction(
     () =>
       document.querySelector('[data-audience-mode-copy] strong')?.textContent ===
@@ -236,12 +277,13 @@ try {
     !personaLayout.audience ||
     !personaLayout.layout ||
     !personaLayout.editor ||
-    personaLayout.workspace.scrollHeight > personaLayout.workspace.clientHeight + 1 ||
-    personaLayout.audience.scrollHeight > personaLayout.audience.clientHeight + 1 ||
-    personaLayout.layout.scrollHeight > personaLayout.layout.clientHeight + 1 ||
+    personaLayout.workspace.scrollWidth > personaLayout.workspace.clientWidth + 1 ||
+    personaLayout.audience.scrollWidth > personaLayout.audience.clientWidth + 1 ||
+    personaLayout.layout.scrollWidth > personaLayout.layout.clientWidth + 1 ||
+    personaLayout.editor.clientHeight > personaLayout.viewportHeight ||
     personaLayout.editor.scrollHeight > personaLayout.editor.clientHeight + 1
   ) {
-    throw new Error(`Persona workspace escaped its viewport: ${JSON.stringify(personaLayout)}`)
+    throw new Error(`Persona editor escaped its viewport: ${JSON.stringify(personaLayout)}`)
   }
   await page.screenshot({
     path: resolve(artifactDirectory, 'audience-personas-1120.png')
@@ -254,10 +296,10 @@ try {
 
   await page.reload()
   await page.getByRole('heading', { name: '直播控制台', exact: true }).waitFor()
-  await page.getByRole('button', { name: /AI 观众/ }).click()
+  await page.getByRole('button', { name: /观众配置/ }).click()
   await page.waitForFunction(() => {
-    const select = document.querySelector('select')
-    return select instanceof HTMLSelectElement && select.value === 'room-6657'
+    const trigger = document.querySelector('[role="combobox"][aria-label="观众模式"]')
+    return trigger instanceof HTMLElement && trigger.dataset.value === 'room-6657'
   })
   await page.getByRole('button', { name: '成长梗库', exact: true }).click()
   assert.equal(await page.getByRole('button', { name: '手动新增梗' }).count(), 0)
@@ -299,19 +341,16 @@ try {
     }
   )
 
-  const targetOptions = await page.getByLabel('弹幕目标', { exact: true }).locator('option').count()
+  const targetValues = await dropdownValues(page, '弹幕目标')
+  const targetOptions = targetValues.length
   assert.ok(targetOptions >= 1, 'Overlay target IPC returned no displays.')
   if (targetOptions > 1) {
-    const targetSelect = page.getByLabel('弹幕目标', { exact: true })
-    const currentTargetId = await targetSelect.inputValue()
+    const targetSelect = page.getByRole('combobox', { name: '弹幕目标', exact: true })
+    const currentTargetId = await targetSelect.getAttribute('data-value')
     const alternateTargetId = Number(
-      (
-        await targetSelect.locator('option').evaluateAll((options) =>
-          options.map((option) => option.value)
-        )
-      ).find((value) => value !== currentTargetId)
+      targetValues.find((value) => value !== currentTargetId)
     )
-    await targetSelect.selectOption(String(alternateTargetId))
+    await selectDropdown(page, '弹幕目标', alternateTargetId)
     await page.waitForFunction(
       async (targetDisplayId) =>
         (await window.advx.getOverlaySettings()).targetDisplayId === targetDisplayId,
@@ -319,7 +358,7 @@ try {
     )
   }
 
-  await page.getByLabel('弹幕字体', { exact: true }).selectOption('system')
+  await selectDropdown(page, '弹幕字体', 'system')
   await page.getByLabel('粗体', { exact: true }).uncheck()
   await setRange(page, '字号', 30)
   await setRange(page, '描边粗细', 2)
@@ -328,9 +367,27 @@ try {
   await setRange(page, '密度', 3)
   await setRange(page, '显示区域顶部', 20)
   await setRange(page, '显示区域底部', 60)
-  await page.getByText('已同步', { exact: true }).waitFor()
 
-  const configuredSettings = await page.evaluate(() => window.advx.getOverlaySettings())
+  let configuredSettings
+  const overlaySettingsDeadline = Date.now() + 5_000
+  do {
+    configuredSettings = await page.evaluate(() => window.advx.getOverlaySettings())
+    if (
+      configuredSettings.fontSizePx === 30 &&
+      configuredSettings.fontFamily === 'system' &&
+      configuredSettings.bold === false &&
+      configuredSettings.outlineWidthPx === 2 &&
+      configuredSettings.speed === 100 &&
+      configuredSettings.opacity === 55 &&
+      configuredSettings.density === 3 &&
+      configuredSettings.region.topPercent === 20 &&
+      configuredSettings.region.bottomPercent === 60
+    ) {
+      break
+    }
+    await page.waitForTimeout(50)
+  } while (Date.now() < overlaySettingsDeadline)
+
   assert.deepEqual(
     {
       fontSizePx: configuredSettings.fontSizePx,
@@ -697,7 +754,7 @@ try {
       document.querySelector('.segmented-control button.active')?.textContent?.trim() ===
         '画中画' && document.querySelectorAll('.video-stage video').length === 2
   )
-  const cameraDevices = await page.getByLabel('摄像头').locator('option').count()
+  const cameraDevices = (await dropdownValues(page, '摄像头')).length
   if (cameraDevices < 1) {
     throw new Error('Camera device enumeration returned no entries after explicit permission.')
   }
@@ -739,8 +796,8 @@ try {
     globalThis.__advxSmokeCameraTrack = video.srcObject?.getVideoTracks()[0]
   })
 
-  await page.getByLabel('画中画位置').selectOption('top-left')
-  await page.getByLabel('画中画尺寸').selectOption('large')
+  await selectDropdown(page, '画中画位置', 'top-left')
+  await selectDropdown(page, '画中画尺寸', 'large')
   await page.getByLabel('镜像').check()
   const pipLayout = await page.evaluate(() => {
     const stage = document.querySelector('.video-stage')?.getBoundingClientRect()
@@ -991,8 +1048,8 @@ try {
     throw new Error('A MemeCandidate bypassed the audience barrage pipeline.')
   }
 
-  await page.getByRole('button', { name: /AI 观众/ }).click()
-  await page.getByRole('heading', { name: 'AI 观众', exact: true }).waitFor()
+  await page.getByRole('button', { name: /观众配置/ }).click()
+  await page.getByRole('heading', { name: '观众配置', exact: true }).waitFor()
   await page.locator('[data-audience-persona-open]').first().click()
   await page.getByRole('dialog', { name: /编辑/ }).waitFor()
   const liveEditPolicy = {
@@ -1173,8 +1230,8 @@ try {
     throw new Error('Camera permission remained open without a fresh single-use authorization.')
   }
 
-  await page.getByRole('button', { name: /AI 观众/ }).click()
-  await page.getByLabel('观众模式').selectOption('room-6657')
+  await page.getByRole('button', { name: /观众配置/ }).click()
+  await selectDropdown(page, '观众模式', 'room-6657')
   await page.getByRole('button', { name: '模式参数', exact: true }).click()
   await page.locator('[data-audience-range] input').first().fill('7')
 
@@ -1432,7 +1489,7 @@ const recoveryApp = await electron.launch({
 try {
   const recoveryPage = await recoveryApp.firstWindow()
   await recoveryPage.getByRole('heading', { name: '直播控制台', exact: true }).waitFor()
-  await recoveryPage.getByRole('button', { name: /AI 观众/ }).click()
+  await recoveryPage.getByRole('button', { name: /观众配置/ }).click()
   await recoveryPage.getByText('本地配置已保护', { exact: true }).waitFor()
   await recoveryPage.waitForTimeout(700)
   if ((await readFile(audienceWorkspaceFile, 'utf8')) !== rejectedWorkspace) {

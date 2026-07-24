@@ -10,7 +10,7 @@
   padding: 10px 13px;
   border: 1px solid var(--danger-border);
   border-left: 3px solid var(--danger);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--danger-soft);
   color: var(--danger-text);
   font-size: 12px;
@@ -31,7 +31,7 @@
 .mixer-panel,
 .settings-surface {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel);
 }
 
@@ -98,7 +98,7 @@
   flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid var(--border-strong);
-  border-radius: 7px;
+  border-radius: var(--radius);
 }
 
 .segmented-control button {
@@ -134,25 +134,38 @@
   gap: 6px;
   padding: 0 8px;
   border: 1px solid var(--border-strong);
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--panel);
   color: var(--text-dim);
   font-size: 10px;
   font-weight: 700;
 }
 
-.visual-select select {
-  max-width: 82px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 11px;
+.visual-select {
+  gap: 4px;
+  padding: 0 2px 0 8px;
 }
 
-.visual-select option {
-  background: var(--panel);
-  color: var(--text);
+.visual-select:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+
+.visual-select > span {
+  flex: 0 0 auto;
+}
+
+.visual-select .select-dropdown {
+  min-width: 66px;
+}
+
+.visual-select .select-dropdown-trigger {
+  height: 28px;
+  padding: 0 5px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 11px;
 }
 
 .visual-toggle {
@@ -202,7 +215,7 @@
   z-index: 2;
   overflow: hidden;
   border: 2px solid rgb(232 234 240 / 72%);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-deep);
   box-shadow: 0 8px 22px rgb(0 0 0 / 35%);
 }
@@ -241,7 +254,7 @@
   align-items: center;
   gap: 6px;
   padding: 4px 9px;
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: rgb(10 11 14 / 78%);
   color: var(--accent-on-dark);
   font-size: 10px;
@@ -308,7 +321,7 @@
   min-height: 40px;
   padding: 0 20px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: linear-gradient(
     135deg,
     var(--accent-gradient-start) 0%,
@@ -346,7 +359,7 @@
   justify-content: center;
   gap: 7px;
   min-height: 34px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   font-size: 12px;
   font-weight: 700;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
@@ -423,14 +436,14 @@
   width: 88px;
   height: 6px;
   overflow: hidden;
-  border-radius: 3px;
+  border-radius: 999px;
   background: var(--bg-deep);
 }
 
 .mini-meter span {
   display: block;
   height: 100%;
-  border-radius: 3px;
+  border-radius: 999px;
   background: linear-gradient(90deg, #2fd68f 0%, #d5ff55 60%, #ffb340 85%, #ff5f52 100%);
   transition: width 80ms linear;
 }
@@ -526,7 +539,7 @@
   height: 36px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   outline: 0;
   background: var(--bg-deep);
   color: var(--text);
@@ -543,18 +556,25 @@
 
 .right-rail {
   display: grid;
-  grid-template-rows: minmax(180px, 1fr) minmax(150px, 220px) auto;
+  grid-template-rows:
+    minmax(110px, 1.35fr)
+    minmax(118px, 1.05fr)
+    minmax(110px, 0.9fr);
   gap: 12px;
   min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .viewer-panel {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel);
 }
 
@@ -581,7 +601,7 @@
   padding: 0;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--panel-raise);
   color: var(--text-dim);
 }
@@ -611,13 +631,9 @@
   font-weight: 750;
 }
 
-.viewer-toolbar select {
-  height: 25px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--panel-raise);
-  color: var(--text-dim);
-  font-size: 10px;
+.viewer-toolbar .select-dropdown {
+  width: 88px;
+  flex: 0 0 auto;
 }
 
 .viewer-list {
@@ -696,7 +712,7 @@
   padding: 0;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--panel-raise);
   color: var(--text-dim);
 }
@@ -742,7 +758,7 @@
   padding: 0;
   place-items: center;
   border: 1px solid var(--danger-border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--panel);
   color: inherit;
 }
@@ -785,7 +801,7 @@
 .chat-count {
   min-width: 24px;
   padding: 2px 7px;
-  border-radius: 10px;
+  border-radius: 999px;
   background: var(--panel-raise);
   color: var(--text-dim);
   font-size: 10px;
@@ -843,7 +859,7 @@
 
 .chat-tag {
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 9px;
@@ -866,7 +882,7 @@
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel);
 }
 
@@ -906,7 +922,7 @@
   gap: 6px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--text-dim);
   font-size: 11px;
   font-weight: 700;
@@ -967,7 +983,7 @@
   min-width: 0;
   height: 36px;
   border: 1px solid var(--border-strong);
-  border-radius: 7px;
+  border-radius: var(--radius);
   outline: 0;
   background: var(--panel);
   color: var(--text);
@@ -980,8 +996,24 @@
 }
 
 .mixer-panel {
+  display: grid;
+  min-height: 0;
   min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
+}
+
+.mixer-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  touch-action: pan-y;
+}
+
+.mixer-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .mixer-row {
@@ -1007,8 +1039,12 @@
 }
 
 .mixer-row strong {
+  max-width: 165px;
+  overflow: hidden;
   color: var(--text-faint);
   font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mixer-row strong.ok {
@@ -1024,7 +1060,7 @@
   width: 108px;
   height: 8px;
   overflow: hidden;
-  border-radius: 4px;
+  border-radius: 999px;
   background: var(--bg-deep);
 }
 
@@ -1056,7 +1092,7 @@
   min-height: 96px;
   padding: 10px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel);
 }
 
@@ -1085,18 +1121,19 @@
   text-transform: uppercase;
 }
 
-.device-control select {
-  width: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 12px;
+.device-control > div {
+  min-width: 0;
 }
 
-.device-control select option {
-  background: var(--panel);
-  color: var(--text);
+.device-control .select-dropdown-trigger {
+  height: 30px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.device-control .select-dropdown-trigger:hover:not(:disabled),
+.device-control .select-dropdown.is-open .select-dropdown-trigger {
+  border-color: var(--control-border);
 }
 
 .privacy-note {

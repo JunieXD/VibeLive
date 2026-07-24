@@ -17,6 +17,7 @@ import type {
   AiCallStatus,
   AiCallTrace
 } from '../../../../shared/backend-client'
+import { SelectDropdown } from '../../components/SelectDropdown'
 import { useAiCallLog } from '../../hooks/useAiCallLog'
 import {
   aiCallRoleLabels,
@@ -70,7 +71,7 @@ function Metric({
 
 function JsonBlock({ value }: { value: unknown }): React.JSX.Element {
   return (
-    <pre className="m-0 max-h-72 min-h-24 overflow-auto whitespace-pre-wrap break-words bg-[var(--bg-deep)] px-3 py-2.5 font-mono text-[11px] leading-5 text-[var(--text-dim)]">
+    <pre className="m-0 max-h-72 min-h-24 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--bg-deep)] px-3 py-2.5 font-mono text-[11px] leading-5 text-[var(--text-dim)]">
       {formatJson(value)}
     </pre>
   )
@@ -109,7 +110,7 @@ function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <strong className="text-sm">{aiCallRoleLabels[trace.role]}</strong>
-              <span className={`px-2 py-0.5 text-[10px] font-bold ${statusClasses[trace.status]}`}>
+              <span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${statusClasses[trace.status]}`}>
                 {aiCallStatusLabels[trace.status]}
               </span>
             </div>
@@ -125,7 +126,7 @@ function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
               {formatTimestamp(trace.started_at_ms)}
             </time>
             <button
-              className="grid size-7 place-items-center border border-[var(--border)] bg-[var(--bg)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              className="grid size-7 place-items-center rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
               type="button"
               title={copied ? '已复制' : '复制调用详情'}
               aria-label={copied ? '已复制调用详情' : '复制调用详情'}
@@ -258,11 +259,11 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
   const log = useAiCallLog({ enabled: active, query })
 
   return (
-    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border border-[var(--border)] bg-[var(--panel)]">
+    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel)]">
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-2.5">
-        <div className="flex h-8 items-center border border-[var(--border)] bg-[var(--bg)] p-0.5">
+        <div className="flex h-8 items-center rounded-lg border border-[var(--border)] bg-[var(--bg)] p-0.5">
           <button
-            className={`h-6.5 px-2.5 text-[11px] font-bold ${scope === 'current' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--text-dim)]'}`}
+            className={`h-6.5 rounded-lg px-2.5 text-[11px] font-bold ${scope === 'current' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--text-dim)]'}`}
             type="button"
             disabled={!currentSessionId}
             onClick={() => setScope('current')}
@@ -270,32 +271,36 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
             当前会话
           </button>
           <button
-            className={`h-6.5 px-2.5 text-[11px] font-bold ${scope === 'all' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--text-dim)]'}`}
+            className={`h-6.5 rounded-lg px-2.5 text-[11px] font-bold ${scope === 'all' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--text-dim)]'}`}
             type="button"
             onClick={() => setScope('all')}
           >
             全部
           </button>
         </div>
-        <select
-          className="h-8 border border-[var(--border)] bg-[var(--bg)] px-2 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
-          aria-label="筛选 AI 角色"
+        <SelectDropdown<AiCallRole | ''>
+          className="min-w-28"
+          triggerClassName="h-8 rounded-lg border-[var(--border)] bg-[var(--bg)] text-xs"
+          ariaLabel="筛选 AI 角色"
           value={role}
-          onChange={(event) => setRole(event.target.value as AiCallRole | '')}
-        >
-          <option value="">全部角色</option>
-          {roleOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select>
-        <select
-          className="h-8 border border-[var(--border)] bg-[var(--bg)] px-2 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
-          aria-label="筛选调用状态"
+          options={[
+            { value: '', label: '全部角色' },
+            ...roleOptions.map(([optionValue, label]) => ({ value: optionValue, label }))
+          ]}
+          onChange={setRole}
+        />
+        <SelectDropdown<AiCallStatus | ''>
+          className="min-w-28"
+          triggerClassName="h-8 rounded-lg border-[var(--border)] bg-[var(--bg)] text-xs"
+          ariaLabel="筛选调用状态"
           value={status}
-          onChange={(event) => setStatus(event.target.value as AiCallStatus | '')}
-        >
-          <option value="">全部状态</option>
-          {statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-        </select>
-        <label className="flex h-8 min-w-44 flex-1 items-center gap-2 border border-[var(--border)] bg-[var(--bg)] px-2 focus-within:border-[var(--accent)]">
+          options={[
+            { value: '', label: '全部状态' },
+            ...statusOptions.map(([optionValue, label]) => ({ value: optionValue, label }))
+          ]}
+          onChange={setStatus}
+        />
+        <label className="flex h-8 min-w-44 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--bg)] px-2 focus-within:border-[var(--accent)]">
           <Search size={14} className="shrink-0 text-[var(--text-faint)]" aria-hidden="true" />
           <input
             className="min-w-0 flex-1 border-0 bg-transparent text-xs text-[var(--text)] outline-none placeholder:text-[var(--text-faint)]"
@@ -308,7 +313,7 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
           {log.lastUpdatedAt ? `更新 ${formatTimestamp(log.lastUpdatedAt)}` : '尚未更新'}
         </span>
         <button
-          className="grid size-8 place-items-center border border-[var(--border)] bg-[var(--bg)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+          className="grid size-8 place-items-center rounded-lg border border-[var(--border)] bg-[var(--bg)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
           type="button"
           title="刷新 AI 调用"
           aria-label="刷新 AI 调用"
@@ -360,7 +365,7 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
                         </time>
                       </span>
                       <span className="flex min-w-0 items-center gap-2">
-                        <span className={`shrink-0 px-1.5 py-0.5 text-[9px] font-bold ${statusClasses[trace.status]}`}>
+                        <span className={`shrink-0 rounded-lg px-1.5 py-0.5 text-[10px] font-bold ${statusClasses[trace.status]}`}>
                           {aiCallStatusLabels[trace.status]}
                         </span>
                         <span className="truncate text-[11px] text-[var(--text-dim)]" title={trace.model_id}>

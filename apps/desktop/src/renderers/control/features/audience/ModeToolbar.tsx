@@ -1,5 +1,6 @@
 import { Copy, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import type { AudienceMode, AudienceWorkspaceState } from '../../../../shared/audience'
+import { SelectDropdown } from '../../components/SelectDropdown'
 import { IconButton } from './IconButton'
 import { Popover } from './Popover'
 import { cx } from './styles'
@@ -48,17 +49,16 @@ export function ModeToolbar({
       <div className={cx('aw-mode-main')}>
         <label>
           <span>观众模式</span>
-          <select
+          <SelectDropdown
+            ariaLabel="观众模式"
             value={activeMode.id}
             disabled={structureLocked}
-            onChange={(event) => onSelectMode(event.target.value)}
-          >
-            {workspace.modeState.modes.map((mode) => (
-              <option key={mode.id} value={mode.id}>
-                {mode.name}
-              </option>
-            ))}
-          </select>
+            options={workspace.modeState.modes.map((mode) => ({
+              value: mode.id,
+              label: mode.name
+            }))}
+            onChange={onSelectMode}
+          />
         </label>
         <div className={cx('aw-mode-copy')} data-audience-mode-copy>
           {activeMode.builtIn ? (
@@ -223,56 +223,61 @@ export function ModeToolbar({
             <h4>行为策略</h4>
             <label>
               <span>冷场策略</span>
-              <select
+              <SelectDropdown
+                ariaLabel="冷场策略"
+                compact
                 value={activeMode.ambience}
-                onChange={(event) =>
-                  onPatchMode({ ambience: event.target.value as AudienceMode['ambience'] })
-                }
-              >
-                <option value="natural">自然静默</option>
-                <option value="continuous">持续暖场</option>
-              </select>
+                options={[
+                  { value: 'natural', label: '自然静默' },
+                  { value: 'continuous', label: '持续暖场' }
+                ]}
+                onChange={(ambience) => onPatchMode({ ambience })}
+              />
             </label>
             <label>
               <span>视觉输入</span>
-              <select
+              <SelectDropdown
+                ariaLabel="视觉输入"
+                compact
                 value={activeMode.visualSettings.viewerVisualInputMode}
-                onChange={(event) =>
+                options={[
+                  { value: 'text_only', label: '纯文本' },
+                  { value: 'direct_frames', label: '独立帧' },
+                  { value: 'shared_summary', label: '共享摘要' }
+                ]}
+                onChange={(viewerVisualInputMode) =>
                   onPatchMode({
                     visualSettings: {
                       ...activeMode.visualSettings,
-                      viewerVisualInputMode: event.target.value as
-                        AudienceMode['visualSettings']['viewerVisualInputMode']
+                      viewerVisualInputMode
                     }
                   })
                 }
-              >
-                <option value="text_only">纯文本</option>
-                <option value="direct_frames">独立帧</option>
-                <option value="shared_summary">共享摘要</option>
-              </select>
+              />
             </label>
           </div>
           <div className={cx('aw-popover-section')}>
             <h4>帧束策略</h4>
             <label>
               <span>选择策略</span>
-              <select
+              <SelectDropdown
+                ariaLabel="帧选择策略"
+                compact
                 value={activeMode.visualSettings.frameSelectionStrategy}
-                onChange={(event) =>
+                options={[
+                  { value: 'change_peaks', label: '变化峰值' },
+                  { value: 'latest_n', label: '最新帧' },
+                  { value: 'evenly_spaced', label: '均匀采样' }
+                ]}
+                onChange={(frameSelectionStrategy) =>
                   onPatchMode({
                     visualSettings: {
                       ...activeMode.visualSettings,
-                      frameSelectionStrategy: event.target.value as
-                        AudienceMode['visualSettings']['frameSelectionStrategy']
+                      frameSelectionStrategy
                     }
                   })
                 }
-              >
-                <option value="change_peaks">变化峰值</option>
-                <option value="latest_n">最新帧</option>
-                <option value="evenly_spaced">均匀采样</option>
-              </select>
+              />
             </label>
             <label>
               <span>帧数</span>

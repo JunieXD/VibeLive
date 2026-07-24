@@ -8,7 +8,7 @@
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel);
   color: var(--text);
 }
@@ -44,14 +44,14 @@
 }
 
 .aw-persistence-alert strong {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .aw-persistence-alert span {
   margin-top: 2px;
   overflow: hidden;
   color: var(--warning-text-dim);
-  font-size: 10px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -68,7 +68,7 @@
   gap: 5px;
   padding: 0 8px;
   border: 1px solid var(--warning-control-border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--warning-text);
 }
@@ -81,10 +81,10 @@
 .aw-runtime-toolbar {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) auto auto;
-  min-height: 44px;
+  min-height: 52px;
   align-items: center;
   gap: 12px;
-  padding: 6px 12px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -94,11 +94,11 @@
   min-width: 0;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .aw-runtime-state strong {
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .aw-runtime-state span {
@@ -127,7 +127,7 @@
 .aw-runtime-toggle {
   gap: 6px;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .aw-runtime-actions {
@@ -135,14 +135,14 @@
 }
 
 .aw-runtime-actions > button {
-  height: 30px;
+  height: 34px;
   gap: 5px;
   padding: 0 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel-raise);
   color: var(--text);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .aw-runtime-actions > button:disabled {
@@ -162,7 +162,6 @@
 
 .audience-workspace button,
 .audience-workspace input,
-.audience-workspace select,
 .audience-workspace textarea {
   font: inherit;
 }
@@ -172,8 +171,8 @@
   grid-template-columns: minmax(260px, 1fr) auto;
   align-items: center;
   gap: 16px;
-  min-height: 56px;
-  padding: 8px 12px;
+  min-height: 68px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--panel-raise);
 }
@@ -199,11 +198,11 @@
   display: grid;
   gap: 5px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
-.aw-mode-main select {
+.aw-mode-main :global(.select-dropdown) {
   width: 180px;
 }
 
@@ -219,13 +218,13 @@
 }
 
 .aw-mode-copy strong {
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .aw-mode-name-input {
   width: min(240px, 100%);
   height: 26px !important;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 750;
 }
 
@@ -233,7 +232,7 @@
   margin-top: 4px;
   overflow: hidden;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -246,7 +245,7 @@
 
 .aw-mode-summary {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -257,15 +256,15 @@
 
 .aw-popover-trigger {
   display: inline-flex;
-  height: 30px;
+  height: 34px;
   align-items: center;
   gap: 6px;
   padding: 0 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .aw-popover-trigger:hover:not(:disabled) {
@@ -302,7 +301,7 @@
   overflow: auto;
   padding: 12px;
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel-raise);
   box-shadow: 0 14px 32px rgb(0 0 0 / 32%);
 }
@@ -325,7 +324,7 @@
 .aw-popover-section h4 {
   margin: 0;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -337,12 +336,12 @@
   align-items: center;
   gap: 8px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
 .aw-popover-section input,
-.aw-popover-section select {
+.aw-popover-section :global(.select-dropdown) {
   width: 100%;
 }
 
@@ -360,7 +359,7 @@
 
 .aw-range-pair b {
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
   text-align: center;
 }
 
@@ -375,13 +374,13 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 32px;
+  min-height: 34px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text);
-  font-size: 11px;
+  font-size: 12px;
   text-align: left;
 }
 
@@ -397,7 +396,7 @@
 .aw-menu-item span {
   overflow: hidden;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -406,19 +405,19 @@
   animation: aw-spin 0.9s linear infinite;
 }
 
-.audience-workspace select,
 .audience-workspace input:not([type="range"]):not([type="checkbox"]):not([type="color"]),
-.audience-workspace textarea {
+.audience-workspace textarea,
+.audience-workspace :global(.select-dropdown-trigger) {
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius);
   outline: 0;
   background: var(--bg-deep);
   color: var(--text);
 }
 
-.audience-workspace select,
-.audience-workspace input:not([type="range"]):not([type="checkbox"]):not([type="color"]) {
-  height: 30px;
+.audience-workspace input:not([type="range"]):not([type="checkbox"]):not([type="color"]),
+.audience-workspace :global(.select-dropdown-trigger) {
+  height: 34px;
   padding: 0 8px;
 }
 
@@ -429,9 +428,9 @@
   resize: vertical;
 }
 
-.audience-workspace select:focus,
 .audience-workspace input:focus,
-.audience-workspace textarea:focus {
+.audience-workspace textarea:focus,
+.audience-workspace :global(.select-dropdown-trigger:focus-visible) {
   border-color: var(--accent);
 }
 
@@ -448,7 +447,7 @@
   padding: 0;
   place-items: center;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-dim);
 }
@@ -482,7 +481,7 @@
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -537,7 +536,7 @@
   min-width: 0;
 }
 
-.aw-search-row > select {
+.aw-search-row > :global(.select-dropdown) {
   width: 78px;
 }
 
@@ -620,14 +619,14 @@
 .aw-brain-row span,
 .aw-brain-row small {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .aw-brain-row strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .aw-brain-editor {
@@ -736,7 +735,7 @@
   place-items: center;
   border-radius: 50%;
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   font-style: normal;
   font-weight: 850;
 }
@@ -756,13 +755,13 @@
 }
 
 .aw-persona-identity strong {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .aw-persona-identity small {
   margin-top: 4px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .aw-persona-preview {
@@ -779,12 +778,12 @@
 
 .aw-persona-preview span {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .aw-persona-allocation {
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .aw-persona-allocation {
@@ -809,7 +808,7 @@
   position: relative;
   width: 30px;
   height: 17px;
-  border-radius: 9px;
+  border-radius: 999px;
   background: var(--border-strong);
 }
 
@@ -836,7 +835,7 @@
 
 .aw-switch em {
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 11px;
   font-style: normal;
 }
 
@@ -847,7 +846,7 @@
 
 .aw-bias-grid b {
   color: var(--text-dim);
-  font-size: 9px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -881,7 +880,7 @@
 .aw-floating-panel > .aw-editor {
   height: 100%;
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--panel);
   box-shadow: 0 22px 54px rgb(0 0 0 / 45%);
 }
@@ -916,20 +915,20 @@
 }
 
 .aw-editor-heading strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .aw-editor-heading span {
   margin-top: 4px;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .aw-segmented {
   display: inline-flex;
   padding: 2px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--bg-deep);
 }
 
@@ -940,10 +939,10 @@
   height: 26px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .aw-segmented button.active {
@@ -959,10 +958,10 @@
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--accent);
   color: var(--accent-ink);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -971,7 +970,7 @@
   border-bottom: 1px solid var(--danger-border);
   background: var(--danger-soft);
   color: var(--danger-text);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .aw-form {
@@ -989,7 +988,7 @@
 
 .aw-form label > span {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1002,7 +1001,7 @@
 
 .aw-toggle-field > span {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1035,7 +1034,7 @@
   height: 30px;
   padding: 2px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--bg-deep);
 }
 
@@ -1055,7 +1054,7 @@
 
 .aw-form-advanced {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--chrome);
 }
 
@@ -1067,7 +1066,7 @@
   padding: 0 12px;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 750;
   list-style: none;
 }
@@ -1105,7 +1104,7 @@
   margin: 12px;
   resize: none !important;
   font-family: "Cascadia Code", Consolas, monospace !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   line-height: 1.5 !important;
 }
 
@@ -1115,7 +1114,7 @@
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -1149,7 +1148,7 @@
 
 .aw-meme-row-title strong {
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1162,10 +1161,10 @@
 
 .aw-tags i {
   padding: 2px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: var(--panel-raise);
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 10px;
   font-style: normal;
 }
 
@@ -1181,7 +1180,7 @@
   padding: 0 12px;
   border-bottom: 1px solid var(--border);
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .aw-meme-meta .aw-switch {
@@ -1197,7 +1196,7 @@
   min-height: 120px;
   place-items: center;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 1180px) {

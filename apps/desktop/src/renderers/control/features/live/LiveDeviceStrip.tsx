@@ -1,4 +1,5 @@
 import { Camera, CameraOff, KeyRound, Mic, Volume2 } from 'lucide-react'
+import { SelectDropdown } from '../../components/SelectDropdown'
 import type { LiveDeviceStripProps } from './liveTypes'
 
 export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element {
@@ -34,19 +35,21 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
           <Mic size={16} />
           <div>
             <label htmlFor="microphone">麦克风</label>
-            <select
+            <SelectDropdown
               id="microphone"
+              ariaLabel="麦克风"
               value={selectedMicrophoneId}
-              onChange={(event) => void onChangeMicrophone(event.target.value)}
+              options={
+                microphones.length === 0
+                  ? [{ value: '', label: '未授权设备' }]
+                  : microphones.map((device, index) => ({
+                      value: device.deviceId,
+                      label: device.label || `麦克风 ${index + 1}`
+                    }))
+              }
+              onChange={(deviceId) => void onChangeMicrophone(deviceId)}
               disabled={isSessionActive || mediaTransitioning}
-            >
-              {microphones.length === 0 && <option value="">未授权设备</option>}
-              {microphones.map((device, index) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.label || `麦克风 ${index + 1}`}
-                </option>
-              ))}
-            </select>
+            />
           </div>
           <button
             className="ghost-button"
@@ -63,19 +66,21 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
           <Camera size={16} />
           <div>
             <label htmlFor="camera">摄像头</label>
-            <select
+            <SelectDropdown
               id="camera"
+              ariaLabel="摄像头"
               value={cameraDeviceId}
-              onChange={(event) => void onChangeCamera(event.target.value)}
+              options={
+                cameras.length === 0
+                  ? [{ value: '', label: '未检测到设备' }]
+                  : cameras.map((device, index) => ({
+                      value: device.deviceId,
+                      label: device.label || `摄像头 ${index + 1}`
+                    }))
+              }
+              onChange={(deviceId) => void onChangeCamera(deviceId)}
               disabled={cameraControlDisabled}
-            >
-              {cameras.length === 0 && <option value="">未检测到设备</option>}
-              {cameras.map((device, index) => (
-                <option key={device.deviceId || `camera-${index}`} value={device.deviceId}>
-                  {device.label || `摄像头 ${index + 1}`}
-                </option>
-              ))}
-            </select>
+            />
           </div>
           <button
             className={`ghost-button ${cameraStream ? 'camera-active' : ''}`}

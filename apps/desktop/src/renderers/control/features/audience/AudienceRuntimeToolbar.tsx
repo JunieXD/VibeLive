@@ -117,11 +117,11 @@ export function AudienceRuntimeToolbar({
               className={cx('aw-menu-item')}
               data-popover-close
               disabled={probing || !canProbe}
-              title={canProbe ? '检测当前会话的 Provider 能力' : '开始或恢复直播后可检测 Provider'}
+              title={canProbe ? '检测当前会话的供应商能力' : '开始或恢复直播后可检测供应商'}
               onClick={onProbe}
             >
               <TestTube2 size={14} />
-              Provider 检测
+              供应商检测
               <span>{probeLabel}</span>
             </button>
             <button

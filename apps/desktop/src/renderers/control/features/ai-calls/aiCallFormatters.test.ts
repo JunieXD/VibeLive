@@ -45,7 +45,7 @@ describe('AI call formatters', () => {
       { label: '调用 ID', value: 'call-1' },
       { label: '关联 ID', value: 'corr-1' },
       { label: '会话 ID', value: 'session-1' },
-      { label: 'Provider 请求 ID', value: 'provider-1' }
+      { label: '供应商请求 ID', value: 'provider-1' }
     ])
   })
 })

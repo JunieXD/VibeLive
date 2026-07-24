@@ -190,7 +190,7 @@ export function useSessionMediaControls({
           )
         }
       } else {
-        onSystemActivityRef.current('Provider 未配置或后端未连接，继续进行仅画面直播。')
+        onSystemActivityRef.current('供应商未配置或后端未连接，继续进行仅画面直播。')
       }
       if (!devices.operation.isCurrent(operationId)) {
         if (backendSessionStarted) {

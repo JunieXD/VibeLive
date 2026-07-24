@@ -45,7 +45,11 @@ export function Popover({
   }, [open])
 
   return (
-    <div className={cx('aw-popover')} ref={rootRef}>
+    <div
+      className={cx('aw-popover')}
+      ref={rootRef}
+      data-select-dropdown-portal-host
+    >
       <button
         ref={triggerRef}
         type="button"

@@ -215,7 +215,7 @@ export class BackendClient {
       {
         timeoutMs: RUNTIME_SESSION_START_TIMEOUT_MS,
         timeoutCode: "runtime_session_start_timeout",
-        timeoutMessage: "AI 观众初始化超时，请检查 Provider 和 ASR 服务连接。"
+        timeoutMessage: "AI 观众初始化超时，请检查供应商和 ASR 服务连接。"
       }
     );
     this.runtimeProvidersByRevision.clear();
@@ -397,7 +397,7 @@ export class BackendClient {
     return this.request("/configuration/providers/probe", "POST", undefined, {
       timeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
       timeoutCode: "provider_probe_timeout",
-      timeoutMessage: "Provider 能力探测超时，请检查上游服务连接。"
+      timeoutMessage: "供应商能力探测超时，请检查上游服务连接。"
     });
   }
 

@@ -22,8 +22,8 @@ export function getModelConfigNotice(result: SaveModelConfigResult): string {
     return '语音识别配置已安全保存；将在下一场直播加载'
   }
   return result.securelyStored
-    ? '模型与语音识别配置已安全保存；开始或恢复直播时将加载 Provider'
-    : '当前系统无法加密密钥；密钥不会落盘，也无法在重启后恢复 Provider'
+    ? '模型与语音识别配置已安全保存；开始或恢复直播时将加载供应商'
+    : '当前系统无法加密密钥；密钥不会落盘，也无法在重启后恢复供应商'
 }
 
 export function canSaveModelConfig(input: {

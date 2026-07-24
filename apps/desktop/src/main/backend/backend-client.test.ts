@@ -351,7 +351,7 @@ describe("BackendClient runtime v2", () => {
       await expect(client.probeProvider()).rejects.toMatchObject({
         name: "BackendClientError",
         code: "provider_probe_timeout",
-        message: "Provider 能力探测超时，请检查上游服务连接。"
+        message: "供应商能力探测超时，请检查上游服务连接。"
       });
     } finally {
       fetchMock.mockRestore();
@@ -428,7 +428,7 @@ describe("BackendClient runtime v2", () => {
       await expect(client.startSession("request-1", compiled)).rejects.toMatchObject({
         name: "BackendClientError",
         code: "runtime_session_start_timeout",
-        message: "AI 观众初始化超时，请检查 Provider 和 ASR 服务连接。"
+        message: "AI 观众初始化超时，请检查供应商和 ASR 服务连接。"
       });
     } finally {
       fetchMock.mockRestore();

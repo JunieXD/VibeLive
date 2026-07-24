@@ -71,7 +71,7 @@ export function collectCorrelationIds(trace: AiCallTrace): Array<{
     ['生成请求 ID', trace.generation_request_id],
     ['Viewer ID', trace.viewer_instance_id],
     ['话语 ID', trace.utterance_id],
-    ['Provider 请求 ID', trace.response?.provider_request_id],
+    ['供应商请求 ID', trace.response?.provider_request_id],
     ['请求 SHA-256', trace.request?.wire_sha256],
     ['响应 SHA-256', trace.response?.body_sha256]
   ].flatMap(([label, value]) => value ? [{ label: label as string, value }] : [])

@@ -3,7 +3,9 @@
   height: 100%;
   min-height: 0;
   grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--panel);
 }
 
@@ -72,7 +74,7 @@
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--danger-border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--panel);
   color: var(--danger);
   font-size: 11px;
@@ -130,7 +132,7 @@
   gap: 8px;
   padding: 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-deep);
   color: var(--text-faint);
 }
@@ -270,7 +272,7 @@
   overflow: hidden;
   padding: 3px 7px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   color: var(--text-dim);
   font-size: 10px;
   text-overflow: ellipsis;
@@ -323,7 +325,7 @@
   padding: 0;
   place-items: center;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--panel-raise);
   color: var(--text-dim);
 }
@@ -431,12 +433,16 @@
   font-size: 11px;
 }
 
-.viewer-management-moderation select,
+.viewer-management-moderation .select-dropdown,
 .viewer-management-moderation input {
   width: 100%;
+}
+
+.viewer-management-moderation .select-dropdown-trigger,
+.viewer-management-moderation input {
   height: 30px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-deep);
   color: var(--text);
   font-size: 11px;
@@ -456,7 +462,7 @@
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--panel-raise);
   color: var(--text-dim);
   font-size: 11px;
@@ -488,6 +494,8 @@
 
 .viewer-management.viewer-management-empty {
   min-height: 0;
+  grid-template-rows: none;
+  grid-auto-rows: max-content;
   place-content: center;
   justify-items: center;
   gap: 8px;
@@ -519,13 +527,13 @@
 .viewer-management-empty h2 {
   margin: 4px 0 0;
   color: var(--text);
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .viewer-management-empty p {
   max-width: 420px;
   margin: 0;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.7;
 }
 

@@ -206,9 +206,9 @@ export function useAudienceRuntimeControl({
     try {
       const result = await window.advx.probeAudienceProvider()
       setProbe(result)
-      onSystemActivity(`Provider capability probe：${result.status}。`)
+      onSystemActivity(`供应商能力检测：${result.status}。`)
     } catch (error) {
-      const message = describeError(error, 'Provider capability probe 失败。')
+      const message = describeError(error, '供应商能力检测失败。')
       setProbeError(message)
       setIssue(message)
       onSystemActivity(message)

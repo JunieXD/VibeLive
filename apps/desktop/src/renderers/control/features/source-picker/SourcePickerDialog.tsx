@@ -62,7 +62,7 @@ export function SourcePickerDialog({
       onMouseDown={onClose}
     >
       <section
-        className="grid h-[min(720px,86vh)] w-[min(980px,92vw)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl border border-[var(--border-strong)] bg-[var(--panel)] shadow-[0_32px_80px_rgb(0_0_0_/_55%)] outline-none"
+        className="grid h-[min(720px,86vh)] w-[min(980px,92vw)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-lg border border-[var(--border-strong)] bg-[var(--panel)] shadow-[0_32px_80px_rgb(0_0_0_/_55%)] outline-none"
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
@@ -141,21 +141,21 @@ export function SourcePickerDialog({
                   onClick={() => setSelectedId(source.id)}
                 >
                   <img
-                    className="block aspect-video w-full rounded-sm bg-[var(--bg-deep)] object-cover"
+                    className="block aspect-video w-full rounded-lg bg-[var(--bg-deep)] object-cover"
                     src={source.thumbnailUrl}
                     alt=""
                   />
                   <span className="flex min-w-0 items-center gap-2 px-1 pb-1 pt-2 text-[11px] font-bold">
                     {source.appIconUrl && (
                       <img
-                        className="size-4 shrink-0 rounded-sm"
+                        className="size-4 shrink-0 rounded-lg"
                         src={source.appIconUrl}
                         alt=""
                       />
                     )}
                     <span className="truncate">{source.name}</span>
                   </span>
-                  <span className="absolute right-3 top-3 rounded bg-[rgb(10_11_14_/_80%)] px-1.5 py-0.5 text-[9px] text-white">
+                  <span className="absolute right-3 top-3 rounded-lg bg-[rgb(10_11_14_/_80%)] px-1.5 py-0.5 text-[10px] text-white">
                     {source.kind === 'screen' ? '屏幕' : '窗口'}
                   </span>
                 </button>

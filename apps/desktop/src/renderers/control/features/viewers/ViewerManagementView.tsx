@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import type { BackendViewerSnapshot } from '../../../../shared/contracts'
 import type { SessionStatus } from '../../../../shared/session'
+import { SelectDropdown } from '../../components/SelectDropdown'
 import type { LiveAudienceProps } from '../live/liveTypes'
 import {
   isViewerMuted,
@@ -334,13 +335,19 @@ export function ViewerManagementView({
                 <div className="viewer-management-moderation">
                   <label>
                     <span>禁言时长</span>
-                    <select value={muteDuration} onChange={(event) => setMuteDuration(event.target.value)}>
-                      <option value="60000">1 分钟</option>
-                      <option value="300000">5 分钟</option>
-                      <option value="600000">10 分钟</option>
-                      <option value="1800000">30 分钟</option>
-                      <option value="custom">自定义</option>
-                    </select>
+                    <SelectDropdown
+                      ariaLabel="观众禁言时长"
+                      compact
+                      value={muteDuration}
+                      options={[
+                        { value: '60000', label: '1 分钟' },
+                        { value: '300000', label: '5 分钟' },
+                        { value: '600000', label: '10 分钟' },
+                        { value: '1800000', label: '30 分钟' },
+                        { value: 'custom', label: '自定义' }
+                      ]}
+                      onChange={setMuteDuration}
+                    />
                   </label>
                   {muteDuration === 'custom' && (
                     <label>

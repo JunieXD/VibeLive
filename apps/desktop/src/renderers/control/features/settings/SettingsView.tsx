@@ -12,6 +12,7 @@ import type {
   OverlaySettings,
   OverlayTarget
 } from '../../../../shared/contracts'
+import { SelectDropdown } from '../../components/SelectDropdown'
 
 export type SettingsViewProps = {
   modelBaseUrl: string
@@ -44,12 +45,12 @@ export type SettingsViewProps = {
 }
 
 const surfaceClassName =
-  'min-w-0 border border-[var(--border)] bg-[var(--panel)] p-5 text-[var(--text)]'
+  'min-w-0 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 text-[var(--text)]'
 const labelClassName = 'grid gap-2 text-xs font-semibold text-[var(--text-dim)]'
 const controlClassName =
-  'min-h-9 w-full border border-[var(--border-strong)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50'
+  'min-h-9 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50'
 const actionButtonClassName =
-  'inline-flex min-h-9 items-center justify-center gap-2 border border-[var(--border-strong)] bg-[var(--panel-raise)] px-3 text-xs font-bold text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
+  'inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--panel-raise)] px-3 text-xs font-bold text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
 const sliderClassName = 'w-full cursor-pointer accent-[var(--accent)]'
 
 type SliderFieldProps = {
@@ -126,7 +127,7 @@ function ToggleField({
           onChange={(event) => onChange(event.target.checked)}
         />
         <span
-          className="pointer-events-none relative h-5 w-9 border border-[var(--border-strong)] bg-[var(--bg)] transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3.5 after:w-3.5 after:bg-[var(--text-dim)] after:transition-transform after:content-[''] peer-checked:border-[var(--accent)] peer-checked:bg-[var(--accent-soft)] peer-checked:after:translate-x-4 peer-checked:after:bg-[var(--accent)] peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--accent)]"
+          className="pointer-events-none relative h-5 w-9 rounded-full border border-[var(--border-strong)] bg-[var(--bg)] transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-3.5 after:w-3.5 after:rounded-full after:bg-[var(--text-dim)] after:transition-transform after:content-[''] peer-checked:border-[var(--accent)] peer-checked:bg-[var(--accent-soft)] peer-checked:after:translate-x-4 peer-checked:after:bg-[var(--accent)] peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--accent)]"
           aria-hidden="true"
         />
         <em className="w-7 text-right text-[10px] not-italic text-[var(--text-faint)]">
@@ -198,13 +199,13 @@ export function SettingsView({
               placeholder="输入多模态模型名称"
             />
           </label>
-          <details className="border border-[var(--border)] p-3">
+          <details className="rounded-lg border border-[var(--border)] p-3">
             <summary className="cursor-pointer text-xs font-semibold text-[var(--text-dim)]">
               高级模型覆盖
             </summary>
             <div className="mt-4 grid gap-4 sm:grid-cols-2">
               <label className={labelClassName}>
-                Provider Profile
+                供应商档案
                 <input
                   className={controlClassName}
                   value={providerProfileId}
@@ -286,7 +287,7 @@ export function SettingsView({
               </span>
             )}
             <button
-              className="inline-flex min-h-9 items-center justify-center gap-2 border border-[var(--accent)] bg-[var(--accent)] px-4 text-xs font-bold text-[var(--accent-ink)] transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-4 text-xs font-bold text-[var(--accent-ink)] transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
               type="button"
               disabled={!canSaveModelConfig}
               onClick={onSaveModelConfig}
@@ -314,51 +315,49 @@ export function SettingsView({
         </header>
 
         {!overlaySettings ? (
-          <div className="grid min-h-40 place-items-center border border-dashed border-[var(--border-strong)] text-sm text-[var(--text-dim)]">
+          <div className="grid min-h-40 place-items-center rounded-lg border border-dashed border-[var(--border-strong)] text-sm text-[var(--text-dim)]">
             {overlaySettingsNotice ?? '正在读取覆盖层设置...'}
           </div>
         ) : (
           <div className="grid gap-4">
-            <label className={labelClassName}>
+            <div className={labelClassName}>
               弹幕目标
-              <select
-                className={controlClassName}
-                aria-label="弹幕目标"
+              <SelectDropdown
+                ariaLabel="弹幕目标"
+                triggerClassName={controlClassName}
                 value={overlaySettings.targetDisplayId}
-                onChange={(event) =>
+                options={overlayTargets.map((target) => ({
+                  value: target.id,
+                  label: `${target.isPrimary ? '主屏 · ' : ''}${target.name} · ${target.bounds.width} × ${target.bounds.height}`
+                }))}
+                onChange={(targetDisplayId) =>
                   onOverlaySettingsChange({
                     ...overlaySettings,
-                    targetDisplayId: Number(event.target.value)
+                    targetDisplayId
                   })
                 }
-              >
-                {overlayTargets.map((target) => (
-                  <option key={target.id} value={target.id}>
-                    {target.isPrimary ? '主屏 · ' : ''}
-                    {target.name} · {target.bounds.width} × {target.bounds.height}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
 
-            <label className={labelClassName}>
+            <div className={labelClassName}>
               字体
-              <select
-                className={controlClassName}
-                aria-label="弹幕字体"
+              <SelectDropdown
+                ariaLabel="弹幕字体"
+                triggerClassName={controlClassName}
                 value={overlaySettings.fontFamily}
-                onChange={(event) =>
+                options={[
+                  { value: 'bilibili', label: 'B站默认' },
+                  { value: 'yahei', label: '微软雅黑' },
+                  { value: 'system', label: '系统字体' }
+                ]}
+                onChange={(fontFamily) =>
                   onOverlaySettingsChange({
                     ...overlaySettings,
-                    fontFamily: event.target.value as OverlaySettings['fontFamily']
+                    fontFamily
                   })
                 }
-              >
-                <option value="bilibili">B站默认</option>
-                <option value="yahei">微软雅黑</option>
-                <option value="system">系统字体</option>
-              </select>
-            </label>
+              />
+            </div>
 
             <div className="grid gap-4 border-y border-[var(--border)] py-4">
               <SliderField

@@ -14,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useEffect } from 'react'
+import { SelectDropdown } from '../../components/SelectDropdown'
 import { bindMediaStreamToVideo } from '../../media'
 import {
   COMPRESSION_PROFILES,
@@ -25,6 +26,25 @@ import {
 } from '../../visual'
 import { pipPositionLabels, pipSizeLabels, visualModeLabels } from './liveConstants'
 import type { LiveStageProps } from './liveTypes'
+
+export function getLiveMessagePlaceholder({
+  audienceSessionActive,
+  sessionStatus,
+  providerConfigured
+}: {
+  audienceSessionActive: boolean
+  sessionStatus: LiveStageProps['session']['status']
+  providerConfigured: boolean
+}): string {
+  if (!audienceSessionActive) {
+    return providerConfigured
+      ? '开始直播后可与 AI 观众互动'
+      : '配置供应商后可与 AI 观众互动'
+  }
+  return sessionStatus === 'running'
+    ? '说点什么，AI 观众会回应你'
+    : '开始直播后可发送'
+}
 
 export function LiveStage(props: LiveStageProps): React.JSX.Element {
   const {
@@ -138,92 +158,87 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           ))}
         </div>
 
-        <label className="visual-select">
+        <div className="visual-select">
           <span>采样</span>
-          <select
-            aria-label="视觉采样频率"
+          <SelectDropdown
+            ariaLabel="视觉采样频率"
+            compact
             value={visualSettings.sampleIntervalMs}
-            onChange={(event) =>
+            options={[
+              { value: 5000, label: '5 秒' },
+              { value: 2000, label: '2 秒' },
+              { value: 1000, label: '1 秒' },
+              { value: 500, label: '0.5 秒' }
+            ]}
+            onChange={(sampleIntervalMs) =>
               setVisualSettings((current) => ({
                 ...current,
-                sampleIntervalMs: Number(event.target.value) as VisualSettings['sampleIntervalMs']
+                sampleIntervalMs
               }))
             }
-          >
-            <option value={5000}>5 秒</option>
-            <option value={2000}>2 秒</option>
-            <option value={1000}>1 秒</option>
-            <option value={500}>0.5 秒</option>
-          </select>
-        </label>
+          />
+        </div>
 
-        <label className="visual-select">
+        <div className="visual-select">
           <span>压缩</span>
-          <select
-            aria-label="图像压缩档位"
+          <SelectDropdown
+            ariaLabel="图像压缩档位"
+            compact
             value={visualSettings.compressionPreset}
-            onChange={(event) =>
-              setVisualSettings((current) => ({
-                ...current,
-                compressionPreset: event.target.value as CompressionPreset
-              }))
-            }
-          >
-            {(
+            options={(
               Object.entries(COMPRESSION_PROFILES) as [
                 CompressionPreset,
                 (typeof COMPRESSION_PROFILES)[CompressionPreset]
               ][]
-            ).map(([preset, profile]) => (
-              <option value={preset} key={preset}>
-                {profile.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            ).map(([preset, profile]) => ({
+              value: preset,
+              label: profile.label
+            }))}
+            onChange={(compressionPreset) =>
+              setVisualSettings((current) => ({
+                ...current,
+                compressionPreset
+              }))
+            }
+          />
+        </div>
 
         {visualSettings.mode === 'pip' && (
           <>
-            <label className="visual-select">
+            <div className="visual-select">
               <span>位置</span>
-              <select
-                aria-label="画中画位置"
+              <SelectDropdown
+                ariaLabel="画中画位置"
+                compact
                 value={visualSettings.pipPosition}
-                onChange={(event) =>
-                  setVisualSettings((current) => ({
-                    ...current,
-                    pipPosition: event.target.value as PipPosition
-                  }))
-                }
-              >
-                {(Object.entries(pipPositionLabels) as [PipPosition, string][]).map(
-                  ([position, label]) => (
-                    <option value={position} key={position}>
-                      {label}
-                    </option>
-                  )
+                options={(Object.entries(pipPositionLabels) as [PipPosition, string][]).map(
+                  ([position, label]) => ({ value: position, label })
                 )}
-              </select>
-            </label>
-            <label className="visual-select">
-              <span>尺寸</span>
-              <select
-                aria-label="画中画尺寸"
-                value={visualSettings.pipSize}
-                onChange={(event) =>
+                onChange={(pipPosition) =>
                   setVisualSettings((current) => ({
                     ...current,
-                    pipSize: event.target.value as PipSize
+                    pipPosition
                   }))
                 }
-              >
-                {(Object.entries(pipSizeLabels) as [PipSize, string][]).map(([size, label]) => (
-                  <option value={size} key={size}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
+              />
+            </div>
+            <div className="visual-select">
+              <span>尺寸</span>
+              <SelectDropdown
+                ariaLabel="画中画尺寸"
+                compact
+                value={visualSettings.pipSize}
+                options={(Object.entries(pipSizeLabels) as [PipSize, string][]).map(
+                  ([size, label]) => ({ value: size, label })
+                )}
+                onChange={(pipSize) =>
+                  setVisualSettings((current) => ({
+                    ...current,
+                    pipSize
+                  }))
+                }
+              />
+            </div>
           </>
         )}
 
@@ -334,7 +349,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           {session.status === 'idle' && '开始直播'}
         </button>
         <details className="provider-capability">
-          <summary>Provider · {providerDisplay.label}</summary>
+          <summary>供应商 · {providerDisplay.label}</summary>
           <div>
             <strong>{providerDisplay.heading}</strong>
             <span>{providerDisplay.detail}</span>
@@ -401,13 +416,12 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           onKeyDown={(event) => {
             if (event.key === 'Enter') onSendUserMessage()
           }}
-          placeholder={
-            !audienceSessionActive
-              ? '配置 Provider 后可与 AI 观众互动'
-              : session.status === 'running'
-                ? '说点什么，AI 观众会回应你'
-                : '开始直播后可发送'
-          }
+          placeholder={getLiveMessagePlaceholder({
+            audienceSessionActive,
+            sessionStatus: session.status,
+            providerConfigured:
+              providerProbeState.profileSaved || providerProbeState.runtimeProviderReady
+          })}
           disabled={!canMessage || messageSending}
         />
         <button
@@ -435,11 +449,11 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           </div>
         )}
       </div>
-      <p className="provider-disclosure">
-        {audienceSessionActive
-          ? '屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型 Provider；原始音频仅发送给 StepFun ASR，生成模型仅接收最终转写。原始音频和连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。'
-          : '当前为本地画面直播；配置并接入 Provider 后才会发送画面、文字和转写。'}
-      </p>
+      {audienceSessionActive && (
+        <p className="provider-disclosure">
+          屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型供应商；原始音频仅发送给 StepFun ASR，生成模型仅接收最终转写。原始音频和连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。
+        </p>
+      )}
     </section>
   )
 }
@@ -453,34 +467,34 @@ export function getProviderProbeDisplay(state: LiveStageProps['providerProbeStat
     return {
       label: '后端未连接',
       heading: '等待本地后端连接',
-      detail: '后端连接完成后才会检测 Provider。'
+      detail: '后端连接完成后才会检测供应商。'
     }
   }
   if (state.profileLoading) {
     return {
       label: '读取配置中',
-      heading: '正在读取已保存的 Provider Profile',
-      detail: 'Provider 凭据存放在本机安全存储中。'
+      heading: '正在读取已保存的供应商档案',
+      detail: '供应商凭据存放在本机安全存储中。'
     }
   }
   if (!state.profileSaved) {
     return {
       label: '未配置',
-      heading: '尚未保存 Provider Profile',
+      heading: '尚未保存供应商档案',
       detail: '请在设置中保存模型和语音识别配置。'
     }
   }
   if (state.probing) {
     return {
       label: '检测中',
-      heading: '正在验证 Provider 能力',
+      heading: '正在验证供应商能力',
       detail: '检测会请求模型列表、文本、图片和并发能力，最长约两分钟。'
     }
   }
   if (state.error) {
     return {
       label: '检测失败',
-      heading: 'Provider 能力检测失败',
+      heading: '供应商能力检测失败',
       detail: state.error
     }
   }
@@ -488,26 +502,26 @@ export function getProviderProbeDisplay(state: LiveStageProps['providerProbeStat
     return {
       label: '已通过',
       heading: state.probe.provider_profile_id,
-      detail: 'Provider 能力检测已通过。'
+      detail: '供应商能力检测已通过。'
     }
   }
   if (state.probe) {
     return {
       label: '检测失败',
       heading: state.probe.provider_profile_id,
-      detail: `Provider 返回 ${state.probe.status}。请展开查看各项能力结果。`
+      detail: `供应商返回 ${state.probe.status}。请展开查看各项能力结果。`
     }
   }
   if (state.runtimeProviderReady) {
     return {
       label: '运行中',
-      heading: state.profileId ?? '当前 Provider Profile',
-      detail: '此直播的 Provider 已装载到后端运行时。'
+      heading: state.profileId ?? '当前供应商档案',
+      detail: '此直播的供应商已装载到后端运行时。'
     }
   }
   return {
     label: '已保存',
-    heading: state.profileId ?? '当前 Provider Profile',
-    detail: 'Provider Profile 已安全保存；开始或恢复直播时将按会话选择装载。'
+    heading: state.profileId ?? '当前供应商档案',
+    detail: '供应商档案已安全保存；开始或恢复直播时将按会话选择装载。'
   }
 }
