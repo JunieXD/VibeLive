@@ -1,4 +1,6 @@
+import hashlib
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -18,6 +20,48 @@ from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeProvider,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+ROOM_6657_SKILL = REPO_ROOT / ".codex" / "skills" / "room-6657-style" / "SKILL.md"
+ROOM_6657_GENERATED_SKILL = (
+    REPO_ROOT
+    / "apps"
+    / "backend"
+    / "src"
+    / "advx_backend"
+    / "providers"
+    / "model"
+    / "room_6657_generation_skill.json"
+)
+
+
+def test_room_6657_generated_skill_matches_source_and_persona_contract() -> None:
+    generated = json.loads(ROOM_6657_GENERATED_SKILL.read_text(encoding="utf-8"))
+
+    assert generated["schema_version"] == 1
+    assert generated["mode_id"] == "room-6657"
+    assert generated["source_skill_sha256"] == hashlib.sha256(
+        ROOM_6657_SKILL.read_bytes()
+    ).hexdigest()
+    learned_directives = generated["learned_directives"]
+    assert 1 <= len(learned_directives) <= 6
+    assert all(isinstance(item, str) and item for item in learned_directives)
+    assert len(generated["persona_lenses"]) == 13
+    assert set(generated["persona_lenses"]) == {
+        "reaction_qmark",
+        "hardmouth_antifan",
+        "instigator",
+        "fun_seeker",
+        "meme_archivist",
+        "abstract_radio",
+        "parrot_unit",
+        "jinx_machine",
+        "grudge_keeper",
+        "cheat_suspector",
+        "praise_then_bite",
+        "clip_alarm",
+        "room_historian",
+    }
+
 
 def test_room_6657_guidance_is_compact_aggregate_only() -> None:
     guidance = style_guidance_for(
@@ -35,9 +79,18 @@ def test_room_6657_guidance_is_compact_aggregate_only() -> None:
         "raw_examples_included": False,
     }
     assert guidance["length_characters"]["median"] == 39
-    assert "禁止引用来源原句" in guidance["persona_lens"]
+    assert guidance["generation_skill_hash"] == hashlib.sha256(
+        ROOM_6657_SKILL.read_bytes()
+    ).hexdigest()
+    assert "never quote" in guidance["persona_lens"]
+    assert guidance["directives"][0].startswith("Anchor the reaction")
+    generated = json.loads(ROOM_6657_GENERATED_SKILL.read_text(encoding="utf-8"))
+    learned_directives = generated["learned_directives"]
+    assert guidance["directives"][-len(learned_directives) :] == learned_directives
     serialized = json.dumps(guidance, ensure_ascii=False)
-    assert "barrage" not in serialized
+    assert "raw_examples" not in guidance
+    assert "record_id" not in serialized
+    assert "username" not in serialized
     assert len(serialized) < 3_000
 
 
@@ -75,7 +128,7 @@ async def test_viewer_provider_injects_room_6657_style_guidance() -> None:
     guidance = payload["mode_context"]["style_profile"]
     assert guidance["profile_id"].startswith("sb6657-aggregate-v1-")
     assert guidance["source"]["raw_examples_included"] is False
-    assert guidance["persona_lens"].startswith("借用梗的结构")
+    assert guidance["persona_lens"].startswith("Reuse a meme's structural logic")
 
 
 @pytest.mark.asyncio

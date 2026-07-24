@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/microsoft/SkillOpt.git",
+  "commit": "fdeebaf976f5d895978959c3e392e62b7dfc3c7e",
+  "upstream_version": "0.2.0+main",
+  "license": "MIT",
+  "local_path": ".advx-data/tools/SkillOpt",
+  "integration": "skillopt_sleep",
+  "verified_on": "2026-07-24"
+}

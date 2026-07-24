@@ -1,0 +1,4 @@
+interface:
+  display_name: "6657 Style Optimizer"
+  short_description: "Evolve and validate the room-6657 barrage style"
+  default_prompt: "Use $room-6657-style to improve and validate the 6657 barrage-generation strategy."

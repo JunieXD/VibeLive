@@ -9,32 +9,8 @@ from typing import Any
 
 ROOM_6657_MODE_ID = "room-6657"
 _PROFILE_RESOURCE = "room_6657_style_profile.json"
+_GENERATION_SKILL_RESOURCE = "room_6657_generation_skill.json"
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-
-_GENERAL_DIRECTIVES = (
-    "先回应当前画面、主播话语或房间上下文，再做抽象化；不要凭空背梗。",
-    "把一条弹幕写成一个完整的反应动作，少解释背景，少写总结口吻。",
-    "优先使用反差、反串、一本正经的荒诞结论、短反问或轻度拱火。",
-    "复读指节奏或句内结构呼应，不得逐字复刻语料，也不要复制其他 Viewer。",
-    "问号、感叹号、@、括号和 ASCII 片段按画像稀疏出现，不要每条堆满信号。",
-    "只调侃游戏操作和直播间公开事件；不升级为现实羞辱、仇恨或真实指控。",
-)
-
-_PERSONA_LENSES = {
-    "reaction_qmark": "允许显著短于画像中位数；只在真实反转或难以解释时用一个短反问。",
-    "hardmouth_antifan": "先嘴硬否认，再用一次转折泄露认可；不要解释反串。",
-    "instigator": "把当前分歧压成一句站队或反问，保持玩笑边界。",
-    "fun_seeker": "把刚发生的意外命名成节目效果或事故类型，必须贴当前画面。",
-    "meme_archivist": "借用梗的结构重新描述当前事件，禁止引用来源原句。",
-    "abstract_radio": "用意外比喻或正式口吻制造荒诞感，但保留可见事件锚点。",
-    "parrot_unit": "只保留房间共识的节奏并改写为个人短变体，最多跟一次。",
-    "jinx_machine": "用过度笃定的短预测制造反向预期，不诅咒现实伤害。",
-    "grudge_keeper": "只回扣当前会话刚出现的 flag 或同类失误，不伪造跨场记忆。",
-    "cheat_suspector": "用夸张鉴定口吻夸高光，明确是游戏内玩笑而非作弊指控。",
-    "praise_then_bite": "一句内先认可真实亮点，再用眼前反差补一刀。",
-    "clip_alarm": "像给当前片段起短标题，但不声称真的录制或发布。",
-    "room_historian": "把当前会话连续事件压成一句短纪要，不写长篇复盘。",
-}
 
 
 class StyleProfileError(RuntimeError):
@@ -50,6 +26,7 @@ def style_guidance_for(
         return None
 
     profile = _load_profile()
+    generation_skill = _load_generation_skill()
     source = _require_dict(profile, "source")
     lengths = _require_dict(profile, "length_characters")
     quantiles = _require_dict(lengths, "quantiles")
@@ -76,10 +53,25 @@ def style_guidance_for(
     profile_hash = _profile_hash(profile)
     corpus_hash = _require_string(source, "canonical_sha256")
     record_count = _require_int(source, "record_count")
+    directives = _require_string_list(generation_skill, "directives")
+    learned_directives = _require_optional_string_list(
+        generation_skill,
+        "learned_directives",
+    )
+    persona_lenses = _require_string_dict(generation_skill, "persona_lenses")
+    persona_lens = persona_lenses.get(persona_id)
+    if persona_lens is None:
+        raise StyleProfileError(
+            f"bundled 6657 generation skill has no lens for Persona {persona_id}"
+        )
 
     return {
         "profile_id": f"sb6657-aggregate-v1-{corpus_hash[:12]}",
         "profile_hash": profile_hash,
+        "generation_skill_hash": _require_string(
+            generation_skill,
+            "source_skill_sha256",
+        ),
         "source": {
             "kind": "aggregate_style_statistics",
             "record_count": record_count,
@@ -110,11 +102,8 @@ def style_guidance_for(
             "bracketed_aside": _require_number(popular_rhetoric, "bracketed_aside"),
             "imperative": _require_number(popular_rhetoric, "imperative_signal"),
         },
-        "directives": list(_GENERAL_DIRECTIVES),
-        "persona_lens": _PERSONA_LENSES.get(
-            persona_id,
-            "保持当前 Persona 的立场，但服从本模式的反差、短促和画面相关性。",
-        ),
+        "directives": [*directives, *learned_directives],
+        "persona_lens": persona_lens,
     }
 
 
@@ -142,6 +131,32 @@ def _load_profile() -> dict[str, Any]:
     _require_dict(profile, "rates")
     _require_dict(profile, "rhetorical_signals")
     return profile
+
+
+@cache
+def _load_generation_skill() -> dict[str, Any]:
+    try:
+        raw = (
+            files("advx_backend.providers.model")
+            .joinpath(_GENERATION_SKILL_RESOURCE)
+            .read_text(encoding="utf-8")
+        )
+        skill = json.loads(raw)
+    except (OSError, TypeError, json.JSONDecodeError) as error:
+        raise StyleProfileError(f"cannot load bundled 6657 generation skill: {error}") from error
+    if not isinstance(skill, dict) or skill.get("schema_version") != 1:
+        raise StyleProfileError("bundled 6657 generation skill has an unsupported schema")
+    if skill.get("mode_id") != ROOM_6657_MODE_ID:
+        raise StyleProfileError("bundled 6657 generation skill has the wrong mode")
+    source_hash = _require_string(skill, "source_skill_sha256")
+    if not _SHA256_PATTERN.fullmatch(source_hash):
+        raise StyleProfileError("bundled 6657 generation skill hash is invalid")
+    _require_string_list(skill, "directives")
+    _require_optional_string_list(skill, "learned_directives")
+    persona_lenses = _require_string_dict(skill, "persona_lenses")
+    if len(persona_lenses) != 13:
+        raise StyleProfileError("bundled 6657 generation skill must define 13 Persona lenses")
+    return skill
 
 
 def _profile_hash(profile: dict[str, Any]) -> str:
@@ -180,6 +195,49 @@ def _require_number(parent: dict[str, Any], field: str) -> int | float:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise StyleProfileError(f"6657 style profile field {field} must be numeric")
     return value
+
+
+def _require_string_list(parent: dict[str, Any], field: str) -> list[str]:
+    value = parent.get(field)
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+    ):
+        raise StyleProfileError(
+            f"6657 style profile field {field} must be a non-empty string array"
+        )
+    return list(value)
+
+
+def _require_string_dict(parent: dict[str, Any], field: str) -> dict[str, str]:
+    value = parent.get(field)
+    if (
+        not isinstance(value, dict)
+        or not value
+        or any(
+            not isinstance(key, str)
+            or not key
+            or not isinstance(item, str)
+            or not item.strip()
+            for key, item in value.items()
+        )
+    ):
+        raise StyleProfileError(
+            f"6657 style profile field {field} must be a non-empty string map"
+        )
+    return dict(value)
+
+
+def _require_optional_string_list(parent: dict[str, Any], field: str) -> list[str]:
+    value = parent.get(field, [])
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
+    ):
+        raise StyleProfileError(
+            f"6657 style profile field {field} must be a string array"
+        )
+    return list(value)
 
 
 __all__ = [

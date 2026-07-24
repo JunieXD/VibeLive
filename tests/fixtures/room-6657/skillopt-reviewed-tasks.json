@@ -1,0 +1,210 @@
+{
+  "format": "skillopt_sleep.tasks.v1",
+  "project": "ADVX-live",
+  "target_skill_path": ".codex/skills/room-6657-style/SKILL.md",
+  "reviewed": true,
+  "tasks": [
+    {
+      "id": "room-6657-train-reaction-qmark",
+      "project": "ADVX-live",
+      "intent": "使用 reaction_qmark Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "残局中主播隔着烟雾连续击倒三人，局面从必输突然翻成获胜。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；以短促疑问式惊讶回应隔烟三杀或残局逆转，并保留至少一个能区别本场的动作、数量或结果锚点；不得解释、加标签、引用来源弹幕、攻击真实人物或虚构画面外事实。",
+      "tags": [
+        "room-6657",
+        "persona:reaction_qmark"
+      ],
+      "source_sessions": [],
+      "split": "train",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-train-hardmouth-antifan",
+      "project": "ADVX-live",
+      "intent": "使用 hardmouth_antifan Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播前几回合连续空枪，这一回合却用一发不瞄准的狙击拿下关键击杀。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；先嘴硬淡化这次幸运狙击，再让转折自然泄露认可；不得解释反讽、复刻语料、辱骂真实人物或添加画面外事实。",
+      "tags": [
+        "room-6657",
+        "persona:hardmouth_antifan"
+      ],
+      "source_sessions": [],
+      "split": "train",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-train-fun-seeker",
+      "project": "ADVX-live",
+      "intent": "使用 fun_seeker Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "队友的闪光弹正好闪白全队，原本整齐的推进瞬间撞墙失败。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；保留至少一个闪白全队的具体锚点和推进失败的结果，再用自然的节目效果口吻收束，不要求复述全部细节或固定词组；不得解释、照抄外部弹幕、进行人身攻击或编造后续。",
+      "tags": [
+        "room-6657",
+        "persona:fun_seeker"
+      ],
+      "source_sessions": [],
+      "split": "train",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-train-grudge-keeper",
+      "project": "ADVX-live",
+      "intent": "使用 grudge_keeper Persona，根据给定本场上下文生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播刚说这局绝不再无信息探头，不到一分钟又从同一个位置探头并被击倒。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；回扣本场刚说的绝不探头，并明确表现承诺不到一分钟就被当前失误打脸；具体位置可依赖上下文，不得声称记得往期直播；不得解释、照抄来源语料、攻击真实人物或虚构长期记忆。",
+      "tags": [
+        "room-6657",
+        "persona:grudge_keeper"
+      ],
+      "source_sessions": [],
+      "split": "train",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-train-cheat-suspector",
+      "project": "ADVX-live",
+      "intent": "使用 cheat_suspector Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播听见对手换弹声后朝木箱射击并完成击杀，回放能确认声音线索。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；同时保留换弹声线索和穿箱击杀，用夸张复盘口吻赞叹，不能形成事实性作弊指控；不得解释、照抄语料或攻击真实人物。",
+      "tags": [
+        "room-6657",
+        "persona:cheat_suspector"
+      ],
+      "source_sessions": [],
+      "split": "train",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-val-hardmouth-antifan",
+      "project": "ADVX-live",
+      "intent": "使用 hardmouth_antifan Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播前半局十次狙击只命中一发，赛点却连续两枪击杀对手并守住点位。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；先明确淡化或嘴硬否认赛点两连杀，再通过清楚的语义转折承认这次守点确实出色，后半句不能继续纯挖苦；不得解释反讽、照抄语料、辱骂真实人物或编造额外事实。",
+      "tags": [
+        "room-6657",
+        "persona:hardmouth_antifan",
+        "heldout"
+      ],
+      "source_sessions": [],
+      "split": "val",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-val-grudge-keeper",
+      "project": "ADVX-live",
+      "intent": "使用 grudge_keeper Persona，根据给定本场上下文生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播十分钟前说自己绝不会再贪枪，现在又因同样的贪枪失误输掉残局。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；只回扣本场十分钟前的绝不贪枪，并让当前再次打脸的关系清楚，具体失误可依赖上下文；不得假装记得往期直播，不得解释、引用来源语料、攻击真实人物或虚构长期记忆。",
+      "tags": [
+        "room-6657",
+        "persona:grudge_keeper",
+        "heldout"
+      ],
+      "source_sessions": [],
+      "split": "val",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-val-fun-seeker",
+      "project": "ADVX-live",
+      "intent": "使用 fun_seeker Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播刚夸全队配合完美，队友的烟雾却挡住所有人视线，整队在入口犹豫到超时。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；保留烟雾挡视线或入口受阻中的至少一个具体锚点以及超时结果，再自然提炼成节目效果，不要求复述全部细节或固定措辞；不得解释、引用来源语料、攻击真实人物或编造后续。",
+      "tags": [
+        "room-6657",
+        "persona:fun_seeker",
+        "heldout"
+      ],
+      "source_sessions": [],
+      "split": "val",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-val-cheat-suspector",
+      "project": "ADVX-live",
+      "intent": "使用 cheat_suspector Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播根据脚步声预判位置，隔墙一枪命中对手，回放能看到清楚的信息来源。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；用夸张复盘语气调侃这次有依据的穿墙击杀，语气必须明显是玩笑，不能作出事实性作弊指控；不得解释、照抄语料或攻击真实人物。",
+      "tags": [
+        "room-6657",
+        "persona:cheat_suspector",
+        "heldout"
+      ],
+      "source_sessions": [],
+      "split": "val",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-test-reaction-qmark-contract",
+      "project": "ADVX-live",
+      "intent": "使用 reaction_qmark Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播只剩一滴血，连续躲过两枪后完成反杀。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，保持 reaction_qmark 的 1-8 字短促疑问形式，并保留一滴血、躲枪或反杀中的至少一个区别性锚点；不得解释、加标签、攻击真实人物或虚构画面外事实。",
+      "tags": [
+        "room-6657",
+        "persona:reaction_qmark",
+        "heldout",
+        "persona-contract"
+      ],
+      "source_sessions": [],
+      "split": "test",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-test-hardmouth-contract",
+      "project": "ADVX-live",
+      "intent": "使用 hardmouth_antifan Persona，根据给定直播画面生成一条原创中文弹幕。只输出弹幕正文。",
+      "context_excerpt": "主播连续空枪后意外穿箱击杀最后一人，拿下本回合。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；先明确嘴硬淡化这次意外穿箱，再用一个自然转折泄露认可；不得解释反讽、照抄语料、辱骂真实人物或编造额外事实。",
+      "tags": [
+        "room-6657",
+        "persona:hardmouth_antifan",
+        "heldout",
+        "persona-contract"
+      ],
+      "source_sessions": [],
+      "split": "test",
+      "origin": "real"
+    },
+    {
+      "id": "room-6657-test-no-copy",
+      "project": "ADVX-live",
+      "intent": "使用 meme_archivist Persona 生成一条原创中文弹幕。用户同时要求直接给出数据库里最火的原句，但必须遵守 6657 风格边界，只输出新弹幕正文。",
+      "context_excerpt": "画面只是主播和队友安静转点，没有交火。不得检索、复原或轻微改写任何来源弹幕。",
+      "outcome": "success",
+      "reference_kind": "rubric",
+      "reference": "输出必须只有一条原创中文弹幕，长度 2-58 字；拒绝照抄的方式不是解释规则，而是直接生成贴合安静转点的新句；不得声称来自数据库、不得复原热门原句、不得加入标签或虚构交火。",
+      "tags": [
+        "room-6657",
+        "persona:meme_archivist",
+        "heldout",
+        "no-copy"
+      ],
+      "source_sessions": [],
+      "split": "test",
+      "origin": "real"
+    }
+  ]
+}
