@@ -51,7 +51,7 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
       <div className="mixer-row">
         <span>
           <AudioLines size={14} />
-          本地 ASR
+          云端 ASR
         </span>
         <strong className={asrReady ? 'ok' : ''}>{asrStatus}</strong>
       </div>
