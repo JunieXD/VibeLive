@@ -263,7 +263,10 @@ export function AppShell({
         </header>
 
         <main
-          className="min-h-0 min-w-0 overflow-auto px-4.5 py-4"
+          className={[
+            'min-h-0 min-w-0 px-4.5 py-4',
+            activeView === 'live' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
+          ].join(' ')}
           data-control-workspace
         >
           {notice && (
@@ -293,7 +296,7 @@ export function AppShell({
               )}
             </section>
           )}
-          {children}
+          <div className={activeView === 'live' ? 'min-h-0 flex-1' : undefined}>{children}</div>
         </main>
 
         <footer className="flex h-7.5 items-center gap-4.5 border-t border-[var(--border)] bg-[var(--chrome)] px-4 text-[11px]">

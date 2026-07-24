@@ -1,8 +1,9 @@
 .live-view {
   display: flex;
+  height: 100%;
   flex-direction: column;
   gap: 12px;
-  min-height: 100%;
+  min-height: 0;
 }
 
 .error-banner {
@@ -21,7 +22,7 @@
   grid-template-columns: minmax(0, 1fr) 332px;
   gap: 12px;
   flex: 1;
-  min-height: 520px;
+  min-height: 0;
 }
 
 .stage-panel,
@@ -799,10 +800,6 @@
 }
 
 @media (max-height: 780px) {
-  .live-layout {
-    min-height: 460px;
-  }
-
   .stage-panel {
     grid-template-rows: auto auto minmax(280px, 1fr) auto auto;
   }
