@@ -3,6 +3,7 @@ import type { BackendConnectionState, ColorTheme } from '../../shared/contracts'
 import { AppShell, type AppShellStatusItem } from './app/AppShell'
 import { AudienceWorkspace } from './AudienceWorkspace'
 import { LiveView } from './features/live/LiveView'
+import { RoomInteractionView } from './features/live/RoomInteractionView'
 import { AiCallLog } from './features/ai-calls/AiCallLog'
 import { SettingsView } from './features/settings/SettingsView'
 import { ViewerManagementView } from './features/viewers/ViewerManagementView'
@@ -352,6 +353,24 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             onMute={liveAudience.mute}
             onUnmute={liveAudience.unmute}
             onKick={liveAudience.kick}
+          />
+        )}
+
+        {activeView === 'interaction' && (
+          <RoomInteractionView
+            session={session}
+            audienceSessionActive={media.audienceSessionActive}
+            audienceCount={
+              media.audienceSessionActive ? liveAudience.audience?.active_count ?? null : 0
+            }
+            activity={activityFeed.activity}
+            chatListRef={activityFeed.chatListRef}
+            message={activityFeed.message}
+            messageSending={barrage.messageSending}
+            targetSuggestions={barrage.targetSuggestions}
+            onMessageChange={barrage.changeMessage}
+            onSelectMessageTarget={barrage.selectMessageTarget}
+            onSendUserMessage={() => void barrage.sendUserMessage()}
           />
         )}
 

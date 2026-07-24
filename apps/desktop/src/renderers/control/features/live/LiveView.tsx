@@ -12,6 +12,7 @@ export type {
   LiveAudienceProps,
   LiveDeviceStripProps,
   LiveMixerProps,
+  RoomInteractionViewProps,
   LiveStageProps,
   LiveViewProps
 } from './liveTypes'

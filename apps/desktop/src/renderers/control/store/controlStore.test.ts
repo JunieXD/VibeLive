@@ -25,6 +25,9 @@ describe('control store', () => {
     state = useControlStore.getState()
     expect(selectActiveView(state)).toBe('viewers')
 
+    selectSetActiveView(state)('interaction')
+    expect(selectActiveView(useControlStore.getState())).toBe('interaction')
+
     selectSetActiveView(state)('ai-calls')
     expect(selectActiveView(useControlStore.getState())).toBe('ai-calls')
   })

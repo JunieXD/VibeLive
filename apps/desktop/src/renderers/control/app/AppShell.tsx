@@ -15,7 +15,7 @@ import type { JSX, ReactNode } from 'react'
 import type { ColorTheme } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
 
-export type AppShellView = 'live' | 'viewers' | 'audience' | 'ai-calls' | 'settings'
+export type AppShellView = 'live' | 'interaction' | 'viewers' | 'audience' | 'ai-calls' | 'settings'
 
 export type AppShellStatusTone = 'offline' | 'online' | 'warning' | 'failed'
 
@@ -57,6 +57,7 @@ export type AppShellProps = {
 
 const viewLabels: Record<AppShellView, string> = {
   live: '直播控制台',
+  interaction: '房间互动',
   viewers: '直播观众',
   audience: '观众配置',
   'ai-calls': 'AI 调用',
@@ -122,6 +123,7 @@ export function AppShell({
 }: AppShellProps): JSX.Element {
   const navigationItems = [
     { view: 'live' as const, label: viewLabels.live, icon: LayoutDashboard },
+    { view: 'interaction' as const, label: viewLabels.interaction, icon: MessageSquareText },
     { view: 'viewers' as const, label: viewLabels.viewers, icon: Users },
     { view: 'audience' as const, label: viewLabels.audience, icon: SlidersHorizontal },
     { view: 'ai-calls' as const, label: viewLabels['ai-calls'], icon: BrainCircuit },
@@ -132,7 +134,10 @@ export function AppShell({
   const ThemeSwitchIcon = colorTheme === 'dark' ? Sun : Moon
   const audienceCountLabel = audienceCount ?? '--'
   const fillsWorkspace =
-    activeView === 'live' || activeView === 'viewers' || activeView === 'ai-calls'
+    activeView === 'live' ||
+    activeView === 'interaction' ||
+    activeView === 'viewers' ||
+    activeView === 'ai-calls'
 
   return (
     <div className="grid h-screen w-screen grid-cols-[224px_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] pt-8 max-[1240px]:grid-cols-[200px_minmax(0,1fr)]">

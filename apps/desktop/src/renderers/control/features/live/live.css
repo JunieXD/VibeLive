@@ -767,6 +767,10 @@
   overflow: hidden;
 }
 
+.chat-panel-no-heading {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .panel-heading {
   display: flex;
   min-height: 46px;
@@ -853,6 +857,126 @@
   font-size: 12px;
   line-height: 1.5;
   overflow-wrap: break-word;
+}
+
+.room-interaction {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.room-interaction-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.room-interaction-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--accent);
+}
+
+.room-interaction-title h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.room-interaction-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.room-status {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.room-status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.room-status.live {
+  border-color: var(--live-border);
+  background: var(--live-soft);
+  color: var(--live);
+}
+
+.room-status.live i {
+  background: var(--live);
+  box-shadow: 0 0 0 3px var(--live-soft);
+}
+
+.room-interaction-feed {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.room-interaction-feed .chat-panel {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.room-interaction-feed .chat-list {
+  padding: 10px 0;
+}
+
+.room-interaction-feed .chat-item {
+  max-width: 780px;
+  padding: 10px 20px;
+}
+
+.room-interaction-composer {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-raise);
+  color: var(--text-faint);
+}
+
+.room-interaction-composer input {
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  padding: 0 10px;
+}
+
+.room-interaction-composer input:focus {
+  border-color: var(--accent);
 }
 
 .mixer-panel {
@@ -1009,5 +1133,14 @@
 
   .visual-toolbar {
     padding-right: 8px;
+  }
+
+  .room-interaction-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .room-interaction-statuses {
+    justify-content: flex-start;
   }
 }

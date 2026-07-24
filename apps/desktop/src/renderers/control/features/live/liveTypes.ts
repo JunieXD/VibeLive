@@ -71,6 +71,19 @@ export type LiveStageProps = {
 export type LiveChatProps = {
   activity: readonly LiveActivityItem[]
   chatListRef: RefObject<HTMLDivElement | null>
+  showHeading?: boolean
+}
+
+export type RoomInteractionViewProps = LiveChatProps & {
+  session: SessionState
+  audienceSessionActive: boolean
+  audienceCount: number | null
+  message: string
+  messageSending: boolean
+  targetSuggestions: readonly MessageTarget[]
+  onMessageChange: (message: string) => void
+  onSelectMessageTarget: (target: MessageTarget) => void
+  onSendUserMessage: () => void
 }
 
 export type LiveAudienceProps = {

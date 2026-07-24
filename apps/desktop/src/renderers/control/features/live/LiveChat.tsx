@@ -1,12 +1,24 @@
+import { useEffect } from 'react'
 import type { LiveChatProps } from './liveTypes'
 
-export function LiveChat({ activity, chatListRef }: LiveChatProps): React.JSX.Element {
+export function LiveChat({
+  activity,
+  chatListRef,
+  showHeading = true
+}: LiveChatProps): React.JSX.Element {
+  useEffect(() => {
+    const list = chatListRef.current
+    if (list) list.scrollTop = list.scrollHeight
+  }, [activity, chatListRef])
+
   return (
-    <section className="chat-panel">
-      <div className="panel-heading compact">
-        <span className="panel-title">房间互动</span>
-        <span className="chat-count">{activity.length}</span>
-      </div>
+    <section className={`chat-panel ${showHeading ? '' : 'chat-panel-no-heading'}`}>
+      {showHeading && (
+        <div className="panel-heading compact">
+          <span className="panel-title">房间互动</span>
+          <span className="chat-count">{activity.length}</span>
+        </div>
+      )}
       <div className="chat-list" ref={chatListRef}>
         {activity.map((item) => (
           <article className={`chat-item ${item.source}`} key={item.id}>
