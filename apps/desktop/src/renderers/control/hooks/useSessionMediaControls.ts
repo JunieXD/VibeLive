@@ -165,6 +165,17 @@ export function useSessionMediaControls({
       }
       if (!devices.operation.isCurrent(operationId)) return
 
+      if (devices.systemAudioEnabled && devices.systemAudioSupported) {
+        try {
+          await devices.startSystemAudio(operationId)
+        } catch (error) {
+          onSystemActivityRef.current(
+            `系统声音未能启用：${describeMediaError(error, 'display')} 麦克风和直播继续运行。`
+          )
+        }
+      }
+      if (!devices.operation.isCurrent(operationId)) return
+
       if (audienceAvailableRef.current) {
         startClientRequestIdRef.current ??= `desktop-${crypto.randomUUID()}`
         try {
@@ -241,6 +252,7 @@ export function useSessionMediaControls({
       if (devices.microphoneStreamRef.current === microphoneStream) {
         await devices.stopMicrophone()
       }
+      await devices.stopSystemAudio().catch(() => undefined)
       if (backendSessionStarted) {
         await window.advx.stopBackendSession().catch(() => undefined)
         startClientRequestIdRef.current = null
@@ -291,6 +303,13 @@ export function useSessionMediaControls({
     } catch (error) {
       onSystemActivityRef.current(
         `麦克风未能完全停止：${describeMediaError(error, 'microphone')}`
+      )
+    }
+    try {
+      await devices.stopSystemAudio()
+    } catch (error) {
+      onSystemActivityRef.current(
+        `系统声音未能完全停止：${describeMediaError(error, 'display')}`
       )
     }
     let stopError: string | null = null
@@ -368,6 +387,13 @@ export function useSessionMediaControls({
           `麦克风未能完全暂停：${describeMediaError(error, 'microphone')}`
         )
       }
+      try {
+        await devices.stopSystemAudio()
+      } catch (error) {
+        onSystemActivityRef.current(
+          `系统声音未能完全暂停：${describeMediaError(error, 'display')}`
+        )
+      }
       if (backendSessionActiveRef.current) {
         try {
           const backendSession = await window.advx.pauseBackendSession()
@@ -422,6 +448,16 @@ export function useSessionMediaControls({
             microphoneStream = null
             onSystemActivityRef.current(
               `麦克风未能恢复：${describeMediaError(error, 'microphone')} 继续进行仅画面直播。`
+            )
+          }
+          if (!devices.operation.isCurrent(operationId)) return
+        }
+        if (devices.systemAudioEnabled && devices.systemAudioSupported) {
+          try {
+            await devices.startSystemAudio(operationId)
+          } catch (error) {
+            onSystemActivityRef.current(
+              `系统声音未能恢复：${describeMediaError(error, 'display')} 麦克风和直播继续运行。`
             )
           }
           if (!devices.operation.isCurrent(operationId)) return

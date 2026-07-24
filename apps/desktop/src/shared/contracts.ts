@@ -204,10 +204,26 @@ export type BackendViewerEvent = {
   viewer: BackendViewerSnapshot
 }
 
+export type AudioSource = components["schemas"]["AudioSource"]
+
+export type BackendTranscriptEvent = {
+  source: AudioSource
+  text: string
+  final: boolean
+  startedAtMs: number
+  endedAtMs: number
+  utteranceId: string | null
+  revision: number
+}
+
 export type RealtimeMediaInput = {
   inputId: string
   capturedAtMs: number
   body: Uint8Array
+}
+
+export type RealtimeAudioInput = RealtimeMediaInput & {
+  source: AudioSource
 }
 
 export type RealtimeFrameInput = RealtimeMediaInput & {
@@ -233,6 +249,7 @@ export type MediaAccessSnapshot = {
   microphone: MediaAccessStatus
   camera: MediaAccessStatus
   screen: MediaAccessStatus
+  systemAudioSupported: boolean
 }
 
 export type OverlayTarget = {
@@ -332,8 +349,8 @@ export type ControlApi = {
   ) => Promise<DebugTraceQueryResult>
   queryAiCalls: (query: AiCallQuery) => Promise<AiCallQueryResponse>
   submitUserText: (text: string, target?: TextSubmitTarget) => Promise<void>
-  submitAudioSegment: (input: RealtimeMediaInput) => Promise<void>
-  notifyVoiceActivity: (occurredAtMs: number) => void
+  submitAudioSegment: (input: RealtimeAudioInput) => Promise<void>
+  notifyVoiceActivity: (source: AudioSource, occurredAtMs: number) => void
   submitVisualFrame: (input: RealtimeFrameInput) => Promise<void>
   listRoomMemories: (roomId: string) => Promise<RoomLongTermMemory[]>
   getRoomMemoryHead: (roomId: string) => Promise<RoomMemoryHead>
@@ -393,6 +410,7 @@ export type ControlApi = {
   onBackendStatus: (listener: (status: BackendRuntimeStatus) => void) => () => void
   onBackendBarrage: (listener: (event: BackendBarrageEvent) => void) => () => void
   onBackendViewerEvent: (listener: (event: BackendViewerEvent) => void) => () => void
+  onBackendTranscript: (listener: (event: BackendTranscriptEvent) => void) => () => void
 }
 
 export type OverlayApi = {

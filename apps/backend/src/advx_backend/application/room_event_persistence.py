@@ -6,6 +6,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from advx_backend.application.ports.asr import AudioSource
 from advx_backend.application.runtime_state import RuntimeStateStore
 from advx_backend.domain.room import JsonValue, RoomEvent, RoomEventSource
 from advx_backend.infrastructure.persistence.sqlite.runtime_repositories import (
@@ -40,6 +41,10 @@ class _UserTextPayload(_PayloadModel):
 
 
 class _UserVoicePayload(_PayloadModel):
+    audio_source: Literal[
+        AudioSource.MICROPHONE,
+        AudioSource.SYSTEM_AUDIO,
+    ] | None = None
     final: bool | None = None
     started_at_ms: int | None = Field(default=None, ge=0)
     ended_at_ms: int | None = Field(default=None, ge=0)

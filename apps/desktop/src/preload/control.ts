@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer as electronIpcRenderer } from "electron";
 import type {
   BackendBarrageEvent,
   BackendRuntimeStatus,
+  BackendTranscriptEvent,
   BackendViewerEvent,
   ControlApi,
   ModelConfig,
@@ -151,7 +152,8 @@ const api: ControlApi = {
   queryAiCalls: (query) => ipcRenderer.invoke("backend:ai-calls", query),
   submitUserText: (text, target) => ipcRenderer.invoke("backend:submit-text", text, target),
   submitAudioSegment: (input) => ipcRenderer.invoke("backend:submit-audio", input),
-  notifyVoiceActivity: (occurredAtMs) => ipcRenderer.send("backend:voice-activity", occurredAtMs),
+  notifyVoiceActivity: (source, occurredAtMs) =>
+    ipcRenderer.send("backend:voice-activity", source, occurredAtMs),
   submitVisualFrame: (input) => ipcRenderer.invoke("backend:submit-frame", input),
   listRoomMemories: (roomId) => ipcRenderer.invoke("shared-brain:memory-list", roomId),
   getRoomMemoryHead: (roomId) => ipcRenderer.invoke("shared-brain:memory-head", roomId),
@@ -233,6 +235,14 @@ const api: ControlApi = {
       listener(event);
     ipcRenderer.on("backend:viewer-event", handler);
     return () => ipcRenderer.removeListener("backend:viewer-event", handler);
+  },
+  onBackendTranscript: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      event: BackendTranscriptEvent
+    ): void => listener(event);
+    ipcRenderer.on("backend:transcript", handler);
+    return () => ipcRenderer.removeListener("backend:transcript", handler);
   }
 };
 

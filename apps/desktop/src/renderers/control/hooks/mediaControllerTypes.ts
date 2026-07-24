@@ -49,6 +49,13 @@ export type MediaDevicesController = {
   microphoneLevel: number
   microphoneReady: boolean
   microphonePermission: MediaAccessStatus
+  microphoneTransportError: string | null
+  systemAudioEnabled: boolean
+  systemAudioSupported: boolean
+  systemAudioLevel: number
+  systemAudioReady: boolean
+  systemAudioError: string | null
+  systemAudioTransportError: string | null
   screenPermission: MediaAccessStatus
   videoRef: MutableRefObject<HTMLVideoElement | null>
   cameraVideoRef: MutableRefObject<HTMLVideoElement | null>
@@ -68,9 +75,12 @@ export type MediaDevicesController = {
   startCapture: (operationId: number, sourceId: string) => Promise<MediaStream>
   startCamera: (operationId: number, deviceId?: string) => Promise<MediaStream>
   startMicrophone: (operationId: number, deviceId?: string) => Promise<MediaStream>
+  startSystemAudio: (operationId: number) => Promise<void>
   stopCapture: () => void
   stopCamera: () => void
   stopMicrophone: () => Promise<void>
+  stopSystemAudio: () => Promise<void>
+  toggleSystemAudio: () => Promise<void>
 }
 
 export type MediaController = {
@@ -89,6 +99,13 @@ export type MediaController = {
   microphoneLevel: number
   microphoneReady: boolean
   microphonePermission: MediaAccessStatus
+  microphoneTransportError: string | null
+  systemAudioEnabled: boolean
+  systemAudioSupported: boolean
+  systemAudioLevel: number
+  systemAudioReady: boolean
+  systemAudioError: string | null
+  systemAudioTransportError: string | null
   screenPermission: MediaAccessStatus
   mediaTransitioning: boolean
   overlayVisible: boolean
@@ -100,6 +117,7 @@ export type MediaController = {
   captureStatus: string
   cameraStatus: string
   microphoneStatus: string
+  systemAudioStatus: string
   pipPreviewStyle: { left: string; top: string; width: string; height: string }
   videoRef: MutableRefObject<HTMLVideoElement | null>
   cameraVideoRef: MutableRefObject<HTMLVideoElement | null>
@@ -115,6 +133,7 @@ export type MediaController = {
   changeCamera: (deviceId: string) => Promise<void>
   changeVisualMode: (mode: VisualMode) => Promise<void>
   changeMicrophone: (deviceId: string) => Promise<void>
+  toggleSystemAudio: () => Promise<void>
   startSession: () => Promise<void>
   stopSession: () => Promise<void>
   toggleGoLive: () => void

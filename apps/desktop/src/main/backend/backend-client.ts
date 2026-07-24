@@ -6,11 +6,13 @@ import type {
   SessionSnapshot
 } from "@advx/contracts";
 import type {
+  AudioSource,
   BackendBarrageEvent,
   BackendAudienceSnapshot,
   BackendConnectionState,
   BackendRuntimeStatus,
   BackendSessionSnapshot,
+  BackendTranscriptEvent,
   BackendViewerEvent,
   BackendViewerSnapshot,
   ModelConfig,
@@ -64,6 +66,7 @@ type PendingIngest = {
 type StatusListener = (status: BackendRuntimeStatus) => void;
 type BarrageListener = (event: BackendBarrageEvent) => void;
 type ViewerListener = (event: BackendViewerEvent) => void;
+type TranscriptListener = (event: BackendTranscriptEvent) => void;
 
 export class BackendClientError extends Error {
   readonly code: string;
@@ -94,7 +97,11 @@ export class BackendClient {
   private readonly statusListeners = new Set<StatusListener>();
   private readonly barrageListeners = new Set<BarrageListener>();
   private readonly viewerListeners = new Set<ViewerListener>();
-  private audioQueue: Promise<void> = Promise.resolve();
+  private readonly transcriptListeners = new Set<TranscriptListener>();
+  private readonly audioQueues: Record<AudioSource, Promise<void>> = {
+    microphone: Promise.resolve(),
+    system_audio: Promise.resolve()
+  };
 
   constructor(options: { baseUrl?: string; localToken: string }) {
     this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:8765").replace(/\/$/, "");
@@ -116,6 +123,11 @@ export class BackendClient {
   onViewerEvent(listener: ViewerListener): () => void {
     this.viewerListeners.add(listener);
     return () => this.viewerListeners.delete(listener);
+  }
+
+  onTranscript(listener: TranscriptListener): () => void {
+    this.transcriptListeners.add(listener);
+    return () => this.transcriptListeners.delete(listener);
   }
 
   async start(): Promise<void> {
@@ -650,6 +662,7 @@ export class BackendClient {
     inputId: string;
     capturedAtMs: number;
     body: Uint8Array;
+    source: AudioSource;
   }): Promise<void> {
     const send = async (): Promise<void> => {
       const sessionId = this.requireRunningSession();
@@ -657,6 +670,7 @@ export class BackendClient {
       this.sendBinary(
         encodeBinaryEnvelope({
           mediaType: "audio",
+          source: input.source,
           sessionId,
           inputId: input.inputId,
           capturedAtMs: input.capturedAtMs,
@@ -672,21 +686,24 @@ export class BackendClient {
         protocol_version: PROTOCOL_VERSION,
         session_id: sessionId,
         input_id: input.inputId,
+        source: input.source,
         committed_at_ms: Date.now()
       });
       await committed;
     };
-    const queued = this.audioQueue.then(send, send);
-    this.audioQueue = queued.catch(() => undefined);
+    const queue = this.audioQueues[input.source];
+    const queued = queue.then(send, send);
+    this.audioQueues[input.source] = queued.catch(() => undefined);
     return queued;
   }
 
-  notifyVoiceActivity(occurredAtMs: number): void {
+  notifyVoiceActivity(source: AudioSource, occurredAtMs: number): void {
     const sessionId = this.requireRunningSession();
     this.sendJson({
       type: "client.voice.activity",
       protocol_version: PROTOCOL_VERSION,
       session_id: sessionId,
+      source,
       occurred_at_ms: occurredAtMs
     });
   }
@@ -887,6 +904,19 @@ export class BackendClient {
           listener(message as BackendViewerEvent);
         }
         break;
+      case "asr.transcript": {
+        const event: BackendTranscriptEvent = {
+          source: message.source,
+          text: message.text,
+          final: message.final,
+          startedAtMs: message.started_at_ms,
+          endedAtMs: message.ended_at_ms,
+          utteranceId: message.utterance_id ?? null,
+          revision: message.revision
+        };
+        for (const listener of this.transcriptListeners) listener(event);
+        break;
+      }
       case "ingest.ack":
         this.resolveIngest(message);
         break;
@@ -1141,6 +1171,36 @@ function validateRealtimeServerMessage(value: unknown): RealtimeServerMessage {
       requireAllowedKeys(message, ["protocol_version", "type", "barrage"], message.type);
       validateBarrage(message.barrage);
       break;
+    case "asr.transcript":
+      requireAllowedKeys(
+        message,
+        [
+          "protocol_version",
+          "type",
+          "source",
+          "text",
+          "final",
+          "started_at_ms",
+          "ended_at_ms",
+          "utterance_id",
+          "revision"
+        ],
+        message.type
+      );
+      requireEnumValue(message.source, "source", AUDIO_SOURCES);
+      requireString(message.text, "text");
+      if (Array.from(message.text as string).length > 4_000) {
+        throw new Error("text 长度不能超过 4000。");
+      }
+      requireBoolean(message.final, "final");
+      requireIntegerAtLeast(message.started_at_ms, "started_at_ms", 0);
+      requireIntegerAtLeast(message.ended_at_ms, "ended_at_ms", 0);
+      if ((message.ended_at_ms as number) < (message.started_at_ms as number)) {
+        throw new Error("ended_at_ms 不能早于 started_at_ms。");
+      }
+      requireOptionalBoundedString(message.utterance_id, "utterance_id", 128);
+      requireIntegerAtLeast(message.revision, "revision", 1);
+      break;
     case "viewer.joined":
     case "viewer.left":
     case "viewer.rejoined":
@@ -1294,6 +1354,12 @@ function requireString(value: unknown, field: string): void {
   }
 }
 
+function requireBoolean(value: unknown, field: string): void {
+  if (typeof value !== "boolean") {
+    throw new Error(`${field} 缺失或无效。`);
+  }
+}
+
 function requireNonEmptyString(value: unknown, field: string): void {
   requireString(value, field);
   if (!(value as string)) {
@@ -1366,6 +1432,7 @@ const SESSION_STATES = new Set([
   "error"
 ]);
 const INGEST_INPUT_KINDS = new Set(["text", "audio", "frame"]);
+const AUDIO_SOURCES = new Set(["microphone", "system_audio"]);
 const INGEST_ACK_STAGES = new Set(["received", "committed"]);
 const INGEST_REJECTION_CODES = new Set([
   "invalid_input",

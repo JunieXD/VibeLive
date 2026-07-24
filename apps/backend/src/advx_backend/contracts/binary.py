@@ -9,8 +9,10 @@ from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from advx_backend.application.ports.asr import AudioSource
+
 BINARY_ENVELOPE_MAGIC: Final = b"ADVX"
-BINARY_ENVELOPE_VERSION: Final = 1
+BINARY_ENVELOPE_VERSION: Final = 2
 MAX_SESSION_ID_BYTES: Final = 128
 MAX_INPUT_ID_BYTES: Final = 128
 MAX_FORMAT_BYTES: Final = 128
@@ -18,8 +20,9 @@ MAX_AUDIO_BODY_BYTES: Final = 1_048_576
 MAX_IMAGE_BODY_BYTES: Final = 4_194_304
 MAX_CAPTURED_AT_MS: Final = (1 << 64) - 1
 
-_FIXED_HEADER = Struct(">4sBBHHQHI")
-BINARY_FIXED_HEADER_BYTES: Final = _FIXED_HEADER.size
+_V1_FIXED_HEADER = Struct(">4sBBHHQHI")
+_V2_FIXED_HEADER = Struct(">4sBBBHHQHI")
+BINARY_FIXED_HEADER_BYTES: Final = _V2_FIXED_HEADER.size
 MAX_BINARY_ENVELOPE_BYTES: Final = (
     BINARY_FIXED_HEADER_BYTES
     + MAX_SESSION_ID_BYTES
@@ -63,8 +66,9 @@ class BinaryEnvelopeHeader(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[1] = BINARY_ENVELOPE_VERSION
+    version: Literal[1, 2] = BINARY_ENVELOPE_VERSION
     media_type: BinaryMediaType
+    source: AudioSource | None = None
     session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_BYTES)
     input_id: str = Field(min_length=1, max_length=MAX_INPUT_ID_BYTES)
     captured_at_ms: int = Field(ge=0, le=MAX_CAPTURED_AT_MS)
@@ -73,6 +77,16 @@ class BinaryEnvelopeHeader(BaseModel):
 
     @model_validator(mode="after")
     def validate_body_length(self) -> BinaryEnvelopeHeader:
+        if self.media_type is BinaryMediaType.AUDIO and self.source is None:
+            object.__setattr__(self, "source", AudioSource.MICROPHONE)
+        if (
+            self.version == 1
+            and self.media_type is BinaryMediaType.AUDIO
+            and self.source is not AudioSource.MICROPHONE
+        ):
+            raise ValueError("binary envelope v1 only supports microphone audio")
+        if self.media_type is BinaryMediaType.IMAGE and self.source is not None:
+            raise ValueError("image envelopes cannot have an audio source")
         limit = max_body_bytes(self.media_type)
         if self.body_length > limit:
             raise ValueError(
@@ -100,6 +114,12 @@ _MEDIA_TYPE_TO_CODE: Final = {
     BinaryMediaType.IMAGE: 2,
 }
 _CODE_TO_MEDIA_TYPE: Final = {code: media_type for media_type, code in _MEDIA_TYPE_TO_CODE.items()}
+_SOURCE_TO_CODE: Final = {
+    None: 0,
+    AudioSource.MICROPHONE: 1,
+    AudioSource.SYSTEM_AUDIO: 2,
+}
+_CODE_TO_SOURCE: Final = {code: source for source, code in _SOURCE_TO_CODE.items()}
 
 
 def encode_binary_envelope(envelope: BinaryInputEnvelope) -> bytes:
@@ -127,18 +147,33 @@ def encode_binary_envelope(envelope: BinaryInputEnvelope) -> bytes:
             f"binary {header.media_type.value} body exceeds the limit of {limit} bytes"
         )
 
-    return b"".join(
-        (
-            _FIXED_HEADER.pack(
+    fixed_header = (
+        _V1_FIXED_HEADER.pack(
+            BINARY_ENVELOPE_MAGIC,
+            header.version,
+            _MEDIA_TYPE_TO_CODE[header.media_type],
+            len(session_id),
+            len(input_id),
+            header.captured_at_ms,
+            len(format_value),
+            header.body_length,
+        )
+        if header.version == 1
+        else _V2_FIXED_HEADER.pack(
                 BINARY_ENVELOPE_MAGIC,
                 header.version,
                 _MEDIA_TYPE_TO_CODE[header.media_type],
+                _SOURCE_TO_CODE[header.source],
                 len(session_id),
                 len(input_id),
                 header.captured_at_ms,
                 len(format_value),
                 header.body_length,
-            ),
+            )
+    )
+    return b"".join(
+        (
+            fixed_header,
             session_id,
             input_id,
             format_value,
@@ -152,31 +187,60 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
 
     if not isinstance(payload, bytes):
         raise BinaryEnvelopeError("binary envelope payload must be bytes")
-    if len(payload) < BINARY_FIXED_HEADER_BYTES:
+    if len(payload) < _V1_FIXED_HEADER.size:
         raise BinaryEnvelopeError("binary envelope is shorter than its fixed header")
     if len(payload) > MAX_BINARY_ENVELOPE_BYTES:
         raise BinaryPayloadTooLargeError("binary envelope exceeds the maximum allowed size")
 
-    (
-        magic,
-        version,
-        media_type_code,
-        session_id_length,
-        input_id_length,
-        captured_at_ms,
-        format_length,
-        body_length,
-    ) = _FIXED_HEADER.unpack_from(payload)
+    magic = payload[:4]
+    version = payload[4]
     if magic != BINARY_ENVELOPE_MAGIC:
         raise BinaryEnvelopeError("binary envelope has an invalid magic value")
-    if version != BINARY_ENVELOPE_VERSION:
+    if version not in {1, BINARY_ENVELOPE_VERSION}:
         raise UnsupportedBinaryVersionError("binary envelope version is not supported")
+    fixed_header_bytes = (
+        _V1_FIXED_HEADER.size if version == 1 else _V2_FIXED_HEADER.size
+    )
+    if len(payload) < fixed_header_bytes:
+        raise BinaryEnvelopeError("binary envelope is shorter than its fixed header")
+    if version == 1:
+        (
+            _,
+            _,
+            media_type_code,
+            session_id_length,
+            input_id_length,
+            captured_at_ms,
+            format_length,
+            body_length,
+        ) = _V1_FIXED_HEADER.unpack_from(payload)
+        source_code = 1 if media_type_code == _MEDIA_TYPE_TO_CODE[BinaryMediaType.AUDIO] else 0
+    else:
+        (
+            _,
+            _,
+            media_type_code,
+            source_code,
+            session_id_length,
+            input_id_length,
+            captured_at_ms,
+            format_length,
+            body_length,
+        ) = _V2_FIXED_HEADER.unpack_from(payload)
     try:
         media_type = _CODE_TO_MEDIA_TYPE[media_type_code]
     except KeyError as error:
         raise UnsupportedBinaryMediaTypeError(
             "binary envelope has an unsupported media type"
         ) from error
+    try:
+        source = _CODE_TO_SOURCE[source_code]
+    except KeyError as error:
+        raise BinaryEnvelopeError("binary envelope has an unsupported audio source") from error
+    if media_type is BinaryMediaType.AUDIO and source is None:
+        raise BinaryEnvelopeError("binary audio envelope requires a source")
+    if media_type is BinaryMediaType.IMAGE and source is not None:
+        raise BinaryEnvelopeError("binary image envelope cannot have an audio source")
 
     _validate_wire_length(session_id_length, "session_id", MAX_SESSION_ID_BYTES)
     _validate_wire_length(input_id_length, "input_id", MAX_INPUT_ID_BYTES)
@@ -190,7 +254,7 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
         )
 
     expected_length = (
-        BINARY_FIXED_HEADER_BYTES
+        fixed_header_bytes
         + session_id_length
         + input_id_length
         + format_length
@@ -199,7 +263,7 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
     if len(payload) != expected_length:
         raise BinaryEnvelopeError("binary envelope length does not match its header")
 
-    cursor = BINARY_FIXED_HEADER_BYTES
+    cursor = fixed_header_bytes
     session_id = _decode_wire_text(payload[cursor : cursor + session_id_length], "session_id")
     cursor += session_id_length
     input_id = _decode_wire_text(payload[cursor : cursor + input_id_length], "input_id")
@@ -212,6 +276,7 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
         header = BinaryEnvelopeHeader(
             version=version,
             media_type=media_type,
+            source=source,
             session_id=session_id,
             input_id=input_id,
             captured_at_ms=captured_at_ms,

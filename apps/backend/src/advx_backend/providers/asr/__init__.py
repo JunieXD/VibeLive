@@ -1,4 +1,10 @@
-from advx_backend.providers.asr.base import AsrProvider, AudioChunk, TranscriptSegment
+from advx_backend.providers.asr.base import (
+    AsrProvider,
+    AudioChunk,
+    AudioSource,
+    TranscriptSegment,
+)
+from advx_backend.providers.asr.mux import AsrProviderMux
 from advx_backend.providers.asr.stepfun import (
     StepFunAsrConfig,
     StepFunAsrError,
@@ -7,7 +13,9 @@ from advx_backend.providers.asr.stepfun import (
 
 __all__ = [
     "AsrProvider",
+    "AsrProviderMux",
     "AudioChunk",
+    "AudioSource",
     "StepFunAsrConfig",
     "StepFunAsrError",
     "StepFunAsrProvider",

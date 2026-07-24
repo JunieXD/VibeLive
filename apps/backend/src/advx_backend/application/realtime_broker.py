@@ -2,6 +2,7 @@ import asyncio
 from typing import TypeVar
 
 from advx_backend.contracts.audience import ViewerPresenceEvent
+from advx_backend.contracts.realtime import AsrTranscriptEvent
 from advx_backend.domain.barrage import BarrageEvent
 from advx_backend.domain.session import SessionStatus
 
@@ -18,6 +19,7 @@ class RealtimeBroker:
         self._subscribers: set[asyncio.Queue[SessionStatus]] = set()
         self._barrage_subscribers: set[asyncio.Queue[BarrageEvent]] = set()
         self._viewer_subscribers: set[asyncio.Queue[ViewerPresenceEvent]] = set()
+        self._transcript_subscribers: set[asyncio.Queue[AsrTranscriptEvent]] = set()
         self._lock = asyncio.Lock()
 
     async def subscribe(self) -> asyncio.Queue[SessionStatus]:
@@ -74,6 +76,51 @@ class RealtimeBroker:
             subscribers = tuple(self._viewer_subscribers)
         for queue in subscribers:
             self._put_latest(queue, event)
+
+    async def subscribe_transcripts(self) -> asyncio.Queue[AsrTranscriptEvent]:
+        queue: asyncio.Queue[AsrTranscriptEvent] = asyncio.Queue(
+            maxsize=self._subscriber_capacity
+        )
+        async with self._lock:
+            self._transcript_subscribers.add(queue)
+        return queue
+
+    async def unsubscribe_transcripts(
+        self,
+        queue: asyncio.Queue[AsrTranscriptEvent],
+    ) -> None:
+        async with self._lock:
+            self._transcript_subscribers.discard(queue)
+
+    async def publish_transcript(self, event: AsrTranscriptEvent) -> None:
+        async with self._lock:
+            subscribers = tuple(self._transcript_subscribers)
+        for queue in subscribers:
+            self._put_transcript(queue, event)
+
+    @staticmethod
+    def _put_transcript(
+        queue: asyncio.Queue[AsrTranscriptEvent],
+        event: AsrTranscriptEvent,
+    ) -> None:
+        if not queue.full():
+            queue.put_nowait(event)
+            return
+
+        queued = [queue.get_nowait() for _ in range(queue.qsize())]
+        partial_index = next(
+            (index for index, queued_event in enumerate(queued) if not queued_event.final),
+            None,
+        )
+        if not event.final and partial_index is None:
+            for queued_event in queued:
+                queue.put_nowait(queued_event)
+            return
+        evicted_index = partial_index if partial_index is not None else 0
+        for index, queued_event in enumerate(queued):
+            if index != evicted_index:
+                queue.put_nowait(queued_event)
+        queue.put_nowait(event)
 
     @staticmethod
     def _put_latest(queue: asyncio.Queue[T], item: T) -> None:

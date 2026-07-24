@@ -19,6 +19,7 @@ import {
   type Persona
 } from "../../shared/audience";
 import type {
+  AudioSource,
   BackendRuntimeStatus,
   BarrageEvent,
   ColorTheme,
@@ -609,8 +610,13 @@ function getMediaAccessStatus(): MediaAccessSnapshot {
   return {
     microphone: systemPreferences.getMediaAccessStatus("microphone"),
     camera: systemPreferences.getMediaAccessStatus("camera"),
-    screen: systemPreferences.getMediaAccessStatus("screen")
+    screen: systemPreferences.getMediaAccessStatus("screen"),
+    systemAudioSupported: process.platform === "win32"
   };
+}
+
+function isAudioSource(value: unknown): value is AudioSource {
+  return value === "microphone" || value === "system_audio";
 }
 
 async function requestMicrophonePermission(): Promise<MediaAccessStatus> {
@@ -627,7 +633,10 @@ async function requestCameraPermission(): Promise<MediaAccessStatus> {
   return systemPreferences.getMediaAccessStatus("camera");
 }
 
-export function configureMediaAccess(getControlWindow: () => BrowserWindow | null): void {
+export function configureMediaAccess(
+  getControlWindow: () => BrowserWindow | null,
+  platform: NodeJS.Platform = process.platform
+): void {
   const isControlWebContents = (webContents: Electron.WebContents | null): boolean =>
     webContents !== null && webContents.id === getControlWindow()?.webContents.id;
 
@@ -675,11 +684,11 @@ export function configureMediaAccess(getControlWindow: () => BrowserWindow | nul
 
   session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     try {
-      const controlFrame = getControlWindow()?.webContents.mainFrame;
+      const controlWindow = getControlWindow();
+      const controlFrame = controlWindow?.webContents.mainFrame;
       if (
-        !hasDisplayCaptureAuthorization(getControlWindow()?.webContents.id ?? -1) ||
+        !hasDisplayCaptureAuthorization(controlWindow?.webContents.id ?? -1) ||
         !request.videoRequested ||
-        request.audioRequested ||
         request.frame?.frameTreeNodeId !== controlFrame?.frameTreeNodeId
       ) {
         displayCaptureAuthorization = null;
@@ -690,8 +699,18 @@ export function configureMediaAccess(getControlWindow: () => BrowserWindow | nul
       displayCaptureAuthorization = null;
       const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
       const source = sources.find((candidate) => candidate.id === selectedSourceId);
-      callback(source ? { video: source } : {});
+      if (!source) {
+        callback({});
+        return;
+      }
+      callback({
+        video: source,
+        ...(request.audioRequested && platform === "win32"
+          ? { audio: "loopback" as const }
+          : {})
+      });
     } catch {
+      displayCaptureAuthorization = null;
       callback({});
     }
   });
@@ -768,6 +787,12 @@ export function registerDesktopIpc(
     const controlWindow = getControlWindow();
     if (controlWindow && !controlWindow.isDestroyed()) {
       controlWindow.webContents.send("backend:viewer-event", event);
+    }
+  });
+  backendClient.onTranscript((event) => {
+    const controlWindow = getControlWindow();
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("backend:transcript", event);
     }
   });
 
@@ -963,17 +988,28 @@ export function registerDesktopIpc(
     "backend:submit-audio",
     (
       event,
-      input: { inputId: string; capturedAtMs: number; body: Uint8Array }
+      input: {
+        inputId: string;
+        capturedAtMs: number;
+        body: Uint8Array;
+        source: AudioSource;
+      }
     ) => {
       assertControlSender(event);
+      if (!isAudioSource(input.source)) throw new Error("音频来源无效。");
       return backendClient.submitAudioSegment(input);
     }
   );
-  ipcMain.on("backend:voice-activity", (event, occurredAtMs: number) => {
-    assertControlSender(event);
-    if (!Number.isInteger(occurredAtMs) || occurredAtMs < 0) return;
-    backendClient.notifyVoiceActivity(occurredAtMs);
-  });
+  ipcMain.on(
+    "backend:voice-activity",
+    (event, source: AudioSource, occurredAtMs: number) => {
+      assertControlSender(event);
+      if (!Number.isInteger(occurredAtMs) || occurredAtMs < 0 || !isAudioSource(source)) {
+        return;
+      }
+      backendClient.notifyVoiceActivity(source, occurredAtMs);
+    }
+  );
   ipcMain.handle(
     "backend:submit-frame",
     (

@@ -44,6 +44,7 @@ from advx_backend.contracts.binary import (
 )
 from advx_backend.contracts.protocol import PROTOCOL_VERSION
 from advx_backend.contracts.realtime import (
+    AsrTranscriptEvent,
     BackendPong,
     BackendReady,
     BarrageEventMessage,
@@ -102,9 +103,11 @@ def create_realtime_router(
         subscription = None
         barrage_subscription = None
         viewer_subscription = None
+        transcript_subscription = None
         status_sender: asyncio.Task[None] | None = None
         barrage_sender: asyncio.Task[None] | None = None
         viewer_sender: asyncio.Task[None] | None = None
+        transcript_sender: asyncio.Task[None] | None = None
         send_lock = asyncio.Lock()
         try:
             hello = await _receive_hello(websocket, local_token=local_token)
@@ -114,6 +117,7 @@ def create_realtime_router(
             subscription = await broker.subscribe()
             barrage_subscription = await broker.subscribe_barrages()
             viewer_subscription = await broker.subscribe_viewers()
+            transcript_subscription = await broker.subscribe_transcripts()
             current = await session_service.status()
             await _send_message(
                 websocket,
@@ -144,6 +148,14 @@ def create_realtime_router(
                     send_lock=send_lock,
                 ),
                 name="realtime-viewer-sender",
+            )
+            transcript_sender = asyncio.create_task(
+                _forward_transcripts(
+                    websocket,
+                    subscription=transcript_subscription,
+                    send_lock=send_lock,
+                ),
+                name="realtime-transcript-sender",
             )
 
             while True:
@@ -190,6 +202,7 @@ def create_realtime_router(
                             await ingest_gateway.notify_voice_activity(
                                 message.session_id,
                                 message.occurred_at_ms,
+                                message.source,
                             )
                         except Exception as error:
                             # Speech activity is advisory. A late signal must
@@ -219,7 +232,12 @@ def create_realtime_router(
             with CancelScope(shield=True):
                 senders = tuple(
                     sender
-                    for sender in (status_sender, barrage_sender, viewer_sender)
+                    for sender in (
+                        status_sender,
+                        barrage_sender,
+                        viewer_sender,
+                        transcript_sender,
+                    )
                     if sender is not None
                 )
                 for sender in senders:
@@ -232,6 +250,8 @@ def create_realtime_router(
                     await broker.unsubscribe_barrages(barrage_subscription)
                 if viewer_subscription is not None:
                     await broker.unsubscribe_viewers(viewer_subscription)
+                if transcript_subscription is not None:
+                    await broker.unsubscribe_transcripts(transcript_subscription)
 
     return router
 
@@ -240,6 +260,17 @@ async def _forward_viewer_events(
     websocket: WebSocket,
     *,
     subscription: asyncio.Queue[ViewerPresenceEvent],
+    send_lock: asyncio.Lock,
+) -> None:
+    while True:
+        event = await subscription.get()
+        await _send_message(websocket, event, send_lock=send_lock)
+
+
+async def _forward_transcripts(
+    websocket: WebSocket,
+    *,
+    subscription: asyncio.Queue[AsrTranscriptEvent],
     send_lock: asyncio.Lock,
 ) -> None:
     while True:
@@ -424,11 +455,13 @@ async def _dispatch_ingest(
                 session_id=message.session_id,
                 input_id=message.input_id,
                 committed_at_ms=message.committed_at_ms,
+                source=message.source,
             )
         )
 
     header = message.header
     if header.media_type is BinaryMediaType.AUDIO:
+        assert header.source is not None
         return await ingest_gateway.submit_audio(
             AudioInput(
                 session_id=header.session_id,
@@ -436,6 +469,7 @@ async def _dispatch_ingest(
                 captured_at_ms=header.captured_at_ms,
                 format=header.format,
                 body=message.body,
+                source=header.source,
             )
         )
     return await ingest_gateway.submit_frame(
@@ -614,6 +648,7 @@ async def _send_message(
         | RealtimeProtocolError
         | IngestAck
         | IngestRejected
+        | AsrTranscriptEvent
     ),
     *,
     send_lock: asyncio.Lock | None = None,

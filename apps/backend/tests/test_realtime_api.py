@@ -7,9 +7,11 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from advx_backend.api.ws.realtime import create_realtime_router
+from advx_backend.application.ports.asr import AudioSource
+from advx_backend.application.realtime_broker import RealtimeBroker
 from advx_backend.bootstrap import build_runtime
 from advx_backend.contracts.protocol import PROTOCOL_VERSION_HEADER
-from advx_backend.contracts.realtime import ClientHello
+from advx_backend.contracts.realtime import AsrTranscriptEvent, ClientHello
 from advx_backend.domain.barrage import (
     BarrageEvent,
     BarrageEvidenceRef,
@@ -175,6 +177,74 @@ def test_realtime_forwards_validated_barrage_events(tmp_path: Path) -> None:
             "expires_at_ms": 200,
         },
     }
+
+
+def test_realtime_forwards_asr_transcripts(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
+    app = create_app(runtime=runtime)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.send_json(hello())
+            websocket.receive_json()
+            assert client.portal is not None
+            client.portal.call(
+                runtime.realtime_broker.publish_transcript,
+                AsrTranscriptEvent(
+                    source=AudioSource.SYSTEM_AUDIO,
+                    text="game audio",
+                    final=False,
+                    started_at_ms=100,
+                    ended_at_ms=200,
+                    utterance_id="utterance-1",
+                    revision=2,
+                ),
+            )
+            message = websocket.receive_json()
+
+    assert message == {
+        "type": "asr.transcript",
+        "protocol_version": 3,
+        "source": "system_audio",
+        "text": "game audio",
+        "final": False,
+        "started_at_ms": 100,
+        "ended_at_ms": 200,
+        "utterance_id": "utterance-1",
+        "revision": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_transcript_queue_never_evicts_final_for_partial() -> None:
+    broker = RealtimeBroker(subscriber_capacity=1)
+    subscription = await broker.subscribe_transcripts()
+    final = AsrTranscriptEvent(
+        source="microphone",
+        text="final",
+        final=True,
+        started_at_ms=0,
+        ended_at_ms=1,
+        revision=1,
+    )
+    partial = final.model_copy(update={"text": "partial", "final": False})
+
+    await broker.publish_transcript(final)
+    await broker.publish_transcript(partial)
+
+    assert subscription.get_nowait() == final
+
+
+def test_asr_transcript_text_matches_realtime_input_limit() -> None:
+    with pytest.raises(ValueError, match="at most 4000 characters"):
+        AsrTranscriptEvent(
+            source="microphone",
+            text="x" * 4_001,
+            final=False,
+            started_at_ms=0,
+            ended_at_ms=1,
+            revision=1,
+        )
 
 
 @pytest.mark.asyncio

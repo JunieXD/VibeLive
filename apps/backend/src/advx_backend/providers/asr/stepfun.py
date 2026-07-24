@@ -17,7 +17,7 @@ from advx_backend.application.ai_call_logging import (
     build_audio_request_summary,
     build_http_response_summary,
 )
-from advx_backend.application.ports.asr import AudioChunk, TranscriptSegment
+from advx_backend.application.ports.asr import AudioChunk, AudioSource, TranscriptSegment
 from advx_backend.contracts.debug import AiCallRole
 from advx_backend.providers.retry_after import parse_retry_after_seconds
 
@@ -105,6 +105,7 @@ class _AudioSegment:
     channels: int
     sample_width_bits: int
     pcm: bytes
+    source: AudioSource = AudioSource.MICROPHONE
 
 
 class _EndOfResults:
@@ -160,6 +161,8 @@ class StepFunAsrProvider:
             first = self._buffer[0]
             if chunk.session_id != first.session_id:
                 raise ValueError("cannot mix sessions in one ASR segment")
+            if chunk.source is not first.source:
+                raise ValueError("cannot mix audio sources in one ASR segment")
             if (
                 chunk.sample_rate,
                 chunk.channels,
@@ -174,15 +177,18 @@ class StepFunAsrProvider:
                 raise ValueError("audio chunks must be ordered by capture time")
         self._buffer.append(chunk)
 
-    async def commit(self) -> None:
+    async def commit(self, source: AudioSource = AudioSource.MICROPHONE) -> None:
         self._ensure_started()
         if not self._buffer:
             return
 
         first = self._buffer[0]
+        if first.source is not source:
+            raise ValueError("ASR commit source does not match buffered audio")
         last = self._buffer[-1]
         segment = _AudioSegment(
             session_id=first.session_id,
+            source=first.source,
             started_at_ms=first.started_at_ms,
             ended_at_ms=last.ended_at_ms,
             sample_rate=first.sample_rate,
@@ -290,7 +296,8 @@ class StepFunAsrProvider:
         wire_body = httpx.Request("POST", url, json=payload).content
         pcm_digest = hashlib.sha256(segment.pcm).hexdigest()
         utterance_id = (
-            f"asr-{segment.started_at_ms}-{segment.ended_at_ms}-{pcm_digest[:16]}"
+            f"asr-{segment.source.value}-{segment.started_at_ms}-"
+            f"{segment.ended_at_ms}-{pcm_digest[:16]}"
         )
         lifecycle = AiCallLifecycle(
             sink=self._ai_call_sink,
@@ -354,6 +361,7 @@ class StepFunAsrProvider:
                                 )
                             yield TranscriptSegment(
                                 session_id=segment.session_id,
+                                source=segment.source,
                                 text=text,
                                 started_at_ms=self._event_time(
                                     event,
@@ -376,6 +384,7 @@ class StepFunAsrProvider:
                             raise StepFunAsrError("StepFun ASR returned a done event without text")
                         yield TranscriptSegment(
                             session_id=segment.session_id,
+                            source=segment.source,
                             text=text,
                             started_at_ms=segment.started_at_ms,
                             ended_at_ms=segment.ended_at_ms,

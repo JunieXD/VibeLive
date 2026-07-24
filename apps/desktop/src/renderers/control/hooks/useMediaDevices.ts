@@ -2,6 +2,15 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import type { DesktopSource, MediaAccessStatus } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
 import {
+  createAudioChannelState,
+  releaseFailedLoopbackCapture,
+  resetAudioSegment,
+  shouldReleaseLoopbackVideo,
+  updateAudioTransportError,
+  type AudioChannelState
+} from '../audio-channel'
+import { loadAudioSettings, saveAudioSettings } from '../audio-settings'
+import {
   AUDIO_SENTENCE_SILENCE_SECONDS,
   AUDIO_SPEECH_THRESHOLD,
   encodePcm16Mono
@@ -52,6 +61,16 @@ export function useMediaDevices({
   const [microphoneReady, setMicrophoneReady] = useState(false)
   const [microphonePermission, setMicrophonePermission] =
     useState<MediaAccessStatus>('unknown')
+  const [microphoneTransportError, setMicrophoneTransportError] = useState<string | null>(null)
+  const [audioSettings, setAudioSettings] = useState(() =>
+    loadAudioSettings(window.localStorage)
+  )
+  const [systemAudioSupported, setSystemAudioSupported] = useState(false)
+  const [systemAudioLevel, setSystemAudioLevel] = useState(0)
+  const [systemAudioReady, setSystemAudioReady] = useState(false)
+  const [systemAudioError, setSystemAudioError] = useState<string | null>(null)
+  const [systemAudioTransportError, setSystemAudioTransportError] =
+    useState<string | null>(null)
   const [screenPermission, setScreenPermission] = useState<MediaAccessStatus>('unknown')
   const [transitioning, setTransitioning] = useState(false)
 
@@ -63,17 +82,8 @@ export function useMediaDevices({
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const visualSettingsRef = useRef(visualSettings)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null)
-  const audioChunksRef = useRef<Float32Array[]>([])
-  const audioSampleCountRef = useRef(0)
-  const audioSampleRateRef = useRef(0)
-  const audioLastSpeechAtRef = useRef<number | null>(null)
-  const audioSegmentStartedAtRef = useRef<number | null>(null)
-  const audioSendQueueRef = useRef<Promise<void>>(Promise.resolve())
-  const audioSegmentSequenceRef = useRef(0)
-  const audioIngestErrorReportedRef = useRef(false)
-  const meterFrameRef = useRef<number | null>(null)
+  const microphoneChannelRef = useRef(createAudioChannelState('microphone'))
+  const systemAudioChannelRef = useRef(createAudioChannelState('system_audio'))
   const operationIdRef = useRef(0)
   const transitionRef = useRef(false)
   const onSystemActivityRef = useRef(onSystemActivity)
@@ -110,6 +120,9 @@ export function useMediaDevices({
     saveVisualSettings(window.localStorage, visualSettings)
   }, [visualSettings])
   useEffect(() => {
+    saveAudioSettings(window.localStorage, audioSettings)
+  }, [audioSettings])
+  useEffect(() => {
     captureStreamRef.current = captureStream
     bindMediaStreamToVideo(videoRef.current, captureStream)
     bindMediaStreamToVideo(capturePipelineVideoRef.current, captureStream)
@@ -124,6 +137,7 @@ export function useMediaDevices({
       setMicrophonePermission(status.microphone)
       setCameraPermission(status.camera)
       setScreenPermission(status.screen)
+      setSystemAudioSupported(status.systemAudioSupported)
     }).catch(() => undefined)
   }, [])
 
@@ -153,79 +167,118 @@ export function useMediaDevices({
     setCameraStream(null)
   }, [])
 
-  const flushAudioSegment = useCallback((): Promise<void> => {
+  const flushAudioSegment = useCallback((channel: AudioChannelState): Promise<void> => {
     if (!mediaIngestEnabledRef.current) {
-      audioChunksRef.current = []
-      audioSampleCountRef.current = 0
-      audioSegmentStartedAtRef.current = null
-      audioLastSpeechAtRef.current = null
-      return audioSendQueueRef.current
+      resetAudioSegment(channel)
+      return channel.sendQueue
     }
-    const sampleRate = audioSampleRateRef.current
-    const sampleCount = audioSampleCountRef.current
+    const sampleRate = channel.sampleRate
+    const sampleCount = channel.sampleCount
     const minimumSamples = Math.round(sampleRate * 0.1)
     if (sampleRate <= 0 || sampleCount < minimumSamples) {
-      audioChunksRef.current = []
-      audioSampleCountRef.current = 0
-      audioSegmentStartedAtRef.current = null
-      audioLastSpeechAtRef.current = null
-      return audioSendQueueRef.current
+      resetAudioSegment(channel)
+      return channel.sendQueue
     }
 
-    const chunks = audioChunksRef.current
-    const capturedAtMs = audioSegmentStartedAtRef.current ?? Date.now()
-    audioChunksRef.current = []
-    audioSampleCountRef.current = 0
-    audioSegmentStartedAtRef.current = null
-    audioLastSpeechAtRef.current = null
-    const sequence = audioSegmentSequenceRef.current + 1
-    audioSegmentSequenceRef.current = sequence
+    const chunks = channel.chunks
+    const capturedAtMs = channel.segmentStartedAt ?? Date.now()
+    resetAudioSegment(channel)
+    const sequence = channel.sequence + 1
+    channel.sequence = sequence
     const body = encodePcm16Mono(chunks, sampleRate)
-    const send = audioSendQueueRef.current.then(() =>
+    const send = channel.sendQueue.then(() =>
       window.advx.submitAudioSegment({
-        inputId: `audio-${capturedAtMs}-${sequence}`,
+        source: channel.source,
+        inputId: `${channel.source}-${capturedAtMs}-${sequence}`,
         capturedAtMs,
         body
       })
     )
     const observed = send.then(
       () => {
-        audioIngestErrorReportedRef.current = false
+        channel.ingestErrorReported = false
+        updateAudioTransportError(
+          channel,
+          null,
+          channel.source === 'microphone'
+            ? setMicrophoneTransportError
+            : setSystemAudioTransportError
+        )
       },
       (error: unknown) => {
-        if (!audioIngestErrorReportedRef.current) {
-          audioIngestErrorReportedRef.current = true
+        updateAudioTransportError(
+          channel,
+          error,
+          channel.source === 'microphone'
+            ? setMicrophoneTransportError
+            : setSystemAudioTransportError
+        )
+        if (!channel.ingestErrorReported) {
+          channel.ingestErrorReported = true
           onSystemActivityRef.current(
-            `音频暂未送达后端：${
-              error instanceof Error && error.message ? error.message : '实时连接异常。'
+            `${channel.source === 'microphone' ? '麦克风' : '系统声音'}暂未送达后端：${
+              channel.error
             }`
           )
         }
       }
     )
-    audioSendQueueRef.current = observed
+    channel.sendQueue = observed
     return observed
   }, [])
 
   const stopMicrophone = useCallback(async (): Promise<void> => {
-    if (meterFrameRef.current !== null) cancelAnimationFrame(meterFrameRef.current)
-    meterFrameRef.current = null
-    const processor = audioProcessorRef.current
-    audioProcessorRef.current = null
+    const channel = microphoneChannelRef.current
+    if (channel.meterFrame !== null) cancelAnimationFrame(channel.meterFrame)
+    channel.meterFrame = null
+    const processor = channel.processor
+    channel.processor = null
     if (processor) {
       processor.onaudioprocess = null
       processor.disconnect()
     }
     const stream = microphoneStreamRef.current
     microphoneStreamRef.current = null
+    channel.stream = null
     stopMediaStream(stream)
-    await flushAudioSegment()
-    const context = audioContextRef.current
-    audioContextRef.current = null
+    await flushAudioSegment(channel)
+    updateAudioTransportError(channel, null, setMicrophoneTransportError)
+    const context = channel.context
+    channel.context = null
     if (context && context.state !== 'closed') await context.close().catch(() => undefined)
     setMicrophoneLevel(0)
     setMicrophoneReady(false)
   }, [flushAudioSegment])
+
+  const stopSystemAudio = useCallback(async (): Promise<void> => {
+    const channel = systemAudioChannelRef.current
+    const stream = channel.stream
+    channel.stream = null
+    if (channel.meterFrame !== null) cancelAnimationFrame(channel.meterFrame)
+    channel.meterFrame = null
+    const processor = channel.processor
+    channel.processor = null
+    if (processor) {
+      processor.onaudioprocess = null
+      processor.disconnect()
+    }
+    await flushAudioSegment(channel)
+    updateAudioTransportError(channel, null, setSystemAudioTransportError)
+    const context = channel.context
+    channel.context = null
+    if (context && context.state !== 'closed') await context.close().catch(() => undefined)
+    channel.level = 0
+    stream?.getAudioTracks().forEach((track) => track.stop())
+    channel.level = 0
+    setSystemAudioLevel(0)
+    setSystemAudioReady(false)
+    if (shouldReleaseLoopbackVideo(
+      visualSettingsRef.current.mode,
+      captureStreamRef.current === stream
+    )) {
+      stopCapture()
+    }
+  }, [flushAudioSegment, stopCapture])
 
   const refreshMicrophones = useCallback(async (preferred?: string, id?: number) => {
     const devices = await navigator.mediaDevices.enumerateDevices()
@@ -265,13 +318,17 @@ export function useMediaDevices({
     return () => navigator.mediaDevices.removeEventListener('devicechange', handleChange)
   }, [refreshCameras, refreshMicrophones])
 
-  const startCapture = useCallback(async (id: number, sourceId: string): Promise<MediaStream> => {
+  const startCapture = useCallback(async (
+    id: number,
+    sourceId: string,
+    includeSystemAudio = false
+  ): Promise<MediaStream> => {
     const accepted = await window.advx.selectDesktopSource(sourceId)
     assertCurrent(id)
     if (!accepted) throw new DOMException('The selected display source is no longer available.', 'NotFoundError')
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: { ideal: 12, max: 20 } },
-      audio: false
+      audio: includeSystemAudio
     })
     try {
       assertCurrent(id)
@@ -287,7 +344,11 @@ export function useMediaDevices({
         if (sessionStatusRef.current !== 'stopping') invalidate()
         captureStreamRef.current = null
         setCaptureStream(null)
-        if (visualSettingsRef.current.mode === 'pip' && cameraStreamRef.current) {
+        void stopSystemAudio()
+        if (visualSettingsRef.current.mode === 'camera' && cameraStreamRef.current) {
+          setSystemAudioError('系统声音已断开')
+          onSystemActivityRef.current('系统声音来源已结束，摄像头和麦克风继续运行。')
+        } else if (visualSettingsRef.current.mode === 'pip' && cameraStreamRef.current) {
           setVisualSettings((current) => ({ ...current, mode: 'camera' }))
           onSystemActivityRef.current('屏幕来源已断开，已自动切换为摄像头画面。')
         } else if (sessionStatusRef.current === 'running' || sessionStatusRef.current === 'starting') {
@@ -301,7 +362,7 @@ export function useMediaDevices({
       stopMediaStream(stream)
       throw error
     }
-  }, [assertCurrent, fatalMediaRef, invalidate, sessionStatusRef, stopCamera, stopMicrophone])
+  }, [assertCurrent, fatalMediaRef, invalidate, sessionStatusRef, stopCamera, stopMicrophone, stopSystemAudio])
 
   const startCamera = useCallback(async (id: number, deviceId?: string): Promise<MediaStream> => {
     const authorized = await window.advx.authorizeCameraCapture()
@@ -356,29 +417,23 @@ export function useMediaDevices({
     }
   }, [assertCurrent, fatalMediaRef, invalidate, refreshCameras, sessionStatusRef, stopCapture, stopMicrophone])
 
-  const startMicrophone = useCallback(async (id: number, deviceId?: string): Promise<MediaStream> => {
-    await stopMicrophone()
-    assertCurrent(id)
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: deviceId ? { exact: deviceId } : undefined,
-        echoCancellation: true,
-        noiseSuppression: true
-      }
-    })
-    let context: AudioContext | null = null
+  const attachAudioProcessing = useCallback(async (
+    id: number,
+    stream: MediaStream,
+    channel: AudioChannelState,
+    setLevel: (level: number) => void
+  ): Promise<void> => {
+    const track = stream.getAudioTracks()[0]
+    if (!track) throw new DOMException('No audio track was created.', 'NotReadableError')
+    const context = new AudioContext()
     try {
-      assertCurrent(id)
-      const track = stream.getAudioTracks()[0]
-      if (!track) throw new DOMException('No microphone audio track was created.', 'NotReadableError')
-      context = new AudioContext()
       const analyser = context.createAnalyser()
       analyser.fftSize = 512
       const source = context.createMediaStreamSource(stream)
-      source.connect(analyser)
       const processor = context.createScriptProcessor(4096, 1, 1)
       const silentOutput = context.createGain()
       silentOutput.gain.value = 0
+      source.connect(analyser)
       source.connect(processor)
       processor.connect(silentOutput)
       silentOutput.connect(context.destination)
@@ -390,87 +445,166 @@ export function useMediaDevices({
           samples.reduce((total, sample) => total + sample * sample, 0) / samples.length
         )
         const now = Date.now()
-        if (audioSegmentStartedAtRef.current === null) {
+        if (channel.segmentStartedAt === null) {
           if (level < AUDIO_SPEECH_THRESHOLD) return
-          audioSegmentStartedAtRef.current = now
+          channel.segmentStartedAt = now
           try {
-            window.advx.notifyVoiceActivity(now)
+            window.advx.notifyVoiceActivity(channel.source, now)
           } catch (error) {
             console.error('Voice activity notification failed; continuing audio ingestion', error)
           }
         }
         const copy = new Float32Array(samples)
-        audioChunksRef.current.push(copy)
-        audioSampleCountRef.current += copy.length
-        audioSampleRateRef.current = context?.sampleRate ?? event.inputBuffer.sampleRate
+        channel.chunks.push(copy)
+        channel.sampleCount += copy.length
+        channel.sampleRate = context.sampleRate || event.inputBuffer.sampleRate
         if (level >= AUDIO_SPEECH_THRESHOLD) {
-          audioLastSpeechAtRef.current = now
+          channel.lastSpeechAt = now
         } else if (
-          audioLastSpeechAtRef.current !== null &&
-          now - audioLastSpeechAtRef.current >= AUDIO_SENTENCE_SILENCE_SECONDS * 1_000
+          channel.lastSpeechAt !== null &&
+          now - channel.lastSpeechAt >= AUDIO_SENTENCE_SILENCE_SECONDS * 1_000
         ) {
-          void flushAudioSegment()
+          void flushAudioSegment(channel)
         }
       }
       if (context.state === 'suspended') {
         await context.resume()
         assertCurrent(id)
       }
+      channel.stream = stream
+      channel.context = context
+      channel.processor = processor
+      channel.sampleRate = context.sampleRate
+      resetAudioSegment(channel)
+      const meterSamples = new Uint8Array(analyser.fftSize)
+      const measure = (): void => {
+        if (channel.stream !== stream) return
+        analyser.getByteTimeDomainData(meterSamples)
+        channel.level = calculateMicrophoneLevel(meterSamples)
+        setLevel(channel.level)
+        channel.meterFrame = requestAnimationFrame(measure)
+      }
+      measure()
+    } catch (error) {
+      if (context.state !== 'closed') await context.close().catch(() => undefined)
+      throw error
+    }
+  }, [assertCurrent, flushAudioSegment, sessionStatusRef])
+
+  const startMicrophone = useCallback(async (id: number, deviceId?: string): Promise<MediaStream> => {
+    await stopMicrophone()
+    assertCurrent(id)
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        echoCancellation: true,
+        noiseSuppression: true
+      }
+    })
+    try {
+      assertCurrent(id)
+      const track = stream.getAudioTracks()[0]
+      if (!track) throw new DOMException('No microphone audio track was created.', 'NotReadableError')
+      await attachAudioProcessing(id, stream, microphoneChannelRef.current, setMicrophoneLevel)
       await refreshMicrophones(track.getSettings().deviceId, id)
       assertCurrent(id)
       microphoneStreamRef.current = stream
-      audioContextRef.current = context
-      audioProcessorRef.current = processor
-      audioChunksRef.current = []
-      audioSampleCountRef.current = 0
-      audioSampleRateRef.current = context.sampleRate
-      audioSegmentStartedAtRef.current = null
-      audioLastSpeechAtRef.current = null
       setMicrophoneReady(true)
       setMicrophonePermission('granted')
       track.addEventListener('ended', () => {
         if (microphoneStreamRef.current !== stream) return
-        if (sessionStatusRef.current !== 'stopping') invalidate()
-        microphoneStreamRef.current = null
-        const activeProcessor = audioProcessorRef.current
-        audioProcessorRef.current = null
-        if (activeProcessor) {
-          activeProcessor.onaudioprocess = null
-          activeProcessor.disconnect()
-        }
-        if (meterFrameRef.current !== null) cancelAnimationFrame(meterFrameRef.current)
-        meterFrameRef.current = null
-        void flushAudioSegment()
-        void context?.close()
-        audioContextRef.current = null
-        setMicrophoneLevel(0)
-        setMicrophoneReady(false)
+        void stopMicrophone()
         if (sessionStatusRef.current === 'running' || sessionStatusRef.current === 'starting') {
           onSystemActivityRef.current('麦克风连接已中断，继续进行仅画面直播。')
         }
       }, { once: true })
-      const samples = new Uint8Array(analyser.fftSize)
-      const measure = (): void => {
-        if (microphoneStreamRef.current !== stream) return
-        analyser.getByteTimeDomainData(samples)
-        setMicrophoneLevel(calculateMicrophoneLevel(samples))
-        meterFrameRef.current = requestAnimationFrame(measure)
-      }
-      measure()
       return stream
     } catch (error) {
       stopMediaStream(stream)
-      if (context && context.state !== 'closed') await context.close().catch(() => undefined)
+      await stopMicrophone()
       throw error
     }
-  }, [assertCurrent, fatalMediaRef, flushAudioSegment, invalidate, refreshMicrophones, sessionStatusRef, stopCapture, stopMicrophone])
+  }, [assertCurrent, attachAudioProcessing, refreshMicrophones, sessionStatusRef, stopMicrophone])
+
+  const activateSystemAudioStream = useCallback(async (
+    id: number,
+    stream: MediaStream
+  ): Promise<void> => {
+    try {
+      assertCurrent(id)
+      const track = stream.getAudioTracks()[0]
+      if (!track) throw new DOMException('The selected source did not provide loopback audio.', 'NotReadableError')
+      await attachAudioProcessing(id, stream, systemAudioChannelRef.current, setSystemAudioLevel)
+      setSystemAudioReady(true)
+      setSystemAudioError(null)
+      track.addEventListener('ended', () => {
+        if (systemAudioChannelRef.current.stream !== stream) return
+        void stopSystemAudio()
+        setSystemAudioError('系统声音已断开')
+        onSystemActivityRef.current('系统声音已断开，麦克风和直播继续运行。')
+      }, { once: true })
+    } catch (error) {
+      await stopSystemAudio()
+      setSystemAudioError(describeMediaError(error, 'display'))
+      throw error
+    }
+  }, [assertCurrent, attachAudioProcessing, stopSystemAudio])
+
+  const startSystemAudio = useCallback(async (id: number): Promise<void> => {
+    await stopSystemAudio()
+    assertCurrent(id)
+    if (!systemAudioSupported) return
+    if (!selectedSource) {
+      throw new DOMException('No display source is available for system audio.', 'NotFoundError')
+    }
+    const stream = await startCapture(id, selectedSource.id, true)
+    try {
+      await activateSystemAudioStream(id, stream)
+    } catch (error) {
+      releaseFailedLoopbackCapture(
+        visualSettingsRef.current.mode,
+        stream,
+        captureStreamRef.current,
+        stopCapture
+      )
+      throw error
+    }
+  }, [
+    activateSystemAudioStream,
+    assertCurrent,
+    selectedSource,
+    startCapture,
+    stopSystemAudio,
+    stopCapture,
+    systemAudioSupported
+  ])
 
   const chooseSource = useCallback(async (source: DesktopSource) => {
     const id = begin()
     if (id === null) return
     try {
-      await startCapture(id, source.id)
+      const includeSystemAudio =
+        sessionStatusRef.current === 'running' &&
+        audioSettings.systemAudioEnabled &&
+        systemAudioSupported
+      if (includeSystemAudio) await stopSystemAudio()
+      const stream = await startCapture(id, source.id, includeSystemAudio)
       setSelectedSource(source)
+      if (includeSystemAudio) {
+        try {
+          await activateSystemAudioStream(id, stream)
+        } catch (error) {
+          releaseFailedLoopbackCapture(
+            visualSettingsRef.current.mode,
+            stream,
+            captureStreamRef.current,
+            stopCapture
+          )
+          onSystemActivityRef.current(
+            `新画面没有可用的系统声音：${describeMediaError(error, 'display')} 麦克风和直播继续运行。`
+          )
+        }
+      }
       if (cameraEnabled && cameraStreamRef.current) {
         setVisualSettings((current) => ({ ...current, mode: 'pip' }))
       }
@@ -481,7 +615,19 @@ export function useMediaDevices({
     } finally {
       finish(id)
     }
-  }, [begin, cameraEnabled, finish, isCurrent, startCapture])
+  }, [
+    activateSystemAudioStream,
+    audioSettings.systemAudioEnabled,
+    begin,
+    cameraEnabled,
+    finish,
+    isCurrent,
+    sessionStatusRef,
+    startCapture,
+    stopCapture,
+    stopSystemAudio,
+    systemAudioSupported
+  ])
 
   useEffect(() => {
     if (selectedSource) return
@@ -632,7 +778,7 @@ export function useMediaDevices({
       }
       assertCurrent(id)
       setVisualSettings((current) => ({ ...current, mode }))
-      if (!requirements.screen) stopCapture()
+      if (!requirements.screen && !systemAudioReady) stopCapture()
       if (!requirements.camera) stopCamera()
     } catch (error) {
       if (!isCurrent(id)) return
@@ -642,7 +788,7 @@ export function useMediaDevices({
     } finally {
       finish(id)
     }
-  }, [assertCurrent, begin, cameraEnabled, finish, isCurrent, selectedSource, startCamera, startCapture, stopCamera, stopCapture])
+  }, [assertCurrent, begin, cameraEnabled, finish, isCurrent, selectedSource, startCamera, startCapture, stopCamera, stopCapture, systemAudioReady])
 
   const changeMicrophone = useCallback(async (deviceId: string) => {
     setSelectedMicrophoneId(deviceId)
@@ -660,6 +806,39 @@ export function useMediaDevices({
     }
   }, [begin, finish, isCurrent, microphoneReady, startMicrophone, stopMicrophone])
 
+  const toggleSystemAudio = useCallback(async () => {
+    if (!systemAudioSupported) return
+    const enabled = !audioSettings.systemAudioEnabled
+    setAudioSettings((current) => ({ ...current, systemAudioEnabled: enabled }))
+    setSystemAudioError(null)
+    if (sessionStatusRef.current !== 'running') {
+      if (!enabled) await stopSystemAudio()
+      return
+    }
+    const id = begin(true)
+    if (id === null) return
+    try {
+      if (enabled) await startSystemAudio(id)
+      else await stopSystemAudio()
+    } catch (error) {
+      if (!isCurrent(id)) return
+      const detail = describeMediaError(error, 'display')
+      setSystemAudioError(detail)
+      onSystemActivityRef.current(`系统声音未能启用：${detail} 麦克风和直播继续运行。`)
+    } finally {
+      finish(id)
+    }
+  }, [
+    audioSettings.systemAudioEnabled,
+    begin,
+    finish,
+    isCurrent,
+    sessionStatusRef,
+    startSystemAudio,
+    stopSystemAudio,
+    systemAudioSupported
+  ])
+
   useEffect(() => () => {
     operationIdRef.current += 1
     transitionRef.current = false
@@ -667,17 +846,21 @@ export function useMediaDevices({
     stopMediaStream(cameraStreamRef.current)
     void window.advx.cancelCameraCaptureAuthorization().catch(() => undefined)
     void stopMicrophone()
-  }, [stopMicrophone])
+    void stopSystemAudio()
+  }, [stopMicrophone, stopSystemAudio])
 
   return {
     selectedSource, setSelectedSource, captureStream, cameraStream, cameras, cameraEnabled,
     cameraPermission, visualSettings, setVisualSettings, microphones, selectedMicrophoneId,
-    microphoneLevel, microphoneReady, microphonePermission, screenPermission, videoRef,
+    microphoneLevel, microphoneReady, microphonePermission, microphoneTransportError,
+    systemAudioEnabled: audioSettings.systemAudioEnabled, systemAudioSupported,
+    systemAudioLevel, systemAudioReady, systemAudioError, systemAudioTransportError,
+    screenPermission, videoRef,
     cameraVideoRef, capturePipelineVideoRef, cameraPipelineVideoRef, captureStreamRef,
     cameraStreamRef, microphoneStreamRef, visualSettingsRef,
     operation: { begin, finish, assertCurrent, isCurrent, invalidate, transitioning },
     chooseSource, requestMicrophoneAccess, toggleCamera, changeCamera, changeVisualMode,
-    changeMicrophone, startCapture, startCamera, startMicrophone, stopCapture, stopCamera,
-    stopMicrophone
+    changeMicrophone, startCapture, startCamera, startMicrophone, startSystemAudio,
+    stopCapture, stopCamera, stopMicrophone, stopSystemAudio, toggleSystemAudio
   }
 }

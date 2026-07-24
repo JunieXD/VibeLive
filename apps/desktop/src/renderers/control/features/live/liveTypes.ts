@@ -15,7 +15,7 @@ import type { MessageTarget } from './message-target'
 
 export type LiveActivityItem = {
   id: string
-  source: 'user' | 'audience' | 'system'
+  source: 'user' | 'audience' | 'system' | 'transcript'
   author: string
   text: string
   color?: string
@@ -106,6 +106,12 @@ export type LiveMixerProps = {
   captureStatus: string
   cameraStatus: string
   microphoneLevel: number
+  microphoneStatus: string
+  systemAudioLevel: number
+  systemAudioReady: boolean
+  systemAudioStatus: string
+  microphonePartial: string
+  systemAudioPartial: string
   asrReady: boolean
   asrStatus: string
   visualSettings: VisualSettings
@@ -121,6 +127,10 @@ export type LiveDeviceStripProps = {
   selectedMicrophoneId: string
   microphoneReady: boolean
   microphonePermission: MediaAccessStatus
+  systemAudioEnabled: boolean
+  systemAudioSupported: boolean
+  systemAudioReady: boolean
+  systemAudioStatus: string
   cameras: readonly MediaDeviceInfo[]
   cameraStream: MediaStream | null
   cameraEnabled: boolean
@@ -130,6 +140,7 @@ export type LiveDeviceStripProps = {
   mediaTransitioning: boolean
   onChangeMicrophone: (deviceId: string) => void | Promise<void>
   onRequestMicrophoneAccess: () => void | Promise<void>
+  onToggleSystemAudio: () => void | Promise<void>
   onChangeCamera: (deviceId: string) => void | Promise<void>
   onToggleCamera: () => void | Promise<void>
 }

@@ -14,11 +14,11 @@
 
 ```mermaid
 flowchart TB
-    USER["用户<br/>屏幕 · 语音 · 文字"]
+    USER["用户<br/>屏幕 · 麦克风 · 系统声音 · 文字"]
     DESKTOP["Electron 桌面端<br/>采集 · 交互 · 弹幕展示"]
     CORE["FastAPI AI 核心<br/>ASR 接入 · 上下文理解 · 观众编排"]
     AUDIENCE[("AI 观众系统<br/>人格模板 · Viewer 实例 · 共享记忆")]
-    ASR["StepFun ASR<br/>语音转写"]
+    ASR["StepFun ASR<br/>麦克风与系统声音双通道"]
     MODEL["外部多模态模型<br/>OpenAI-compatible"]
 
     USER <-->|"输入与实时反馈"| DESKTOP
@@ -48,7 +48,7 @@ Electron 负责与操作系统和用户界面直接相关的能力：
 - 使用 React 实现控制台、设置和运行状态。
 - 屏幕或窗口来源选择。
 - 麦克风选择与授权。
-- 屏幕帧和麦克风音频采集。
+- 屏幕帧、麦克风音频和 Windows 系统回环音频采集。
 - 透明弹幕覆盖层。
 - 托盘、快捷键和恢复入口。
 - 启动、监督和停止本地 FastAPI 后端。
@@ -62,7 +62,7 @@ FastAPI 负责本地计算和 AI 编排：
 
 - 会话生命周期。
 - 接收有界的画面帧和音频数据。
-- ASR Provider 调度。
+- 按音频来源隔离并并行调度 ASR Provider。
 - 近期画面与转写缓冲。
 - 用户文字、语音转写和公开弹幕组成的房间事件流。
 - 稳定 Viewer 池、实例短期状态和 Room 共享记忆。
@@ -98,7 +98,7 @@ Main Process 不负责运行 ASR 或解释模型输出。
 
 Control UI 使用 React + TypeScript，只显示状态并收集用户意图：
 
-- 来源、麦克风、模型和弹幕设置。
+- 来源、麦克风、系统声音、模型和弹幕设置。
 - 用户文字弹幕输入、单一激活模式、模式内观众和观众状态。
 - 内置模式复制、自定义模式和完整人格编辑。
 - 版本化 `personality.md` 的校验，以及当前模式成长梗库的管理和自动入库撤销。
@@ -113,13 +113,14 @@ Capture 负责把系统媒体能力转换为内部数据：
 
 - 通过 Electron/Chromium Media API 获取用户授权的屏幕或窗口视频轨道。
 - 通过 Electron/Chromium Media API 获取用户选择的麦克风音频轨道。
+- 在 Windows 上通过 Electron display-media loopback 获取用户开启的系统声音轨道。
 - 对画面进行缩放、编码、节流和必要的变化检测。
-- 通过 AudioWorklet 对音频进行 ASR 所需的格式转换和有界分块。
+- 通过相互隔离的 Web Audio 管线对两路音频进行 ASR 所需的格式转换和有界分块，禁止把两路混成一个识别输入。
 - 在暂停、来源结束或停止时释放轨道和缓冲。
 
 采样频率、图像尺寸、编码格式和音频块长度属于运行参数，需要实测后配置，不能写死在领域合同中。
 
-第一版不让 Python 直接访问麦克风，也不引入平台原生采集模块。只有 Electron API 在目标平台实测无法满足要求时，才为对应系统增加窄范围原生适配。
+第一版不让 Python 直接访问音频设备，也不引入平台原生采集模块。系统回环首期只承诺 Electron 当前支持的 Windows 路径；其他平台显示不可用，不使用虚拟声卡或静默降级冒充系统声音。
 
 ### 3.4 Overlay
 
@@ -163,7 +164,7 @@ idle -> starting -> running <-> paused -> stopping -> idle
 class AsrProvider(Protocol):
     async def start(self, config: AsrConfig) -> None: ...
     async def push_audio(self, chunk: AudioChunk) -> None: ...
-    async def commit(self) -> None: ...
+    async def commit(self, source: AudioSource) -> None: ...
     async def results(self) -> AsyncIterator[TranscriptSegment]: ...
     async def stop(self) -> None: ...
 ```
@@ -171,15 +172,16 @@ class AsrProvider(Protocol):
 `TranscriptSegment` 至少包含：
 
 - 所属会话。
+- `microphone` 或 `system_audio` 来源。
 - 文本。
 - 开始和结束时间。
 - 是否为最终结果。
 
-第一版实现 `StepFunAsrProvider`，通过 Step Plan 的 HTTP + SSE 接口调用 `stepaudio-2.5-asr`。Electron 将麦克风音频转换为单声道 16 kHz PCM S16LE 并通过本地数据面发送给 FastAPI；Provider 在音频段提交后编码请求，并把供应商的增量、最终和错误事件转换为统一结果。
+第一版实现 `StepFunAsrProvider`，通过 Step Plan 的 HTTP + SSE 接口调用 `stepaudio-2.5-asr`。Electron 将麦克风和 Windows 系统声音分别转换为单声道 16 kHz PCM S16LE，并通过带 `AudioSource` 的本地数据面发送给 FastAPI。运行时为两个来源各持有一个独立 Provider，允许并行识别且不混合缓冲；Provider 在音频段提交后编码请求，并把供应商的增量、最终和错误事件转换为统一结果。
 
-Step Plan 接口一次提交一个有限音频段，不提供持续上传音频的双向流。`commit()` 只表示当前音频段结束，不规定使用静音检测、固定窗口或其他分段算法。Provider 串行处理已提交片段，避免后提交的语音先成为房间事件。具体分段方式和时长需要通过延迟与准确率实测决定。
+Step Plan 接口一次提交一个有限音频段，不提供持续上传音频的双向流。`commit(source)` 只表示对应来源的当前音频段结束，不规定使用静音检测、固定窗口或其他分段算法。同一来源内串行处理已提交片段，不同来源可以并行；具体分段方式和时长需要通过延迟与准确率实测决定。
 
-每个最终转写会转换为来源为 `user_voice` 的 `RoomEvent`。用户从 React UI 发送的文字则由 Main/FastAPI 校验后转换为 `user_text` 事件；两者在对话中地位相同，但保留来源信息。
+每个最终转写会转换为来源为 `user_voice` 的 `RoomEvent`。主播麦克风使用 `source_id=host`，系统声音使用 `source_id=system-audio`，payload 同时保留 `audio_source`。用户从 React UI 发送的文字则由 Main/FastAPI 校验后转换为 `user_text` 事件；这些输入在触发观察时地位相同，但模型和控制台始终能区分来源。
 
 StepFun 的 endpoint、model、鉴权和 SSE 事件只存在于 Adapter 内。业务层和跨进程合同不出现供应商字段；如果 Step Plan 延迟不能满足体验，可以新增双向流式 ASR Adapter，而不修改房间事件和 Audience Engine。
 
@@ -423,7 +425,7 @@ Electron 与 FastAPI 之间需要两类通信：
 
 ASR 和模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不读取已保存的明文凭据；Main 使用本次启动的短期鉴权通道将当前会话所需凭据注入 FastAPI 内存，停止后清理。凭据不得进入命令行参数、环境变量、普通配置和日志。
 
-控制界面必须展示当前启用的 ASR 服务，并在开始采集前说明麦克风音频会发送到 StepFun。原始音频默认不持久化，也不得写入日志；弹幕生成模型只接收最终转写文本。
+控制界面必须分别展示麦克风和系统声音的采集、ASR 与部分转写状态，并在开始采集前说明两种原始音频会发送到 StepFun。系统声音默认开启并标记为推荐，但只在运行中的 Session 采集，用户可以随时关闭。原始音频默认不持久化，也不得写入日志；弹幕生成模型只接收带来源的最终转写文本。
 
 第一版没有账号或云同步。目标架构使用 SQLite 持久化 Room、最小会话记录、runtime revisions、Viewer 池结构、有界可恢复的公开结构事件、Room 长期记忆与证据、ModeMeme 及其事件日志，并通过版本化迁移管理 Schema。原始音频、完整画面、隐藏推理、完整 Prompt、Provider 原始响应和凭据不写入数据库或 Debug Trace。Electron 和 FastAPI 使用结构化本地日志及机器可读 trace，通过 `room_id`、`session_id`、`audience_epoch`、`observation_id`、`generation_request_id` 和 `viewer_instance_id` 关联事件。
 
@@ -446,6 +448,7 @@ Room 长期记忆只保存从公开房间事件中提炼的必要事实、共同
 | ------------------ | --------------------------------------------------- |
 | 屏幕来源结束       | 停止使用旧画面，提示用户重新选择或停止会话          |
 | 麦克风断开         | 停止 ASR，明确进入仅画面状态或结束会话              |
+| 系统声音不可用或断开 | 只停止系统声音 ASR，并显示降级状态，麦克风和直播继续 |
 | ASR 失败或网络中断 | 不把不稳定文本送入模型，保留文字输入、控制和停止能力 |
 | Provider 不可用    | 停止新的模型请求，显示明确状态，不伪造上下文弹幕    |
 | 模型输出非法       | 丢弃本次候选并记录脱敏错误                          |
@@ -476,18 +479,18 @@ Room 长期记忆只保存从公开房间事件中提炼的必要事实、共同
 - Shared Brain 测试：下一波共享可见、跨 Session/模式 Room 记忆、证据约束、异步提取和删除生效。
 - 成长梗库测试：来源归一化、当前模式隔离、自动入库撤销、持久恢复、衰减归档，以及 `MemeCandidate` 不能直接成为弹幕。
 - Provider 合同测试：角色模型探测、独立 Viewer 请求、沉默、非法输出、超时、取消、限流、一次重试和断流。
-- ASR 合同测试：音频格式、SSE 分片、部分结果、最终结果、超时、限流、断流和停止。
-- Electron 集成测试：开始、暂停、清屏、热更新、回滚、停止和后端恢复。
+- ASR 合同测试：音频来源、双路隔离与并发、SSE 分片、部分结果、最终结果、超时、限流、单路断流和停止。
+- Electron 集成测试：Windows loopback、两路标签、开始、暂停、清屏、热更新、回滚、停止和后端恢复。
 - Headless/replay 测试：固定 seed、虚拟时钟、隔离数据目录、recorded replay、live replay 显式开关和稳定退出码。
 - 两个平台的真实系统测试：权限、点击穿透、采集释放和打包启动。
-- 端到端测试：固定 CS2/CSGO fixture、真实屏幕、真实麦克风、StepFun ASR 和至少一个真实外部模型。
+- 端到端测试：固定 CS2/CSGO fixture、真实屏幕、真实麦克风、Windows 系统声音、StepFun ASR 和至少一个真实外部模型。
 
 模拟服务可以覆盖错误路径，但不能代替最终的真实多模态验收。
 
 ## 11. 明确未定的实现
 
 - Python Runtime 使用哪种目录式冻结工具随 Electron 分发。
-- 麦克风音频的分段方式，以及 Step Plan SSE 的延迟是否满足实时互动体验。
+- 两路音频的最终分段参数，以及 Step Plan SSE 的延迟是否满足实时互动体验。
 - 屏幕帧在进程间使用何种编码和压缩。
 - 双平台实测后采用哪个成熟弹幕库。
 - 画面变化阈值、ambient 间隔、响应人数预算、并发、队列和 TTL 的调优值。

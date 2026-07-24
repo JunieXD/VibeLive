@@ -286,6 +286,13 @@
 - 决定：PersonaTemplate 是持久化行为模板，ViewerInstance 是仅属于单次 Session 的独立观众，拥有与 Persona 无关的用户名和头像种子。Mode 使用 `target_concurrent_viewers` 表示目标同时在线人数，Persona 权重只在创建 Viewer 时决定 assignment。Director 只输出 `SceneAssessment`；每个 active 且未禁言 Viewer 使用本地可解释概率和稳定抽样独立决定是否发言，最终候选再各自调用一次模型。
 - 影响：Viewer 可以加入、离开、同场重返、限时禁言、解除禁言和被踢；被踢后本场不可重返并可由新 Viewer 补位。Mode 热更新保留 ViewerIdentity。最终提交同时校验 epoch、sequence、presence/moderation/behavior revisions。正常关播清空当前 audience 和私有状态，新直播创建全新 Viewer；异常重启恢复同一未终止 Session 的 Viewer。
 
+### D-041：麦克风与 Windows 系统声音使用独立 ASR 通道
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：音频来源固定为 `microphone` 和 `system_audio`。Windows 系统声音使用 Electron loopback，首次默认开启并标记为推荐；两路音频使用独立缓冲、提交顺序和 StepFun Provider，不混音。partial 只用于控制台状态，final 立即以带来源的 `user_voice` 事件进入 Room，并按每个来源独立的语音轮次策略触发观察。
+- 影响：主播麦克风使用 `source_id=host`，系统声音使用 `source_id=system-audio`；模型和界面都能区分来源。非 Windows 平台明确显示不支持，系统声音失败只降级该通道，不结束麦克风、画面或 Session。
+
 ## 4. 开放问题
 
 ### Q-001：Electron 与 FastAPI 的媒体编码是什么？

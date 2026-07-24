@@ -7,6 +7,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:system-audio": "pnpm build && node scripts/system-audio-smoke.mjs",
     "smoke:capture": "pnpm build && node scripts/capture-smoke.mjs",
     "smoke:floating-chat": "pnpm build && node scripts/floating-chat-smoke.mjs",
     "smoke:tray": "pnpm build && node scripts/tray-smoke.mjs",

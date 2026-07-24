@@ -1,7 +1,6 @@
-export type BinaryMediaType = "audio" | "image";
+import type { AudioSource } from "../../shared/contracts";
 
-export type BinaryEnvelopeInput = {
-  mediaType: BinaryMediaType;
+type BinaryEnvelopeBase = {
   sessionId: string;
   inputId: string;
   capturedAtMs: number;
@@ -9,9 +8,19 @@ export type BinaryEnvelopeInput = {
   body: Uint8Array;
 };
 
+export type BinaryEnvelopeInput =
+  | (BinaryEnvelopeBase & {
+      mediaType: "audio";
+      source: AudioSource;
+    })
+  | (BinaryEnvelopeBase & {
+      mediaType: "image";
+      source?: never;
+    });
+
 const MAGIC = Buffer.from("ADVX", "ascii");
-const VERSION = 1;
-const FIXED_HEADER_BYTES = 24;
+const VERSION = 2;
+const FIXED_HEADER_BYTES = 25;
 const MAX_TEXT_BYTES = 128;
 const MAX_AUDIO_BYTES = 1_048_576;
 const MAX_IMAGE_BYTES = 4_194_304;
@@ -46,11 +55,12 @@ export function encodeBinaryEnvelope(input: BinaryEnvelopeInput): Uint8Array {
   MAGIC.copy(output, 0);
   output.writeUInt8(VERSION, 4);
   output.writeUInt8(input.mediaType === "audio" ? 1 : 2, 5);
-  output.writeUInt16BE(sessionId.length, 6);
-  output.writeUInt16BE(inputId.length, 8);
-  output.writeBigUInt64BE(BigInt(input.capturedAtMs), 10);
-  output.writeUInt16BE(format.length, 18);
-  output.writeUInt32BE(body.length, 20);
+  output.writeUInt8(sourceByte(input), 6);
+  output.writeUInt16BE(sessionId.length, 7);
+  output.writeUInt16BE(inputId.length, 9);
+  output.writeBigUInt64BE(BigInt(input.capturedAtMs), 11);
+  output.writeUInt16BE(format.length, 19);
+  output.writeUInt32BE(body.length, 21);
 
   let cursor = FIXED_HEADER_BYTES;
   for (const part of [sessionId, inputId, format, body]) {
@@ -58,6 +68,13 @@ export function encodeBinaryEnvelope(input: BinaryEnvelopeInput): Uint8Array {
     cursor += part.length;
   }
   return output;
+}
+
+function sourceByte(input: BinaryEnvelopeInput): number {
+  if (input.mediaType === "image") return 0;
+  if (input.source === "microphone") return 1;
+  if (input.source === "system_audio") return 2;
+  throw new Error("Audio source is not supported.");
 }
 
 function encodeText(value: string, field: string): Buffer {

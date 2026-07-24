@@ -1,3 +1,8 @@
-from advx_backend.application.ports.asr import AsrProvider, AudioChunk, TranscriptSegment
+from advx_backend.application.ports.asr import (
+    AsrProvider,
+    AudioChunk,
+    AudioSource,
+    TranscriptSegment,
+)
 
-__all__ = ["AsrProvider", "AudioChunk", "TranscriptSegment"]
+__all__ = ["AsrProvider", "AudioChunk", "AudioSource", "TranscriptSegment"]
