@@ -140,6 +140,58 @@ export type BackendBarrageEvent = {
   expiresAt: number
 }
 
+export type ViewerPresenceState =
+  | 'not_joined'
+  | 'active'
+  | 'left'
+  | 'kicked'
+  | 'ended'
+  | 'removed'
+
+export type BackendViewerSnapshot = {
+  viewer_instance_id: string
+  username: string
+  display_name: string
+  avatar_seed: string
+  color_seed: string
+  persona_id: string
+  persona_display_name: string
+  presence_state: ViewerPresenceState
+  joined_at_ms: number | null
+  last_left_at_ms: number | null
+  join_count: number
+  muted_until_ms: number | null
+  viewer_sequence: number
+  presence_revision: number
+  moderation_revision: number
+}
+
+export type BackendAudienceSnapshot = {
+  session_id: string
+  room_id: string
+  audience_epoch: number
+  population_revision: number
+  target_concurrent_viewers: number
+  active_count: number
+  viewers: BackendViewerSnapshot[]
+}
+
+export type BackendViewerEvent = {
+  type:
+    | 'viewer.joined'
+    | 'viewer.left'
+    | 'viewer.rejoined'
+    | 'viewer.muted'
+    | 'viewer.unmuted'
+    | 'viewer.kicked'
+  protocol_version: 3
+  session_id: string
+  audience_epoch: number
+  population_revision: number
+  occurred_at_ms: number
+  viewer: BackendViewerSnapshot
+}
+
 export type RealtimeMediaInput = {
   inputId: string
   capturedAtMs: number
@@ -231,6 +283,19 @@ export type ControlApi = {
   resumeBackendSession: () => Promise<BackendSessionSnapshot>
   stopBackendSession: () => Promise<BackendSessionSnapshot>
   queryAudienceRuntime: (sessionId: string) => Promise<RuntimeQuerySnapshot>
+  queryLiveAudience: (sessionId: string) => Promise<BackendAudienceSnapshot>
+  muteViewer: (
+    sessionId: string,
+    viewerId: string,
+    durationMs: number,
+    reason?: string
+  ) => Promise<BackendViewerSnapshot>
+  unmuteViewer: (sessionId: string, viewerId: string) => Promise<BackendViewerSnapshot>
+  kickViewer: (
+    sessionId: string,
+    viewerId: string,
+    reason?: string
+  ) => Promise<BackendViewerSnapshot>
   applyAudienceRuntime: (
     sessionId: string,
     workspace: AudienceWorkspaceState,
@@ -311,6 +376,7 @@ export type ControlApi = {
   onOverlaySettingsChanged: (listener: (settings: OverlaySettings) => void) => () => void
   onBackendStatus: (listener: (status: BackendRuntimeStatus) => void) => () => void
   onBackendBarrage: (listener: (event: BackendBarrageEvent) => void) => () => void
+  onBackendViewerEvent: (listener: (event: BackendViewerEvent) => void) => () => void
 }
 
 export type OverlayApi = {

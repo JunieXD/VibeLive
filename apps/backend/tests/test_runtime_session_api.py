@@ -32,8 +32,8 @@ def persona(persona_id: str, *, revision: int = 1) -> dict[str, object]:
 
 def runtime_spec(*, revision: int = 1, persona_revision: int = 1) -> dict[str, object]:
     return {
-        "protocol_version": 2,
-        "audience_contract_version": 1,
+        "protocol_version": 3,
+        "audience_contract_version": 2,
         "config_revision": revision,
         "room": {
             "room_id": "room-1",
@@ -49,7 +49,7 @@ def runtime_spec(*, revision: int = 1, persona_revision: int = 1) -> dict[str, o
                 "mode_id": "mode-1",
                 "namespace_id": "mode-1",
                 "revision": revision,
-                "viewer_count": 1,
+                "target_concurrent_viewers": 1,
                 "persona_ids": ["persona-1"],
                 "persona_weights": {"persona-1": 1},
                 "persona_overrides": {},
@@ -84,7 +84,7 @@ def start_body(
     }
 
 
-def headers(*, version: str = "2") -> dict[str, str]:
+def headers(*, version: str = "3") -> dict[str, str]:
     return {
         "Authorization": f"Bearer {LOCAL_TOKEN}",
         PROTOCOL_VERSION_HEADER: version,
@@ -240,7 +240,7 @@ def test_runtime_current_apply_and_rollback_are_explicit_session_operations() ->
     apply_request = {
         "apply_id": "apply-2",
         "base_revision": 1,
-        "audience_contract_version": 1,
+        "audience_contract_version": 2,
         "canonical_runtime_spec": next_spec,
         "client_config_hash": start_body(spec=next_spec)["client_config_hash"],
     }
@@ -260,7 +260,7 @@ def test_runtime_current_apply_and_rollback_are_explicit_session_operations() ->
                 "apply_id": "rollback-1",
                 "base_revision": 2,
                 "target_revision": 1,
-                "audience_contract_version": 1,
+                "audience_contract_version": 2,
             },
         )
 
@@ -288,7 +288,7 @@ def test_failed_apply_preserves_previous_committed_runtime() -> None:
             json={
                 "apply_id": "apply-2",
                 "base_revision": 1,
-                "audience_contract_version": 1,
+                "audience_contract_version": 2,
                 "canonical_runtime_spec": next_spec,
                 "client_config_hash": start_body(spec=next_spec)["client_config_hash"],
             },
@@ -346,7 +346,7 @@ def test_v1_runtime_request_is_rejected_as_an_explicit_conflict() -> None:
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "protocol_version_conflict"
-    assert response.headers[PROTOCOL_VERSION_HEADER] == "2"
+    assert response.headers[PROTOCOL_VERSION_HEADER] == "3"
     assert service.starts == {}
 
 
@@ -361,5 +361,5 @@ def test_unknown_runtime_protocol_version_is_rejected_as_unprocessable() -> None
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "unsupported_protocol_version"
-    assert response.headers[PROTOCOL_VERSION_HEADER] == "2"
+    assert response.headers[PROTOCOL_VERSION_HEADER] == "3"
     assert service.starts == {}

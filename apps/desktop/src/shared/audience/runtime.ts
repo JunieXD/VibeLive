@@ -27,7 +27,7 @@ export function compileAudienceRuntimeSnapshot(
       revision: mode.revision,
       name: mode.name,
       description: mode.description,
-      viewerCount: mode.viewerCount,
+      targetConcurrentViewers: mode.targetConcurrentViewers,
       normalResponseRange: [...mode.normalResponseRange],
       highlightResponseRange: [...mode.highlightResponseRange],
       ambience: mode.ambience,

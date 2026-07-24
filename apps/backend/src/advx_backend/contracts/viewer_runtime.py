@@ -15,6 +15,7 @@ from advx_backend.domain.observation_wave import (
     ViewerVisualInputMode,
 )
 from advx_backend.domain.persona import ModeDefinition, PersonaTemplate
+from advx_backend.domain.scene_assessment import SceneAssessment
 from advx_backend.domain.viewer import ViewerInstance, ViewerInstanceVariant, ViewerPrivateState
 
 
@@ -80,8 +81,8 @@ class ViewerRuntimeTelemetry(RuntimeContractModel):
 
 
 class CanonicalRuntimeSpec(RuntimeContractModel):
-    protocol_version: Literal[2] = PROTOCOL_VERSION
-    audience_contract_version: Literal[1] = AUDIENCE_CONTRACT_VERSION
+    protocol_version: Literal[3] = PROTOCOL_VERSION
+    audience_contract_version: Literal[2] = AUDIENCE_CONTRACT_VERSION
     config_revision: int = Field(ge=1)
     room: Room
     active_mode_id: str = Field(min_length=1, max_length=128)
@@ -206,7 +207,7 @@ class RuntimeDiffSummary(RuntimeContractModel):
 class RuntimeApplyRequest(RuntimeContractModel):
     apply_id: str = Field(min_length=1, max_length=128)
     base_revision: int = Field(ge=0)
-    audience_contract_version: Literal[1] = AUDIENCE_CONTRACT_VERSION
+    audience_contract_version: Literal[2] = AUDIENCE_CONTRACT_VERSION
     canonical_runtime_spec: CanonicalRuntimeSpec
     client_config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     provider_candidate: RuntimeModelProviderCandidate | None = Field(
@@ -246,7 +247,7 @@ class RuntimeRollbackRequest(RuntimeContractModel):
     apply_id: str = Field(min_length=1, max_length=128)
     base_revision: int = Field(ge=1)
     target_revision: int = Field(ge=1)
-    audience_contract_version: Literal[1] = AUDIENCE_CONTRACT_VERSION
+    audience_contract_version: Literal[2] = AUDIENCE_CONTRACT_VERSION
     provider_candidate: RuntimeModelProviderCandidate | None = Field(
         default=None,
         repr=False,
@@ -279,6 +280,18 @@ class EvidenceRef(RuntimeContractModel):
         return self
 
 
+class ViewerPublicEvent(RuntimeContractModel):
+    event_id: str = Field(min_length=1, max_length=128)
+    sequence: int = Field(ge=1)
+    source_type: str = Field(min_length=1, max_length=64)
+    source_id: str | None = Field(default=None, min_length=1, max_length=128)
+    text: str | None = Field(default=None, max_length=4_000)
+    viewer_instance_id: str | None = Field(default=None, min_length=1, max_length=128)
+    display_name: str | None = Field(default=None, min_length=1, max_length=64)
+    target_viewer_id: str | None = Field(default=None, min_length=1, max_length=128)
+    occurred_at_ms: int = Field(ge=0)
+
+
 class ViewerGenerationRequest(RuntimeContractModel):
     room_id: str = Field(min_length=1, max_length=128)
     session_id: str = Field(min_length=1, max_length=128)
@@ -287,7 +300,15 @@ class ViewerGenerationRequest(RuntimeContractModel):
     generation_request_id: str = Field(min_length=1, max_length=128)
     viewer_instance_id: str = Field(min_length=1, max_length=128)
     viewer_sequence: int = Field(ge=1)
+    username: str = Field(min_length=1, max_length=64)
+    display_name: str = Field(min_length=1, max_length=64)
+    persona: PersonaTemplate
     persona_revision: int = Field(ge=1)
+    presence_revision: int = Field(ge=1)
+    moderation_revision: int = Field(ge=1)
+    behavior_revision: int = Field(ge=1)
+    scene_assessment: SceneAssessment
+    active_viewer_ids: list[str] = Field(default_factory=list, max_length=128)
     instance_variant: ViewerInstanceVariant
     mode_context: dict[str, JsonValue]
     visual_input_mode: ViewerVisualInputMode
@@ -295,6 +316,7 @@ class ViewerGenerationRequest(RuntimeContractModel):
     shared_visual_summary: str | None = Field(default=None, max_length=8_000)
     input_event_ids: list[str] = Field(default_factory=list, max_length=128)
     public_context_event_ids: list[str] = Field(default_factory=list, max_length=512)
+    public_context: list[ViewerPublicEvent] = Field(default_factory=list, max_length=512)
     viewer_private_state: ViewerPrivateState
     room_memory_slice: RoomMemorySlice
     deadline_at_ms: int = Field(gt=0)
@@ -309,6 +331,46 @@ class ViewerGenerationRequest(RuntimeContractModel):
         return self
 
 
+class ViewerReactionIntent(StrEnum):
+    REACT_TO_HOST = "react_to_host"
+    REACT_TO_SCENE = "react_to_scene"
+    REPLY_TO_VIEWER = "reply_to_viewer"
+    ASK_QUESTION = "ask_question"
+    AGREE = "agree"
+    DISAGREE = "disagree"
+    ENCOURAGE = "encourage"
+    JOKE = "joke"
+    CONTINUE_THREAD = "continue_thread"
+    ROOM_META = "room_meta"
+    SILENCE = "silence"
+
+
+class ViewerTargetKind(StrEnum):
+    HOST = "host"
+    SCENE = "scene"
+    ROOM = "room"
+    VIEWER = "viewer"
+    EVENT = "event"
+
+
+class ViewerReactionTarget(RuntimeContractModel):
+    kind: ViewerTargetKind
+    viewer_instance_id: str | None = Field(default=None, min_length=1, max_length=128)
+    event_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "ViewerReactionTarget":
+        if self.kind is ViewerTargetKind.VIEWER and self.viewer_instance_id is None:
+            raise ValueError("viewer target requires viewer_instance_id")
+        if self.kind is ViewerTargetKind.EVENT and self.event_id is None:
+            raise ValueError("event target requires event_id")
+        if self.kind is not ViewerTargetKind.VIEWER and self.viewer_instance_id is not None:
+            raise ValueError("viewer_instance_id requires viewer target")
+        if self.kind is not ViewerTargetKind.EVENT and self.event_id is not None:
+            raise ValueError("event_id requires event target")
+        return self
+
+
 class ViewerAction(StrEnum):
     BARRAGE = "barrage"
     SILENCE = "silence"
@@ -319,6 +381,8 @@ class ViewerGenerationResponse(RuntimeContractModel):
     viewer_instance_id: str = Field(min_length=1, max_length=128)
     viewer_sequence: int = Field(ge=1)
     action: ViewerAction
+    intent: ViewerReactionIntent = ViewerReactionIntent.REACT_TO_SCENE
+    target: ViewerReactionTarget | None = None
     text: str | None = Field(default=None, min_length=1, max_length=200)
     reaction_type: str = Field(min_length=1, max_length=64)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
@@ -329,6 +393,8 @@ class ViewerGenerationResponse(RuntimeContractModel):
             raise ValueError("barrage requires text")
         if self.action is ViewerAction.SILENCE and self.text is not None:
             raise ValueError("silence cannot include text")
+        if self.action is ViewerAction.SILENCE and self.target is not None:
+            raise ValueError("silence cannot include target")
         return self
 
 
@@ -344,6 +410,8 @@ class ViewerBarrageEvent(RuntimeContractModel):
     display_name: str = Field(min_length=1, max_length=64)
     viewer_sequence: int = Field(ge=1)
     reaction_type: str = Field(min_length=1, max_length=64)
+    intent: ViewerReactionIntent
+    target: ViewerReactionTarget | None = None
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
     text: str = Field(min_length=1, max_length=200)
     created_at_ms: int = Field(ge=0)

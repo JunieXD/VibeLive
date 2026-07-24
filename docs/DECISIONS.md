@@ -192,7 +192,7 @@
 
 - 状态：`Accepted`
 - 日期：2026-07-23
-- 决定：导演保留 `CrowdDecision` 调度输出，并新增独立的 `MemeCandidate`。梗可以来自用户文字、最终语音转写、近期真实事件或 AI 互动；导演判断成立且本地校验通过后，候选自动进入当时的激活模式。
+- 决定：导演输出 `SceneAssessment`，并可附带独立的 `MemeCandidate`。梗可以来自用户文字、最终语音转写、近期真实事件或 AI 互动；导演判断成立且本地校验通过后，候选自动进入当时的激活模式。
 - 影响：自动入库必须可撤销，梗条目需要持久化、衰减和归档。`MemeCandidate` 不能直接显示为弹幕、写成 `audience_barrage` 或进入 Overlay；只有后续归属于明确观众的合法弹幕才能显示。
 
 ### D-028：当前迭代先实现桌面前端与产品合同
@@ -218,7 +218,7 @@
 
 ### D-031：PersonaTemplate 与 ViewerInstance 分离
 
-- 状态：`Accepted`
+- 状态：`Superseded`，由 D-040 细化
 - 日期：2026-07-24
 - 决定：PersonaTemplate 是可复用表达模板；ViewerInstance 是 Session 内独立 AI 观众。一个 Session 最多创建 32 个 ViewerInstance，同一 PersonaTemplate 可以对应多个实例。现有 32 个 PersonaTemplate 继续作为素材库，但模板数量不是产品不变量。
 - 影响：每个实例拥有稳定 ID、确定性别名、微变体和短期状态。`personality.md` 是结构化 PersonaTemplate 的交换格式，不为每个 Viewer 复制一份。
@@ -232,21 +232,21 @@
 
 ### D-033：Mode 通过人数和权重建立 Viewer 池
 
-- 状态：`Accepted`
+- 状态：`Superseded`，由 D-040 取代
 - 日期：2026-07-24
 - 决定：ModeDefinition 使用 `viewer_count`、`persona_weights`、普通/高光 response range、人格覆盖和 ambience。权重只用于确定性 Viewer 池分配，不在 Director 中再次加权。
 - 影响：六个现有模式的初始 Viewer 数为 24、28、16、14、24、14。UI 保存权重并预览准确实例数，房间人数、每波响应人数和网络并发数必须分开。
 
 ### D-034：ObservationWave、Director 与独立 Viewer 请求
 
-- 状态：`Accepted`
+- 状态：`Superseded`，由 D-040 取代 Director 选人部分
 - 日期：2026-07-24
 - 决定：文字、final 语音、显著画面变化和受控 ambient tick 形成 ObservationWave。FastAPI 计算硬预算，Director 每波调用一次并选择准确 ViewerInstance ID；每个 selected Viewer 发起一次独立模型请求。
 - 影响：首版不实现多 Viewer batching。同一波使用冻结上下文，AI 输出不能直接递归触发新波。Viewer 每波返回一条弹幕或合法 silence，并携带 reaction type 和 evidence refs。
 
 ### D-035：运行时配置使用版本化原子热更新
 
-- 状态：`Accepted`
+- 状态：`Superseded`，由 D-040 细化 Viewer 保留语义
 - 日期：2026-07-24
 - 决定：Electron 自动保存编辑；默认通过“应用到当前会话”把完整 runtime spec 原子切换到新 `audience_epoch`，开发模式可启用保存后自动应用。
 - 影响：旧 epoch 请求零副作用；配置可以查询、回滚和重放。未变化 Viewer 保留状态，Persona 内容变化清空对应短期状态，模式切换重建 Viewer 池但不清空 Room 记忆。
@@ -278,6 +278,13 @@
 - 日期：2026-07-24
 - 决定：使用固定 CS2/CSGO 片段、脚本化 final 语音和文字验证普通跑图、高光、失误、点名、6657 权重热更新、共享记忆和模式梗，再补真实游戏 smoke。
 - 影响：真实模型按身份、证据、反应类别和状态变化验收，不比较固定弹幕文本。
+
+### D-040：Session Viewer 生命周期与逐 Viewer 行为决策
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：PersonaTemplate 是持久化行为模板，ViewerInstance 是仅属于单次 Session 的独立观众，拥有与 Persona 无关的用户名和头像种子。Mode 使用 `target_concurrent_viewers` 表示目标同时在线人数，Persona 权重只在创建 Viewer 时决定 assignment。Director 只输出 `SceneAssessment`；每个 active 且未禁言 Viewer 使用本地可解释概率和稳定抽样独立决定是否发言，最终候选再各自调用一次模型。
+- 影响：Viewer 可以加入、离开、同场重返、限时禁言、解除禁言和被踢；被踢后本场不可重返并可由新 Viewer 补位。Mode 热更新保留 ViewerIdentity。最终提交同时校验 epoch、sequence、presence/moderation/behavior revisions。正常关播清空当前 audience 和私有状态，新直播创建全新 Viewer；异常重启恢复同一未终止 Session 的 Viewer。
 
 ## 4. 开放问题
 

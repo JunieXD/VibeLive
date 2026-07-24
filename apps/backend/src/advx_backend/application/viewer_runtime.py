@@ -3,7 +3,7 @@ import logging
 import unicodedata
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from advx_backend.application.ports.session import Clock, IdGenerator
 from advx_backend.application.ports.viewer import (
@@ -19,10 +19,15 @@ from advx_backend.application.viewer_trace import (
     build_viewer_request_trace,
 )
 from advx_backend.contracts.debug import ObservationWaveStatus, TraceResponseStatus
-from advx_backend.contracts.viewer_runtime import ViewerAction, ViewerGenerationRequest
+from advx_backend.contracts.viewer_runtime import (
+    ViewerAction,
+    ViewerGenerationRequest,
+    ViewerPublicEvent,
+)
 from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation_wave import ObservationWave, ViewerVisualInputMode
+from advx_backend.domain.persona import PersonaTemplate
 from advx_backend.domain.viewer import ViewerInstance, ViewerLifecycleState
 
 logger = logging.getLogger(__name__)
@@ -126,11 +131,18 @@ class _RuntimeLane:
 class _RequestContext:
     mode_context: dict[str, Any] = field(default_factory=dict)
     public_context_event_ids: list[str] = field(default_factory=list)
+    public_context: list[ViewerPublicEvent] = field(default_factory=list)
     room_memory_slice: RoomMemorySlice | None = None
 
 
 class _ViewerRequestExpired(TimeoutError):
     pass
+
+
+class ViewerBehaviorStateSink(Protocol):
+    async def record_published(self, request: ViewerGenerationRequest, event: object) -> None: ...
+
+    async def record_silence(self, request: ViewerGenerationRequest) -> None: ...
 
 
 class ViewerRuntime:
@@ -150,6 +162,7 @@ class ViewerRuntime:
         sequence_claimer: ViewerSequenceClaimer | None = None,
         trace_recorder: ViewerTraceSink | None = None,
         debug_service: ViewerTraceSink | None = None,
+        behavior_state_sink: ViewerBehaviorStateSink | None = None,
     ) -> None:
         if max_in_flight < 1:
             raise ValueError("max_in_flight must be at least one")
@@ -171,6 +184,7 @@ class ViewerRuntime:
         self._trace_recorder = trace_recorder or debug_service
         self._default_max_in_flight = max_in_flight
         self._default_queue_capacity = 64
+        self._behavior_state_sink = behavior_state_sink
         self._lanes: dict[tuple[object, ...], _RuntimeLane] = {}
         self._mailboxes: dict[str, _ViewerMailbox] = {}
         self._sequences: dict[str, int] = {}
@@ -239,6 +253,40 @@ class ViewerRuntime:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def cancel_viewer(
+        self,
+        viewer_instance_id: str,
+        *,
+        reason: str = "viewer_state_changed",
+    ) -> None:
+        """Cancel all queued or in-flight work owned by one Viewer."""
+
+        async with self._lock:
+            mailbox = self._mailboxes.pop(viewer_instance_id, None)
+            if mailbox is None:
+                return
+            items = tuple(
+                {
+                    id(item): item
+                    for item in (mailbox.current, mailbox.pending)
+                    if item is not None
+                }.values()
+            )
+            for item in items:
+                self._record_trace(
+                    item,
+                    status=TraceResponseStatus.CANCELLED,
+                    accepted=False,
+                    reason=reason,
+                    validation_codes=("cancelled",),
+                )
+                self._discard_item_locked(item)
+                self._resolve(item, "cancelled")
+            task = mailbox.task
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def dispatch(
         self,
@@ -338,6 +386,7 @@ class ViewerRuntime:
                 wave=wave,
                 runtime=runtime,
                 sequence=sequence,
+                active_viewer_ids=available_viewer_ids,
             )
             item = _WorkItem(
                 request=request,
@@ -566,6 +615,7 @@ class ViewerRuntime:
                 status=TraceResponseStatus.SILENCE,
                 accepted=True,
             )
+            await self._record_behavior_silence(request)
             return "silenced"
         validation = self._barrage_pipeline.validate(request=request, response=response)
         if not validation.accepted:
@@ -633,6 +683,7 @@ class ViewerRuntime:
                     "generation_request_id": request.generation_request_id,
                 },
             )
+        await self._record_behavior_published(request, validation.event)
         self._record_trace(
             item,
             status=TraceResponseStatus.PUBLISHED,
@@ -645,6 +696,32 @@ class ViewerRuntime:
             published_barrage_id=getattr(validation.event, "barrage_id", None),
         )
         return "published"
+
+    async def _record_behavior_published(
+        self,
+        request: ViewerGenerationRequest,
+        event: object,
+    ) -> None:
+        if self._behavior_state_sink is None:
+            return
+        try:
+            await self._behavior_state_sink.record_published(request, event)
+        except Exception as error:
+            logger.warning(
+                "Viewer behavior state update failed after publish",
+                extra={"error_type": type(error).__name__},
+            )
+
+    async def _record_behavior_silence(self, request: ViewerGenerationRequest) -> None:
+        if self._behavior_state_sink is None:
+            return
+        try:
+            await self._behavior_state_sink.record_silence(request)
+        except Exception as error:
+            logger.warning(
+                "Viewer behavior state update failed after silence",
+                extra={"error_type": type(error).__name__},
+            )
 
     async def _commit_published_event(
         self,
@@ -684,6 +761,9 @@ class ViewerRuntime:
             audience_epoch=item.request.audience_epoch,
             viewer_instance_id=item.request.viewer_instance_id,
             viewer_sequence=item.request.viewer_sequence,
+            presence_revision=item.request.presence_revision,
+            moderation_revision=item.request.moderation_revision,
+            behavior_revision=item.request.behavior_revision,
             operation=commit_to_completion,
         )
         if not accepted or result is None:
@@ -721,6 +801,9 @@ class ViewerRuntime:
             audience_epoch=request.audience_epoch,
             viewer_instance_id=request.viewer_instance_id,
             viewer_sequence=request.viewer_sequence,
+            presence_revision=request.presence_revision,
+            moderation_revision=request.moderation_revision,
+            behavior_revision=request.behavior_revision,
             deadline_at_ms=request.deadline_at_ms,
         ):
             self._record_trace(
@@ -952,6 +1035,7 @@ class ViewerRuntime:
         wave: ObservationWave,
         runtime: object,
         sequence: int,
+        active_viewer_ids: tuple[str, ...],
     ) -> ViewerGenerationRequest:
         context = self._request_context(runtime, wave)
         frame_bundle = wave.frame_bundle
@@ -966,6 +1050,10 @@ class ViewerRuntime:
             "_viewer_persona_id": viewer.persona_id,
             "_viewer_display_name": viewer.display_name,
         }
+        persona = self._resolved_persona(runtime, viewer)
+        assessment = getattr(runtime, "scene_assessment", None)
+        if assessment is None:
+            raise ValueError("Viewer runtime requires a SceneAssessment")
         return ViewerGenerationRequest(
             room_id=wave.room_id,
             session_id=wave.session_id,
@@ -974,7 +1062,15 @@ class ViewerRuntime:
             generation_request_id=self._id_generator.new_id(),
             viewer_instance_id=viewer.viewer_instance_id,
             viewer_sequence=sequence,
+            username=viewer.username,
+            display_name=viewer.display_name,
+            persona=persona,
             persona_revision=viewer.persona_revision,
+            presence_revision=viewer.presence_revision,
+            moderation_revision=viewer.moderation_revision,
+            behavior_revision=viewer.behavior_revision,
+            scene_assessment=assessment,
+            active_viewer_ids=list(active_viewer_ids),
             instance_variant=viewer.variant,
             mode_context=mode_context,
             visual_input_mode=visual_mode,
@@ -986,6 +1082,7 @@ class ViewerRuntime:
             shared_visual_summary=shared_summary,
             input_event_ids=wave.trigger_event_ids,
             public_context_event_ids=context.public_context_event_ids,
+            public_context=context.public_context,
             viewer_private_state=viewer.private_state,
             room_memory_slice=memory,
             deadline_at_ms=self._deadline(wave, runtime),
@@ -1016,11 +1113,64 @@ class ViewerRuntime:
         memory = getattr(runtime, "room_memory_slice", None)
         if not isinstance(memory, RoomMemorySlice) or memory.room_id != wave.room_id:
             memory = None
+        public_events: list[ViewerPublicEvent] = []
+        for event in getattr(runtime, "public_context", ()):
+            payload = getattr(event, "payload", {})
+            viewer_id = payload.get("viewer_instance_id")
+            display_name = payload.get("display_name")
+            target_viewer_id = payload.get("target_viewer_id")
+            public_events.append(
+                ViewerPublicEvent(
+                    event_id=event.event_id,
+                    sequence=event.sequence,
+                    source_type=event.source_type.value,
+                    source_id=event.source_id,
+                    text=event.text,
+                    viewer_instance_id=(viewer_id if isinstance(viewer_id, str) else None),
+                    display_name=(display_name if isinstance(display_name, str) else None),
+                    target_viewer_id=(
+                        target_viewer_id if isinstance(target_viewer_id, str) else None
+                    ),
+                    occurred_at_ms=event.created_at_ms,
+                )
+            )
         return _RequestContext(
             mode_context=mode_context,
             public_context_event_ids=list(public_ids),
+            public_context=public_events,
             room_memory_slice=memory,
         )
+
+    @staticmethod
+    def _resolved_persona(runtime: object, viewer: ViewerInstance) -> PersonaTemplate:
+        spec = getattr(runtime, "canonical_runtime_spec", runtime)
+        persona = next(
+            (
+                item
+                for item in getattr(spec, "personas", ())
+                if item.persona_id == viewer.persona_id
+            ),
+            None,
+        )
+        if not isinstance(persona, PersonaTemplate):
+            raise ValueError("Viewer references an unavailable PersonaTemplate")
+        active_mode_id = getattr(spec, "active_mode_id", None)
+        mode = next(
+            (
+                item
+                for item in getattr(spec, "modes", ())
+                if item.mode_id == active_mode_id
+            ),
+            None,
+        )
+        override = (
+            None
+            if mode is None
+            else mode.persona_overrides.get(viewer.persona_id)
+        )
+        if override is None:
+            return persona
+        return persona.model_copy(update=override.model_dump(exclude_none=True))
 
     @staticmethod
     def _deadline(wave: ObservationWave, runtime: object) -> int:

@@ -10,7 +10,7 @@ router = APIRouter(tags=["system"])
 
 class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"] = "ok"
-    protocol_version: Literal[2] = PROTOCOL_VERSION
+    protocol_version: Literal[3] = PROTOCOL_VERSION
     persistence_error: dict[str, str] | None = None
 
 

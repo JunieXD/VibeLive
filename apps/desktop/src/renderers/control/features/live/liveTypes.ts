@@ -1,5 +1,9 @@
 import type { CSSProperties, Dispatch, RefObject, SetStateAction } from 'react'
-import type { DesktopSource, MediaAccessStatus } from '../../../../shared/contracts'
+import type {
+  BackendAudienceSnapshot,
+  DesktopSource,
+  MediaAccessStatus
+} from '../../../../shared/contracts'
 import type { ProviderProbeResult } from '../../../../shared/backend-client'
 import type { SessionState } from '../../../../shared/session'
 import type {
@@ -58,6 +62,14 @@ export type LiveChatProps = {
   chatListRef: RefObject<HTMLDivElement | null>
 }
 
+export type LiveAudienceProps = {
+  audience: BackendAudienceSnapshot | null
+  pendingViewerId: string | null
+  onMute: (viewerId: string, durationMs: number) => Promise<void>
+  onUnmute: (viewerId: string) => Promise<void>
+  onKick: (viewerId: string) => Promise<void>
+}
+
 export type LiveMixerProps = {
   captureStream: MediaStream | null
   cameraStream: MediaStream | null
@@ -96,6 +108,7 @@ export type LiveViewProps = {
   session: SessionState
   stage: LiveStageProps
   chat: LiveChatProps
+  audience: LiveAudienceProps
   mixer: LiveMixerProps
   devices: LiveDeviceStripProps
 }

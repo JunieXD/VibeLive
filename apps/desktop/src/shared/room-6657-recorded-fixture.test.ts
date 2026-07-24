@@ -84,7 +84,7 @@ function compileFixtureSpecs() {
       primary_persona_ids: primaryPersonaIds,
       secondary_persona_ids: secondaryPersonaIds,
       persona_alias_bases: personaNames,
-      initial_viewer_count: initialMode.viewer_count,
+      initial_viewer_count: initialMode.target_concurrent_viewers,
       initial_persona_weights: initialMode.persona_weights
     }
   }

@@ -16,7 +16,7 @@ export type AudienceWorkspaceParseResult =
   | {
       readonly ok: true
       readonly workspace: AudienceWorkspaceState
-      readonly migratedFromVersion?: 1
+      readonly migratedFromVersion?: 1 | 2
       readonly legacyMemes?: readonly LegacyLocalMeme[]
     }
   | { readonly ok: false; readonly issues: readonly string[] }
@@ -29,8 +29,8 @@ export type LegacyLocalMeme = {
 
 export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspaceParseResult {
   if (!isRecord(value)) return { ok: false, issues: ['workspace must be an object'] }
-  if (value.version !== 1 && value.version !== 2) {
-    return { ok: false, issues: ['version must be 1 or 2'] }
+  if (value.version !== 1 && value.version !== 2 && value.version !== 3) {
+    return { ok: false, issues: ['version must be 1, 2 or 3'] }
   }
   const sourceVersion = value.version
   const issues: string[] = []
@@ -38,10 +38,10 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
   const legacyMemes = sourceVersion === 1
     ? parseLegacyMemes(value.memes, issues)
     : []
-  if (sourceVersion === 2 && Array.isArray(value.memes) && value.memes.length > 0) {
+  if (sourceVersion >= 2 && Array.isArray(value.memes) && value.memes.length > 0) {
     issues.push('legacy local memes require Shared Brain migration and were not loaded')
   } else if (
-    sourceVersion === 2 &&
+    sourceVersion >= 2 &&
     value.memes !== undefined &&
     !Array.isArray(value.memes)
   ) {
@@ -62,10 +62,13 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
 
   validateReferences(personas, modes, activeModeId, issues)
   if (issues.length > 0) return { ok: false, issues }
+  const migratedFromVersion = sourceVersion === 1 || sourceVersion === 2
+    ? sourceVersion
+    : undefined
   return {
     ok: true,
-    workspace: { version: 2, personas, modeState: { modes, activeModeId } },
-    ...(sourceVersion === 1 ? { migratedFromVersion: 1 as const } : {}),
+    workspace: { version: 3, personas, modeState: { modes, activeModeId } },
+    ...(migratedFromVersion === undefined ? {} : { migratedFromVersion }),
     ...(legacyMemes.length > 0 ? { legacyMemes } : {})
   }
 }
@@ -105,7 +108,7 @@ function parseLegacyMemes(value: unknown, issues: string[]): LegacyLocalMeme[] {
 
 function parsePersonas(
   value: unknown,
-  sourceVersion: 1 | 2,
+  sourceVersion: 1 | 2 | 3,
   issues: string[]
 ): PersonaTemplate[] {
   const builtInIds = new Set(BASE_PERSONAS.map((persona) => persona.id))
@@ -125,7 +128,7 @@ function parsePersonas(
 function parsePersona(
   value: unknown,
   path: string,
-  sourceVersion: 1 | 2,
+  sourceVersion: 1 | 2 | 3,
   issues: string[]
 ): PersonaTemplate | null {
   if (!isRecord(value)) return fail(path, 'must be an object', issues)
@@ -152,7 +155,7 @@ function parsePersona(
 function parseMode(
   value: unknown,
   path: string,
-  sourceVersion: 1 | 2,
+  sourceVersion: 1 | 2 | 3,
   issues: string[]
 ): AudienceMode | null {
   if (!isRecord(value)) return fail(path, 'must be an object', issues)
@@ -182,14 +185,22 @@ function parseMode(
   const highlightResponseRange = sourceVersion === 1
     ? legacyBurst
     : integerRange(value.highlightResponseRange, `${path}.highlightResponseRange`, issues)
-  const viewerCount = sourceVersion === 1
+  const targetConcurrentViewers = sourceVersion === 1
     ? clamp(legacyBurst[1], 1, 32)
-    : boundedInteger(value.viewerCount, `${path}.viewerCount`, 1, 32, issues)
-  if (normalResponseRange[1] > viewerCount) {
-    issues.push(`${path}.normalResponseRange maximum cannot exceed viewerCount`)
+    : sourceVersion === 2
+      ? boundedInteger(value.viewerCount, `${path}.viewerCount`, 1, 32, issues)
+      : boundedInteger(
+          value.targetConcurrentViewers,
+          `${path}.targetConcurrentViewers`,
+          1,
+          32,
+          issues
+        )
+  if (normalResponseRange[1] > targetConcurrentViewers) {
+    issues.push(`${path}.normalResponseRange maximum cannot exceed targetConcurrentViewers`)
   }
-  if (highlightResponseRange[1] > viewerCount) {
-    issues.push(`${path}.highlightResponseRange maximum cannot exceed viewerCount`)
+  if (highlightResponseRange[1] > targetConcurrentViewers) {
+    issues.push(`${path}.highlightResponseRange maximum cannot exceed targetConcurrentViewers`)
   }
   if (value.ambience !== 'natural' && value.ambience !== 'continuous') {
     issues.push(`${path}.ambience must be natural or continuous`)
@@ -212,7 +223,7 @@ function parseMode(
     name: value.name as string,
     description: value.description as string,
     builtIn: value.builtIn as boolean,
-    viewerCount,
+    targetConcurrentViewers,
     personaIds,
     personaWeights,
     personaOverrides,

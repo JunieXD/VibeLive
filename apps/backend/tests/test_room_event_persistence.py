@@ -197,6 +197,42 @@ async def test_user_text_event_is_durable_and_recoverable_for_active_runtime(
     ) == (event,)
 
 
+def test_audience_barrage_persistence_accepts_intent_and_target() -> None:
+    event = RoomEvent(
+        event_id="event-1",
+        session_id="session-1",
+        sequence=1,
+        source_type=RoomEventSource.AUDIENCE_BARRAGE,
+        source_id="barrage-1",
+        created_at_ms=1_000,
+        text="说得对",
+        payload={
+            "barrage_id": "barrage-1",
+            "audience_epoch": 1,
+            "observation_id": "observation-1",
+            "generation_request_id": "request-1",
+            "viewer_instance_id": "viewer-1",
+            "persona_id": "persona-1",
+            "display_name": "Viewer",
+            "viewer_sequence": 1,
+            "reaction_type": "reply",
+            "intent": "reply_to_viewer",
+            "target": {"kind": "viewer", "viewer_instance_id": "viewer-2"},
+            "evidence_refs": [{"source": "event", "event_id": "event-0"}],
+            "expires_at_ms": 2_000,
+        },
+    )
+
+    persisted = persisted_room_event(event, room_id="room-1", audience_epoch=1)
+
+    assert restore_room_event(
+        persisted,
+        expected_room_id="room-1",
+        expected_session_id="session-1",
+        maximum_audience_epoch=1,
+    ) == event
+
+
 def test_room_event_recovery_rejects_tampered_content_hash() -> None:
     event = RoomEvent(
         event_id="event-1",

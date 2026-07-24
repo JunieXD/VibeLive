@@ -6,7 +6,7 @@
 >
 > 更新日期：2026-07-24
 >
-> 当前仓库已经实现 Electron/React、FastAPI/SQLite、StepFun ASR、OpenAI-compatible Provider、Room shared brain、ViewerInstance pool、ObservationWave、原子热更新、独立 Viewer 请求、Debug/replay 和 protocol v2 联动基线。deterministic replay 与 Windows Electron + FastAPI + Overlay smoke 已通过；真实 StepFun 能力探测已通过，但完整 credentialed E2E 因生产 Director 上游超时以 `BLOCKED` 收口。macOS 系统级验收尚未执行。完整验收状态以 [VIEWER_RUNTIME_INTEGRATION_PLAN.md](./VIEWER_RUNTIME_INTEGRATION_PLAN.md) 为准。
+> 当前仓库已经实现 Electron/React、FastAPI/SQLite、StepFun ASR、OpenAI-compatible Provider、Room shared brain、PersonaTemplate/ViewerInstance 分离、SceneAssessment、独立 Viewer 决策与请求、观众生命周期和管理、原子热更新、Debug/replay，以及 protocol v3、Audience contract v2 和 workspace v3 联动基线。确定性 replay、桌面测试和 Provider 合同测试已通过；credentialed E2E 仍取决于本地凭据与上游可用性。完整设计和验收标准以 [VIEWER_BEHAVIOR_REDESIGN.md](./VIEWER_BEHAVIOR_REDESIGN.md) 为准。
 
 ## 1. 架构目标
 
@@ -208,13 +208,17 @@ class RoomEvent(TypedDict):
 class ViewerInstance(TypedDict):
     viewer_instance_id: str
     session_id: str
+    username: str
+    avatar_seed: str
     persona_id: str
     persona_revision: int
-    ordinal: int
-    display_name: str
+    creation_ordinal: int
     instance_variant: dict[str, object]
+    presence_state: str
+    presence_revision: int
+    moderation_revision: int
+    behavior_revision: int
     viewer_sequence: int
-    enabled: bool
 
 class RoomLongTermMemory(TypedDict):
     memory_id: str
@@ -234,9 +238,9 @@ class RoomLongTermMemory(TypedDict):
 
 ### 4.4 模式与人格合同
 
-观众产品状态按“模式 > PersonaTemplate 引用与覆盖 > ViewerInstance 池 > 成长梗库”分层。现有 32 个基础人格继续作为首版内置模板库，但 `32` 的运行时含义是单个 Session 最多 32 个 ViewerInstance，不要求存在 32 个唯一人格文件。同一 PersonaTemplate 可以按权重生成多个实例。
+观众产品状态按“模式 > PersonaTemplate 引用与覆盖 > SessionAudience > ViewerInstance > 成长梗库”分层。现有 32 个基础人格继续作为首版内置模板库；同时 active Viewer 上限为 32，同一 Session 内已创建 Viewer 另有有界上限。同一 PersonaTemplate 可以赋予多个实例。
 
-模式保存 `viewer_count`、`persona_weights`、模式内人格覆盖、普通/高光响应人数范围和 ambient 行为。`viewer_count` 范围为 1 到 32；Persona 权重只用于以 Hamilton 最大余数法确定性构建 Viewer 池，Director 不再二次应用权重。状态中只能存在一个 `active_mode_id`，不能把多个模式合并为同一运行快照。
+模式保存 `target_concurrent_viewers`、`persona_weights`、模式内人格覆盖、普通/高光响应人数范围和 ambient 行为。目标在线人数范围为 1 到 32；Persona 权重只在创建新 Viewer 时决定 assignment。Mode 热更新保留 ViewerIdentity，不按 Persona 席位重建身份。状态中只能存在一个 `active_mode_id`，不能把多个模式合并为同一运行快照。
 
 运行时人格按“当前版本内置模板 -> 当前模式覆盖”解析。覆盖不能反写基础模板，也不能影响其他模式。内置模式保留可恢复基线，用户既可以直接调整后重置，也可以复制为新的自定义模式继续编辑。
 
@@ -277,7 +281,7 @@ class ObservationWave(TypedDict):
 
 ### 4.6 Audience Engine
 
-Audience Engine 先由本地预算器根据事件类型、模式响应范围、冷却和 Provider 压力得到本波硬上限，再调用一次 Director。Director 只在预算内选择准确的 ViewerInstance ID，也可以选择 0 个；输出为独立的 `CrowdDecision` 和可选 `MemeCandidate`，不能生成弹幕正文。
+Audience Engine 先由本地预算器根据事件类型、模式响应范围和 Provider 压力得到本波硬上限，再调用一次 Director。Director 输出不绑定具体 Viewer 的 `SceneAssessment` 和可选 `MemeCandidate`，不能生成弹幕正文。每个 Viewer 再由本地 `ViewerBehaviorService` 根据在场/禁言状态、Persona、实例微变体、冷却、短期状态、场景相关度和 crowd pressure 计算可解释的发言概率，并使用 Session seed 下的稳定抽样决定是否进入预算。
 
 每个被选中的 ViewerInstance 创建一个独立 Provider 请求，并收到：
 
@@ -285,7 +289,7 @@ Audience Engine 先由本地预算器根据事件类型、模式响应范围、�
 - 冻结的 `ObservationWave`、画面包或共享视觉摘要。
 - 同波一致的 public context 和 Room 长期记忆核心切片。
 - 仅属于该实例的 `ViewerPrivateState`。
-- `session_id`、`audience_epoch`、`viewer_sequence` 和 deadline。
+- `session_id`、`audience_epoch`、`viewer_sequence`、presence/moderation/behavior revisions 和 deadline。
 
 首版明确要求：
 
@@ -295,6 +299,9 @@ Audience Engine 先由本地预算器根据事件类型、模式响应范围、�
 - TTL 从波创建时开始；每个 Viewer 使用 latest-wins，旧 epoch、旧 sequence、过期、取消和非法结果零副作用。
 - 瞬时网络错误、429 或 5xx 仅在 TTL 允许时重试同一 Viewer 一次，不换人补位。
 - 合法结果按完成顺序独立发布，语义近似重复时保留最早通过者。
+- 限时禁言、离开和踢出会取消该 Viewer 的 mailbox；最终围栏要求 Viewer 仍 active、未禁言且三个 revision 全部匹配。
+
+`SessionAudience` 是本场观众的权威边界，维护 session seed、目标在线人数、已知/active Viewer、下一个 creation ordinal 和 population revision。Viewer 可以离开和同场重返；被踢 Viewer 本场不可恢复并由新身份补位。正常停止后当前 audience 为空且私有行为状态清理，崩溃恢复同一未终止 Session 时则恢复原 Viewer。
 
 文字 `@` 通过自动补全传递结构化 Viewer 或 Persona 目标；最终语音由可追踪 mention resolver 解析。高置信实例目标必须成为选择约束，Persona 目标至少选择该模板的一个实例，歧义目标按普通房间发言处理。
 

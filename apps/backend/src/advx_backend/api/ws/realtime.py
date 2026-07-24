@@ -32,6 +32,7 @@ from advx_backend.application.ports.ingest import (
 )
 from advx_backend.application.realtime_broker import RealtimeBroker
 from advx_backend.application.session_service import SessionService
+from advx_backend.contracts.audience import ViewerPresenceEvent
 from advx_backend.contracts.binary import (
     BinaryEnvelopeError,
     BinaryInputEnvelope,
@@ -99,8 +100,10 @@ def create_realtime_router(
         await websocket.accept()
         subscription = None
         barrage_subscription = None
+        viewer_subscription = None
         status_sender: asyncio.Task[None] | None = None
         barrage_sender: asyncio.Task[None] | None = None
+        viewer_sender: asyncio.Task[None] | None = None
         send_lock = asyncio.Lock()
         try:
             hello = await _receive_hello(websocket, local_token=local_token)
@@ -109,6 +112,7 @@ def create_realtime_router(
 
             subscription = await broker.subscribe()
             barrage_subscription = await broker.subscribe_barrages()
+            viewer_subscription = await broker.subscribe_viewers()
             current = await session_service.status()
             await _send_message(
                 websocket,
@@ -131,6 +135,14 @@ def create_realtime_router(
                     send_lock=send_lock,
                 ),
                 name="realtime-barrage-sender",
+            )
+            viewer_sender = asyncio.create_task(
+                _forward_viewer_events(
+                    websocket,
+                    subscription=viewer_subscription,
+                    send_lock=send_lock,
+                ),
+                name="realtime-viewer-sender",
             )
 
             while True:
@@ -193,7 +205,7 @@ def create_realtime_router(
             with CancelScope(shield=True):
                 senders = tuple(
                     sender
-                    for sender in (status_sender, barrage_sender)
+                    for sender in (status_sender, barrage_sender, viewer_sender)
                     if sender is not None
                 )
                 for sender in senders:
@@ -204,8 +216,21 @@ def create_realtime_router(
                     await broker.unsubscribe(subscription)
                 if barrage_subscription is not None:
                     await broker.unsubscribe_barrages(barrage_subscription)
+                if viewer_subscription is not None:
+                    await broker.unsubscribe_viewers(viewer_subscription)
 
     return router
+
+
+async def _forward_viewer_events(
+    websocket: WebSocket,
+    *,
+    subscription: asyncio.Queue[ViewerPresenceEvent],
+    send_lock: asyncio.Lock,
+) -> None:
+    while True:
+        event = await subscription.get()
+        await _send_message(websocket, event, send_lock=send_lock)
 
 
 async def _receive_hello(

@@ -18,6 +18,7 @@ class ViewerBarrageRejection(StrEnum):
     VIEWER_MISMATCH = "viewer_mismatch"
     SEQUENCE_MISMATCH = "sequence_mismatch"
     EVIDENCE_NOT_IN_REQUEST = "evidence_not_in_request"
+    TARGET_NOT_IN_REQUEST = "target_not_in_request"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,8 @@ class ViewerBarragePipeline:
             return self._reject(ViewerBarrageRejection.SEQUENCE_MISMATCH)
         if not self._evidence_is_allowed(request, response.evidence_refs):
             return self._reject(ViewerBarrageRejection.EVIDENCE_NOT_IN_REQUEST)
+        if not self._target_is_allowed(request, response):
+            return self._reject(ViewerBarrageRejection.TARGET_NOT_IN_REQUEST)
         if response.action is ViewerAction.SILENCE:
             return ViewerBarrageValidation(accepted=True)
 
@@ -78,6 +81,8 @@ class ViewerBarragePipeline:
                 display_name=display_name,
                 viewer_sequence=request.viewer_sequence,
                 reaction_type=response.reaction_type,
+                intent=response.intent,
+                target=response.target,
                 evidence_refs=response.evidence_refs,
                 text=response.text or "",
                 created_at_ms=now_ms,
@@ -98,6 +103,20 @@ class ViewerBarragePipeline:
                     return False
             elif evidence.frame_index is None or evidence.frame_index >= frame_count:
                 return False
+        return True
+
+    @staticmethod
+    def _target_is_allowed(
+        request: ViewerGenerationRequest,
+        response: ViewerGenerationResponse,
+    ) -> bool:
+        target = response.target
+        if target is None:
+            return True
+        if target.viewer_instance_id is not None:
+            return target.viewer_instance_id in request.active_viewer_ids
+        if target.event_id is not None:
+            return target.event_id in request.scene_assessment.replyable_event_ids
         return True
 
     @staticmethod

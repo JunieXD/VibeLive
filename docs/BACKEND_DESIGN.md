@@ -14,8 +14,8 @@
 - 同一时刻只维护一个活动直播会话。
 - 音频、画面、`ObservationWave`、Provider 请求和待显示弹幕位于有界内存管线中。
 - Room、最小会话记录、runtime revisions、Viewer 池结构、有界公开结构事件、Room 长期记忆、证据和 ModeMeme 使用 SQLite 持久化。
-- `32` 是单个 Session 的 ViewerInstance 上限；一个 PersonaTemplate 可以创建多个独立 ViewerInstance。
-- Director 每波调用一次，但可以选择 0 个 Viewer；每个被选中的 ViewerInstance 使用一个独立 Provider 请求，首版不做多 Viewer batching。
+- `32` 是同时 active ViewerInstance 上限；单个 Session 内创建过的唯一 Viewer 另有有界上限。一个 PersonaTemplate 可以赋予多个独立 ViewerInstance。
+- Director 每波调用一次并只产出 SceneAssessment；每个 Viewer 本地独立判断是否发言，最终候选各使用一个独立 Provider 请求，首版不做多 Viewer batching。
 - Room 是共享大脑边界；不存在按 Persona 或 Viewer 隔离的私有长期事实库。
 - Pydantic/JSON Schema 是跨进程合同单一来源，并生成 TypeScript；Debug API、headless harness 和 replay 是首版后端能力。
 - HTTP 和 WebSocket 处理协议，Application Service 负责用例，Domain 负责不变量，Provider 和 Infrastructure 负责外部适配。
@@ -61,6 +61,8 @@ src/advx_backend/
     observation_wave_builder.py
     runtime_config_service.py
     viewer_pool_service.py
+    viewer_audience_service.py
+    viewer_behavior_service.py
     director_service.py
     viewer_runtime.py
     barrage_pipeline.py
@@ -102,8 +104,9 @@ Repository、ASR、Model Provider、时钟、ID 生成器和实时事件输出�
 | Room Service | 为公开互动分配有序事件，维护 `RoomWorkingMemory`，异步保存有界可恢复结构事件 | 保存原始媒体或无界直播历史 |
 | Observation Wave Builder | 合并相近触发，选择历史帧与事件，构造冻结 `ObservationWave`，淘汰过期上下文 | 选择 Viewer 或解释模型输出 |
 | Runtime Config Service | 校验 canonical runtime spec、hash、base revision 和 capability，在波边界原子应用或回滚 | 编辑 Electron 工作区或保存凭据 |
-| Viewer Pool Service | 按 ModeDefinition 确定性分配 ViewerInstance，协调热更新后的实例与短期状态 | 二次应用 Persona 权重 |
-| Director Service | 计算本地硬预算、调用一次 Director、校验准确 Viewer ID 和 `MemeCandidate` | 生成弹幕正文 |
+| Viewer Pool / Audience Service | 创建独立 ViewerIdentity，维护 join/leave/rejoin、目标在线人数、限时禁言、踢出和热更新 | 把 PersonaTemplate 当作观众身份 |
+| Viewer Behavior Service | 按 Viewer 计算 eligibility、发言概率和稳定抽样，准确点名时执行本地保底 | 调用模型或直接发布弹幕 |
+| Director Service | 计算本地硬预算、调用一次 Director、校验 `SceneAssessment` 和 `MemeCandidate` | 选择准确 Viewer ID 或生成弹幕正文 |
 | Viewer Runtime | 为每个选中 Viewer 建立独立请求，执行并发、latest-wins、重试和提交围栏 | 多 Viewer batching 或绕过本地预算 |
 | Barrage Pipeline | 校验结构、身份、epoch、sequence、TTL、evidence、长度、屏蔽词、重复和密度，产生可信 `BarrageEvent` | 接受模型创建的新身份或直接修改记忆 |
 | Memory Service | 检索 Room memory slice，异步处理候选、证据、合并、冲突、编辑、撤销和删除 | 保存原始音频、画面、完整 Prompt 或私有 Viewer 长期库 |
@@ -112,7 +115,7 @@ Repository、ASR、Model Provider、时钟、ID 生成器和实时事件输出�
 | Persistence | Repository、事务、迁移、SQLite 配置和领域对象映射 | 实时调度与业务策略 |
 | Observability | 脱敏日志、运行状态和耗时指标 | 记录凭据、媒体正文或完整 Provider 响应 |
 
-触发阈值、响应预算、记忆检索排序和并发参数属于可调策略，但核心拓扑不是开放项：一波一次 Director、准确 Viewer ID、每实例一个独立请求、同波冻结上下文、Room 共享长期记忆。策略不能固化到 WebSocket Handler 或 Model Adapter 中。
+触发阈值、响应预算、发言概率、记忆检索排序和并发参数属于可调策略，但核心拓扑不是开放项：一波一次 Director 场景评估、每 Viewer 本地独立决策、最终候选每实例一个独立请求、同波冻结上下文、Room 共享长期记忆。策略不能固化到 WebSocket Handler 或 Model Adapter 中。
 
 ## 4. 实时处理流程
 
@@ -166,15 +169,16 @@ flowchart LR
 3. ASR 只有带稳定 utterance ID 的最终转写能够幂等成为 `user_voice` Room Event；部分转写只用于状态展示和调试。
 4. Observation Wave Builder 合并相近的文字、最终语音和显著画面变化，冻结 public context、FrameBundle、Room memory revision 和 deadline。
 5. 本地预算器根据 ModeDefinition、事件类型、冷却和 Provider 压力计算本波硬上限。
-6. Director Service 每波调用一次，返回 `CrowdDecision` 和可选 `MemeCandidate`；可以选择 0 个 Viewer，非空决定只能引用当前 Viewer 池中的准确 ID。
-7. Viewer Runtime 为每个选中 ViewerInstance 创建一个独立请求，并注入同波共享上下文、Room memory slice 和该实例的 `ViewerPrivateState`。
-8. Viewer 请求在有界并发和 latest-wins 邮箱中运行；合法结果按完成顺序进入 Barrage Pipeline，不等待其他 Viewer。
-9. Barrage Pipeline 在发布前重新检查 Session、epoch、Viewer、sequence、deadline、取消状态、evidence、内容和去重。
-10. 通过检查的弹幕发送给 Electron，并写入 `RoomWorkingMemory`；同波其他 Viewer 不可见，从下一波起共享。
-11. 波次完成后，Memory Service 可以低优先级异步提取 Room memory candidate；发布弹幕不等待该任务。
-12. Meme Service 独立校验 Director 的候选，按设置自动入库并发出可撤销通知；候选本身不能成为弹幕。
-13. Debug / Replay 为每一步记录结构化引用、hash、版本、时序、状态和副作用结果，不记录敏感正文或隐藏推理。
-14. 停止、热更新、后端恢复、epoch/sequence 失效或 TTL 到期后，旧任务即使返回也不得进入 Room、Overlay、记忆或梗库。
+6. Director Service 每波调用一次，返回不绑定具体 Viewer 的 `SceneAssessment` 和可选 `MemeCandidate`。
+7. Viewer Behavior Service 逐个过滤 inactive/muted/cooldown Viewer，计算确定性 desire 并在硬预算内选出最终候选；准确点名 Viewer 保底。
+8. Viewer Runtime 为每个最终候选创建一个独立请求，并注入同波共享上下文、Room memory slice 和该实例的 `ViewerPrivateState`。
+9. Viewer 请求在有界并发和 latest-wins 邮箱中运行；合法结果按完成顺序进入 Barrage Pipeline，不等待其他 Viewer。
+10. Barrage Pipeline 在发布前重新检查 Session、epoch、Viewer、sequence、presence/moderation/behavior revisions、deadline、取消状态、evidence、target、内容和去重。
+11. 通过检查的弹幕发送给 Electron，并写入 `RoomWorkingMemory`；同波其他 Viewer 不可见，从下一波起共享。
+12. 波次完成后，Memory Service 可以低优先级异步提取 Room memory candidate；发布弹幕不等待该任务。
+13. Meme Service 独立校验 Director 的候选，按设置自动入库并发出可撤销通知；候选本身不能成为弹幕。
+14. Debug / Replay 为每一步记录结构化引用、hash、版本、时序、状态和副作用结果，不记录敏感正文或隐藏推理。
+15. 停止、热更新、后端恢复、epoch/sequence 失效或 TTL 到期后，旧任务即使返回也不得进入 Room、Overlay、记忆或梗库。
 
 每个异步工作项都必须携带 `room_id`、`session_id`、`audience_epoch`、创建时间和 deadline，以及适用时的 `observation_id`、`generation_request_id`、`viewer_instance_id` 和 `viewer_sequence`。Session Service 为活动会话持有统一任务作用域；停止时先让 Session 不再接受结果，再取消任务并清空有界队列。
 
@@ -192,7 +196,7 @@ flowchart LR
 | Runtime revision、Viewer 池结构、最小会话记录 | SQLite | 用于热更新、幂等和恢复，不复制原始媒体 |
 | Room 长期记忆、候选、证据和 revision head | SQLite | 用户编辑、撤销、删除或清除 Room 数据前保留 |
 | ModeMeme 和 ModeMeme 事件 | SQLite | 按 mode namespace 保存，可撤销和归档 |
-| ViewerPrivateState | 后端有界内存，可由 Viewer 结构和公开事件重建 | Viewer 移除、模式切换或 Session 结束后释放 |
+| ViewerPrivateState | 后端有界内存并随同一未终止 Session 的 Viewer 持久化 | 正常 Session 结束时清空；崩溃恢复同一 Session 时恢复 |
 | API Key、访问令牌 | Electron `safeStorage` | 用户替换或删除前保留；后端只持有会话内明文 |
 | 结构化日志和 Debug Trace | 本地有界文件/事件流 | 按保留策略轮换，不包含凭据、原始媒体、完整 Prompt/响应或思维链 |
 
@@ -328,7 +332,7 @@ erDiagram
 
 `rooms` 是共享大脑的持久 namespace。首版 UI 只使用一个默认 Room，但所有记忆、事件和 Session 从首版就携带稳定 `room_id`，测试和 headless 运行必须使用隔离 Room。
 
-`session_records` 保存稳定 `session_id`、`room_id`、状态、当前 `audience_epoch`、活动 config hash、启动/结束时间和恢复信息。相同 `client_request_id` 与相同 canonical hash 必须幂等返回同一 Session；相同 request ID 配不同 hash 返回 409。开始会话使用 `starting -> running` 两阶段提交。
+`session_records` 保存稳定 `session_id`、`room_id`、状态、当前 `audience_epoch`、session seed、目标在线人数、下一个 creation ordinal、population revision、活动 config hash、启动/结束时间和恢复信息。相同 `client_request_id` 与相同 canonical hash 必须幂等返回同一 Session；相同 request ID 配不同 hash 返回 409。开始会话使用 `starting -> running` 两阶段提交。
 
 ### 7.2 `session_runtime_revisions`
 
@@ -349,9 +353,9 @@ erDiagram
 
 ### 7.3 `session_viewer_instances`
 
-保存当前逻辑 Session 的 Viewer 池结构：Viewer ID、Persona ID/revision、ordinal、确定性别名、微变体、创建/移除 epoch 和生命周期状态。它不保存私有长期记忆。
+保存当前逻辑 Session 的 Viewer 结构：独立身份、Persona assignment、creation ordinal、微变体、presence/moderation/behavior revisions、禁言/踢出状态、sequence 和可恢复的私有行为状态。它不保存私有长期事实。
 
-Viewer ID 在同一 Session 内不复用。热更新中未变化的实例保留 ID 和短期状态；Persona/override 变化的存量实例保留 ID 但清空短期状态；移除实例取消任务并结束生命周期；新增实例获得新 ID 和空状态；整个模式切换重建池。`ViewerPrivateState` 仅存在于有界运行时，并可由实例结构和公开事件恢复。
+Viewer ID 在同一 Session 内不复用。热更新和 Mode 切换保留 ViewerIdentity；Persona/override 变化的存量实例保留 ID 并按规则重置行为状态；超出新目标的 active Viewer 才移除；新增实例使用单调 creation ordinal。Viewer 主动离开可同场重返，被踢后不可重返。正常停止将全部 Viewer 标记 ended 并清空私有状态；异常重启恢复同一逻辑 Session 的 Viewer 和行为状态。
 
 ### 7.4 `room_events`
 

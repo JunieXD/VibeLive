@@ -42,6 +42,8 @@ from advx_backend.domain.viewer import (
 )
 from advx_backend.domain.viewer import (
     ViewerInstanceVariant,
+    ViewerLifecycleState,
+    ViewerPrivateState,
 )
 from advx_backend.infrastructure.persistence.sqlite.models import (
     SessionRecordRow,
@@ -188,6 +190,7 @@ class RuntimeSessionService:
                     spec=spec,
                     audience_epoch=pool.audience_epoch,
                     pool=pool,
+                    population_revision=1,
                     provider_generation=provider_generation,
                 )
                 if self._runtime_state is None:
@@ -300,6 +303,9 @@ class RuntimeSessionService:
                 else:
                     pending_revision = prior.revision
 
+            current_pool, current_population_revision = await self._audience_state(
+                session_id
+            )
             candidate_generation: RuntimeProviderGeneration | None = None
             try:
                 candidate_generation = await self._prepare_provider_generation(
@@ -308,7 +314,7 @@ class RuntimeSessionService:
                     candidate=request.provider_candidate,
                 )
                 reconciliation = self._viewer_pool.reconcile(
-                    current=self._pools[session_id],
+                    current=current_pool,
                     next_epoch=current.audience_epoch + 1,
                     spec=request.canonical_runtime_spec,
                 )
@@ -330,12 +336,18 @@ class RuntimeSessionService:
                     storage_revision=pending_revision,
                     expected_storage_revision=current_storage_revision,
                     reconciliation=reconciliation,
+                    expected_population_revision=current_population_revision,
+                    next_population_revision=current_population_revision + 1,
+                    target_concurrent_viewers=self._target_concurrent_viewers(
+                        request.canonical_runtime_spec
+                    ),
                 )
             state = CommittedRuntime(
                 session_id=session_id,
                 spec=request.canonical_runtime_spec,
                 audience_epoch=reconciliation.snapshot.audience_epoch,
                 pool=reconciliation.snapshot,
+                population_revision=current_population_revision + 1,
                 provider_generation=(
                     candidate_generation
                     if candidate_generation is not None
@@ -433,6 +445,9 @@ class RuntimeSessionService:
                     )
                     await session.commit()
 
+            current_pool, current_population_revision = await self._audience_state(
+                session_id
+            )
             candidate_generation: RuntimeProviderGeneration | None = None
             try:
                 candidate_generation = await self._prepare_provider_generation(
@@ -441,7 +456,7 @@ class RuntimeSessionService:
                     candidate=request.provider_candidate,
                 )
                 reconciliation = self._viewer_pool.reconcile(
-                    current=self._pools[session_id],
+                    current=current_pool,
                     next_epoch=current.audience_epoch + 1,
                     spec=target_spec,
                 )
@@ -462,6 +477,11 @@ class RuntimeSessionService:
                     storage_revision=next_storage_revision,
                     expected_storage_revision=storage_revision,
                     reconciliation=reconciliation,
+                    expected_population_revision=current_population_revision,
+                    next_population_revision=current_population_revision + 1,
+                    target_concurrent_viewers=self._target_concurrent_viewers(
+                        target_spec
+                    ),
                     revision_metadata={
                         "_rollback_identity": self._rollback_identity(
                             request,
@@ -474,6 +494,7 @@ class RuntimeSessionService:
                 spec=target_spec,
                 audience_epoch=reconciliation.snapshot.audience_epoch,
                 pool=reconciliation.snapshot,
+                population_revision=current_population_revision + 1,
                 provider_generation=(
                     candidate_generation
                     if candidate_generation is not None
@@ -580,8 +601,11 @@ class RuntimeSessionService:
                     )
                     await session.commit()
 
+                current_pool, current_population_revision = await self._audience_state(
+                    session_id
+                )
                 reconciliation = self._viewer_pool.reconcile(
-                    current=self._pools[session_id],
+                    current=current_pool,
                     next_epoch=current.audience_epoch + 1,
                     spec=spec,
                 )
@@ -593,6 +617,9 @@ class RuntimeSessionService:
                         storage_revision=recovery_revision,
                         expected_storage_revision=current_storage_revision,
                         reconciliation=reconciliation,
+                        expected_population_revision=current_population_revision,
+                        next_population_revision=current_population_revision + 1,
+                        target_concurrent_viewers=self._target_concurrent_viewers(spec),
                         recovery={
                             "recovered": True,
                             "recovered_at_ms": now_ms,
@@ -604,6 +631,7 @@ class RuntimeSessionService:
                     spec=spec,
                     audience_epoch=reconciliation.snapshot.audience_epoch,
                     pool=reconciliation.snapshot,
+                    population_revision=current_population_revision + 1,
                     provider_generation=await self._bound_provider_generation(
                         session_id
                     ),
@@ -683,6 +711,12 @@ class RuntimeSessionService:
                 canonical_spec_json=spec.canonical_json(),
                 diff_summary_json=canonical_json(diff.model_dump(mode="json")),
                 app_version=self._app_version,
+                session_seed=session_id,
+                target_concurrent_viewers=next(
+                    mode.target_concurrent_viewers
+                    for mode in spec.modes
+                    if mode.mode_id == spec.active_mode_id
+                ),
                 now_ms=now_ms,
             )
             if not created:
@@ -708,6 +742,12 @@ class RuntimeSessionService:
                 1,
                 expected_base_revision=0,
                 next_epoch=1,
+                expected_population_revision=1,
+                next_population_revision=1,
+                target_concurrent_viewers=len(pool.viewers),
+                next_creation_ordinal=(
+                    max((viewer.ordinal for viewer in pool.viewers), default=0) + 1
+                ),
                 now_ms=now_ms,
             )
             await session.commit()
@@ -756,14 +796,28 @@ class RuntimeSessionService:
             committed.canonical_spec_json
         )
         pool = self._pools.get(session_id)
+        existing_state: CommittedRuntime | None = None
+        if self._runtime_state is not None:
+            try:
+                existing_state = await self._runtime_state.snapshot(session_id)
+            except KeyError:
+                pass
+            else:
+                if (
+                    existing_state.audience_epoch == record.audience_epoch
+                    and existing_state.spec == spec
+                ):
+                    pool = existing_state.pool
         if pool is None or pool.audience_epoch != record.audience_epoch:
             pool = await self._load_pool(
                 session,
                 spec=spec,
                 session_id=session_id,
                 audience_epoch=record.audience_epoch,
+                session_seed=record.session_seed or session_id,
+                next_creation_ordinal=record.next_creation_ordinal,
             )
-            self._pools[session_id] = pool
+        self._pools[session_id] = pool
         active_record = record.ended_at_ms is None and record.state in {
             "starting",
             "running",
@@ -781,15 +835,20 @@ class RuntimeSessionService:
                 spec=spec,
                 audience_epoch=pool.audience_epoch,
                 pool=pool,
+                population_revision=record.population_revision,
                 provider_generation=self._current_provider_generation(spec),
                 accepting_results=active_record,
             )
-            try:
+            if existing_state is None:
                 await self._runtime_state.activate(state)
-            except ValueError:
-                existing = await self._runtime_state.snapshot(session_id)
-                if existing != state and existing.accepting_results:
-                    raise
+            elif (
+                existing_state.audience_epoch != state.audience_epoch
+                or existing_state.spec != state.spec
+                or existing_state.population_revision != state.population_revision
+            ) and existing_state.accepting_results:
+                raise RuntimeSessionConflictError(
+                    "persisted runtime snapshot diverged from active runtime state"
+                )
         try:
             diff_payload = json.loads(committed.diff_summary_json)
             if not isinstance(diff_payload, dict):
@@ -813,13 +872,15 @@ class RuntimeSessionService:
         spec: CanonicalRuntimeSpec,
         session_id: str,
         audience_epoch: int,
+        session_seed: str,
+        next_creation_ordinal: int,
     ) -> ViewerPoolSnapshot:
         rows = list(
             await session.scalars(
                 select(SessionViewerInstanceRow)
                 .where(
                     SessionViewerInstanceRow.session_id == session_id,
-                    SessionViewerInstanceRow.state == "active",
+                    SessionViewerInstanceRow.presence_state != "removed",
                 )
                 .order_by(
                     SessionViewerInstanceRow.persona_id,
@@ -832,7 +893,7 @@ class RuntimeSessionService:
                 room_id=spec.room.room_id,
                 session_id=session_id,
                 audience_epoch=audience_epoch,
-                session_seed=session_id,
+                session_seed=session_seed,
                 spec=spec,
             )
         viewers = [
@@ -843,12 +904,37 @@ class RuntimeSessionService:
                 audience_epoch=audience_epoch,
                 persona_id=row.persona_id,
                 persona_revision=row.persona_revision,
+                persona_content_hash=row.persona_content_hash,
                 ordinal=row.ordinal,
+                username=row.username or row.display_name,
                 display_name=row.display_name,
+                avatar_seed=row.avatar_seed or row.viewer_instance_id,
+                color_seed=row.color_seed or row.viewer_instance_id,
+                locale=row.locale,
                 variant=ViewerInstanceVariant.model_validate_json(
                     row.micro_variant_json
                 ),
-                created_at_ms=spec.room.updated_at_ms,
+                private_state=ViewerPrivateState.model_validate_json(
+                    row.behavior_state_json
+                ),
+                viewer_sequence=row.viewer_sequence,
+                lifecycle_state=ViewerLifecycleState(row.presence_state),
+                presence_revision=row.presence_revision,
+                moderation_revision=row.moderation_revision,
+                behavior_revision=row.behavior_revision,
+                joined_at_ms=row.joined_at_ms,
+                last_left_at_ms=row.last_left_at_ms,
+                join_count=row.join_count,
+                muted_until_ms=row.muted_until_ms,
+                mute_reason=row.mute_reason,
+                kicked_at_ms=row.kicked_at_ms,
+                kick_reason=row.kick_reason,
+                created_at_ms=row.created_at_ms,
+                removed_at_ms=(
+                    row.kicked_at_ms
+                    if row.presence_state == ViewerLifecycleState.KICKED.value
+                    else None
+                ),
             )
             for row in rows
         ]
@@ -857,8 +943,34 @@ class RuntimeSessionService:
             session_id=session_id,
             audience_epoch=audience_epoch,
             mode_id=spec.active_mode_id,
-            session_seed=session_id,
+            session_seed=session_seed,
+            next_creation_ordinal=max(
+                next_creation_ordinal,
+                max((viewer.ordinal for viewer in viewers), default=0) + 1,
+            ),
             viewers=viewers,
+        )
+
+    async def _audience_state(
+        self,
+        session_id: str,
+    ) -> tuple[ViewerPoolSnapshot, int]:
+        if self._runtime_state is not None:
+            state = await self._runtime_state.snapshot(session_id)
+            self._pools[session_id] = state.pool
+            return state.pool, state.population_revision
+        async with self._session_factory() as session:
+            record = await session.get(SessionRecordRow, session_id)
+            if record is None:
+                raise RuntimeSessionNotFoundError(session_id)
+            return self._pools[session_id], record.population_revision
+
+    @staticmethod
+    def _target_concurrent_viewers(spec: CanonicalRuntimeSpec) -> int:
+        return next(
+            mode.target_concurrent_viewers
+            for mode in spec.modes
+            if mode.mode_id == spec.active_mode_id
         )
 
     def _current_provider_generation(
@@ -917,9 +1029,13 @@ class RuntimeSessionService:
         storage_revision: int,
         expected_storage_revision: int,
         reconciliation: ViewerPoolReconciliation,
+        expected_population_revision: int,
+        next_population_revision: int,
+        target_concurrent_viewers: int,
         recovery: dict[str, object] | None = None,
         revision_metadata: dict[str, object] | None = None,
     ) -> None:
+        next_creation_ordinal = reconciliation.snapshot.next_creation_ordinal
         now_ms = self._clock.now_ms()
         diff = RuntimeDiffSummary(
             added_viewer_ids=list(reconciliation.added_viewer_ids),
@@ -962,11 +1078,29 @@ class RuntimeSessionService:
                         == viewer.viewer_instance_id,
                     )
                     .values(
+                        persona_id=viewer.persona_id,
                         persona_revision=viewer.persona_revision,
+                        persona_content_hash=viewer.persona_content_hash,
                         display_name=viewer.display_name,
                         micro_variant_json=canonical_json(
                             viewer.variant.model_dump(mode="json")
                         ),
+                        presence_state=viewer.lifecycle_state.value,
+                        presence_revision=viewer.presence_revision,
+                        moderation_revision=viewer.moderation_revision,
+                        behavior_revision=viewer.behavior_revision,
+                        joined_at_ms=viewer.joined_at_ms,
+                        last_left_at_ms=viewer.last_left_at_ms,
+                        join_count=viewer.join_count,
+                        muted_until_ms=viewer.muted_until_ms,
+                        mute_reason=viewer.mute_reason,
+                        kicked_at_ms=viewer.kicked_at_ms,
+                        kick_reason=viewer.kick_reason,
+                        viewer_sequence=viewer.viewer_sequence,
+                        behavior_state_json=canonical_json(
+                            viewer.private_state.model_dump(mode="json")
+                        ),
+                        updated_at_ms=now_ms,
                     )
                 )
             await session.execute(
@@ -995,6 +1129,10 @@ class RuntimeSessionService:
                 storage_revision,
                 expected_base_revision=expected_storage_revision,
                 next_epoch=reconciliation.snapshot.audience_epoch,
+                expected_population_revision=expected_population_revision,
+                next_population_revision=next_population_revision,
+                target_concurrent_viewers=target_concurrent_viewers,
+                next_creation_ordinal=next_creation_ordinal,
                 now_ms=now_ms,
                 recovery=recovery,
             )
@@ -1181,7 +1319,31 @@ def _persisted_viewer(viewer: DomainViewerInstance) -> PersistedViewerInstance:
         display_name=viewer.display_name,
         micro_variant_json=canonical_json(viewer.variant.model_dump(mode="json")),
         created_epoch=viewer.audience_epoch,
-        state=viewer.lifecycle_state.value,
+        state=(
+            "removed"
+            if viewer.lifecycle_state is ViewerLifecycleState.REMOVED
+            else "active"
+        ),
+        username=viewer.username,
+        avatar_seed=viewer.avatar_seed,
+        color_seed=viewer.color_seed,
+        locale=viewer.locale,
+        persona_content_hash=viewer.persona_content_hash,
+        presence_state=viewer.lifecycle_state.value,
+        presence_revision=viewer.presence_revision,
+        moderation_revision=viewer.moderation_revision,
+        behavior_revision=viewer.behavior_revision,
+        joined_at_ms=viewer.joined_at_ms,
+        last_left_at_ms=viewer.last_left_at_ms,
+        join_count=viewer.join_count,
+        muted_until_ms=viewer.muted_until_ms,
+        mute_reason=viewer.mute_reason,
+        kicked_at_ms=viewer.kicked_at_ms,
+        kick_reason=viewer.kick_reason,
+        viewer_sequence=viewer.viewer_sequence,
+        behavior_state_json=canonical_json(viewer.private_state.model_dump(mode="json")),
+        created_at_ms=viewer.created_at_ms,
+        updated_at_ms=viewer.created_at_ms,
     )
 
 

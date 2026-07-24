@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]
 ContentHash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -65,7 +65,11 @@ class ModeDefinition(AudienceDomainModel):
     mode_id: Identifier
     namespace_id: Identifier
     revision: int = Field(ge=1)
-    viewer_count: int = Field(ge=1, le=32)
+    target_concurrent_viewers: int = Field(
+        ge=1,
+        le=32,
+        validation_alias=AliasChoices("target_concurrent_viewers", "viewer_count"),
+    )
     persona_ids: list[Identifier] = Field(min_length=1, max_length=32)
     persona_weights: dict[str, float] = Field(min_length=1, max_length=32)
     persona_overrides: dict[str, PersonaOverride] = Field(default_factory=dict)
@@ -86,8 +90,18 @@ class ModeDefinition(AudienceDomainModel):
             raise ValueError("persona weights must not be negative")
         if not set(self.persona_overrides).issubset(known):
             raise ValueError("persona_overrides cannot reference an unknown persona")
-        if self.normal_response_range.maximum > self.viewer_count:
-            raise ValueError("normal response range cannot exceed viewer_count")
-        if self.highlight_response_range.maximum > self.viewer_count:
-            raise ValueError("highlight response range cannot exceed viewer_count")
+        if self.normal_response_range.maximum > self.target_concurrent_viewers:
+            raise ValueError(
+                "normal response range cannot exceed target_concurrent_viewers"
+            )
+        if self.highlight_response_range.maximum > self.target_concurrent_viewers:
+            raise ValueError(
+                "highlight response range cannot exceed target_concurrent_viewers"
+            )
         return self
+
+    @property
+    def viewer_count(self) -> int:
+        """Compatibility accessor for runtime v1 callers during contract migration."""
+
+        return self.target_concurrent_viewers

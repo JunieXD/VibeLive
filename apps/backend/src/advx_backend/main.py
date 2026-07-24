@@ -42,6 +42,7 @@ def create_app(*, runtime: BackendRuntime | None = None) -> FastAPI:
     application.state.replay_service = active_runtime.replay_service
     application.state.shared_brain_service = active_runtime.shared_brain_service
     application.state.runtime_session_service = active_runtime.runtime_session_service
+    application.state.viewer_audience_service = active_runtime.viewer_audience_service
     application.include_router(health_router)
     application.include_router(
         create_configuration_router(

@@ -11,7 +11,7 @@ def test_health() -> None:
         response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "protocol_version": 2}
+    assert response.json() == {"status": "ok", "protocol_version": 3}
 
 
 def test_health_reports_machine_readable_migration_failure(

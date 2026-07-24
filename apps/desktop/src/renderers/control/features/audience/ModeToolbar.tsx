@@ -84,23 +84,23 @@ export function ModeToolbar({
       </div>
       <div className={cx('aw-mode-controls')}>
         <label>
-          <span>Viewer</span>
+          <span>目标在线</span>
           <input
             type="number"
             min={1}
             max={32}
-            value={activeMode.viewerCount}
+            value={activeMode.targetConcurrentViewers}
             onChange={(event) => {
-              const viewerCount = Math.max(1, clampActivityValue(event.target.value))
+              const targetConcurrentViewers = Math.max(1, clampActivityValue(event.target.value))
               onPatchMode({
-                viewerCount,
+                targetConcurrentViewers,
                 normalResponseRange: [
-                  Math.min(activeMode.normalResponseRange[0], viewerCount),
-                  Math.min(activeMode.normalResponseRange[1], viewerCount)
+                  Math.min(activeMode.normalResponseRange[0], targetConcurrentViewers),
+                  Math.min(activeMode.normalResponseRange[1], targetConcurrentViewers)
                 ],
                 highlightResponseRange: [
-                  Math.min(activeMode.highlightResponseRange[0], viewerCount),
-                  Math.min(activeMode.highlightResponseRange[1], viewerCount)
+                  Math.min(activeMode.highlightResponseRange[0], targetConcurrentViewers),
+                  Math.min(activeMode.highlightResponseRange[1], targetConcurrentViewers)
                 ]
               })
             }}
@@ -111,13 +111,13 @@ export function ModeToolbar({
           <input
             type="number"
             min={0}
-            max={activeMode.viewerCount}
+            max={activeMode.targetConcurrentViewers}
             value={activeMode.normalResponseRange[0]}
             onChange={(event) =>
               onPatchMode({
                 normalResponseRange: [
                   Math.min(
-                    clampActivityValue(event.target.value, activeMode.viewerCount),
+                    clampActivityValue(event.target.value, activeMode.targetConcurrentViewers),
                     activeMode.normalResponseRange[1]
                   ),
                   activeMode.normalResponseRange[1]
@@ -129,14 +129,14 @@ export function ModeToolbar({
           <input
             type="number"
             min={0}
-            max={activeMode.viewerCount}
+            max={activeMode.targetConcurrentViewers}
             value={activeMode.normalResponseRange[1]}
             onChange={(event) =>
               onPatchMode({
                 normalResponseRange: [
                   activeMode.normalResponseRange[0],
                   Math.max(
-                    clampActivityValue(event.target.value, activeMode.viewerCount),
+                    clampActivityValue(event.target.value, activeMode.targetConcurrentViewers),
                     activeMode.normalResponseRange[0]
                   )
                 ]
@@ -149,13 +149,13 @@ export function ModeToolbar({
           <input
             type="number"
             min={0}
-            max={activeMode.viewerCount}
+            max={activeMode.targetConcurrentViewers}
             value={activeMode.highlightResponseRange[0]}
             onChange={(event) =>
               onPatchMode({
                 highlightResponseRange: [
                   Math.min(
-                    clampActivityValue(event.target.value, activeMode.viewerCount),
+                    clampActivityValue(event.target.value, activeMode.targetConcurrentViewers),
                     activeMode.highlightResponseRange[1]
                   ),
                   activeMode.highlightResponseRange[1]
@@ -167,14 +167,14 @@ export function ModeToolbar({
           <input
             type="number"
             min={0}
-            max={activeMode.viewerCount}
+            max={activeMode.targetConcurrentViewers}
             value={activeMode.highlightResponseRange[1]}
             onChange={(event) =>
               onPatchMode({
                 highlightResponseRange: [
                   activeMode.highlightResponseRange[0],
                   Math.max(
-                    clampActivityValue(event.target.value, activeMode.viewerCount),
+                    clampActivityValue(event.target.value, activeMode.targetConcurrentViewers),
                     activeMode.highlightResponseRange[0]
                   )
                 ]

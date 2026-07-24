@@ -1,8 +1,9 @@
 import hashlib
 
-from advx_backend.domain.crowd_decision import CrowdDecision, DecisionSource
+from advx_backend.domain.crowd_decision import DecisionSource
 from advx_backend.domain.observation_wave import ObservationTrigger, ObservationWave
 from advx_backend.domain.persona import ModeDefinition
+from advx_backend.domain.scene_assessment import SceneAssessment
 from advx_backend.domain.viewer import ViewerInstance, ViewerLifecycleState
 
 
@@ -28,37 +29,31 @@ class ActiveModeDirectorBudgetPolicy:
 
 
 class DeterministicDirectorFallbackPolicy:
-    """Select a fresh, stable, small subset without retaining prior decisions."""
+    """Return a bounded local scene assessment without selecting speakers."""
 
-    def decide(self, **context: object) -> CrowdDecision:
+    def decide(self, **context: object) -> SceneAssessment:
         wave = context.get("wave")
         if not isinstance(wave, ObservationWave):
             raise TypeError("fallback requires an ObservationWave")
         maximum = max(0, int(context.get("maximum", 0)))
-        eligible = _eligible_viewers(context.get("pool"), wave)
-        ranked = sorted(
-            eligible,
-            key=lambda viewer: (
-                hashlib.sha256(
-                    f"{wave.observation_id}\0{viewer.viewer_instance_id}".encode()
-                ).digest(),
-                viewer.viewer_instance_id,
-            ),
-        )
-        selected = [viewer.viewer_instance_id for viewer in ranked[: min(maximum, 2)]]
         decision_digest = hashlib.sha256(
             (
                 f"{wave.room_id}\0{wave.session_id}\0{wave.audience_epoch}\0"
-                f"{wave.observation_id}\0{','.join(selected)}"
+                f"{wave.observation_id}\0scene-fallback-v2"
             ).encode()
         ).hexdigest()
-        return CrowdDecision(
-            decision_id=f"fallback-{decision_digest[:32]}",
+        return SceneAssessment(
+            assessment_id=f"fallback-{decision_digest[:32]}",
             room_id=wave.room_id,
             session_id=wave.session_id,
             audience_epoch=wave.audience_epoch,
             observation_id=wave.observation_id,
-            selected_viewer_ids=selected,
+            salience=0.5,
+            novelty=0.5,
+            emotional_intensity=0.25,
+            replyable_event_ids=list(wave.event_ids),
+            evidence_event_ids=list(wave.trigger_event_ids),
+            maximum_responses=min(maximum, 2),
             reason_codes=["director_failure_fallback"],
             decision_source=DecisionSource.FALLBACK,
             created_at_ms=wave.created_at_ms,
@@ -95,6 +90,7 @@ def _eligible_viewers(pool: object, wave: ObservationWave) -> list[ViewerInstanc
         and viewer.room_id == wave.room_id
         and viewer.session_id == wave.session_id
         and viewer.audience_epoch == wave.audience_epoch
+        and not viewer.is_muted(wave.created_at_ms)
         and (
             viewer.private_state.cooldown_until_ms is None
             or viewer.private_state.cooldown_until_ms <= wave.created_at_ms

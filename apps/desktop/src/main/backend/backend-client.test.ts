@@ -45,6 +45,69 @@ describe("BackendClient startup state", () => {
 });
 
 describe("BackendClient runtime v2", () => {
+  it("queries and moderates session-scoped Viewer identities", async () => {
+    const viewer = {
+      viewer_instance_id: "viewer/a",
+      username: "pixel-user",
+      display_name: "pixel-user",
+      avatar_seed: "avatar-1",
+      color_seed: "color-1",
+      persona_id: "curious",
+      persona_display_name: "Curious",
+      presence_state: "active",
+      joined_at_ms: 1,
+      last_left_at_ms: null,
+      join_count: 1,
+      muted_until_ms: null,
+      viewer_sequence: 0,
+      presence_revision: 1,
+      moderation_revision: 1
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        session_id: "session/a",
+        room_id: "room-1",
+        audience_epoch: 1,
+        population_revision: 1,
+        target_concurrent_viewers: 1,
+        active_count: 1,
+        viewers: [viewer]
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockImplementation(async () => new Response(JSON.stringify(viewer), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    const client = new BackendClient({
+      baseUrl: "http://127.0.0.1:9999",
+      localToken: "token"
+    });
+
+    await client.queryAudience("session/a");
+    await client.muteViewer("session/a", "viewer/a", 60_000, "host moderation");
+    await client.unmuteViewer("session/a", "viewer/a");
+    await client.kickViewer("session/a", "viewer/a", "host moderation");
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:9999/runtime/sessions/session%2Fa/audience",
+      "http://127.0.0.1:9999/runtime/sessions/session%2Fa/viewers/viewer%2Fa/mute",
+      "http://127.0.0.1:9999/runtime/sessions/session%2Fa/viewers/viewer%2Fa/unmute",
+      "http://127.0.0.1:9999/runtime/sessions/session%2Fa/viewers/viewer%2Fa/kick"
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
+      command_id: expect.any(String),
+      duration_ms: 60_000,
+      reason: "host moderation"
+    });
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string)).toEqual({
+      command_id: expect.any(String)
+    });
+    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({
+      command_id: expect.any(String),
+      reason: "host moderation"
+    });
+    fetchMock.mockRestore();
+  });
+
   it("sends structured Viewer and Persona targets without embedding them in text", async () => {
     const client = new BackendClient({ localToken: "token" });
     const sendJson = vi.fn();
@@ -379,7 +442,7 @@ describe("BackendClient runtime v2", () => {
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          "X-ADVX-Protocol-Version": "2"
+          "X-ADVX-Protocol-Version": "3"
         })
       })
     );
@@ -387,7 +450,7 @@ describe("BackendClient runtime v2", () => {
     expect(body).toMatchObject({
       apply_id: "apply-1",
       base_revision: 1,
-      audience_contract_version: 1,
+      audience_contract_version: 2,
       client_config_hash: compiled.configHash,
       provider_candidate: providerCandidate
     });
@@ -515,7 +578,7 @@ describe("BackendClient runtime v2", () => {
     bridge.runtime = { audience_epoch: 3 };
     bridge.handleMessage({
       type: "barrage.event",
-      protocol_version: 2,
+      protocol_version: 3,
       barrage: {
         barrage_id: "barrage-1",
         room_id: "room-1",
@@ -528,6 +591,8 @@ describe("BackendClient runtime v2", () => {
         display_name: "问号哥·01",
         viewer_sequence: 2,
         reaction_type: "surprise",
+        intent: "react_to_host",
+        target: { kind: "host", viewer_instance_id: null, event_id: null },
         evidence_refs: [{ source: "event", event_id: "event-1", frame_index: null }],
         text: "？？",
         created_at_ms: 100,
@@ -559,7 +624,7 @@ describe("BackendClient runtime v2", () => {
       name: "a protocol v2 barrage without viewer identity",
       message: {
         type: "barrage.event",
-        protocol_version: 2,
+        protocol_version: 3,
         barrage: {
           barrage_id: "legacy-barrage",
           room_id: "room-1",
@@ -654,7 +719,7 @@ describe("BackendClient runtime v2", () => {
 
     const parsed = bridge.parseMessage(JSON.stringify({
       type: "barrage.event",
-      protocol_version: 2,
+      protocol_version: 3,
       barrage: {
         barrage_id: "barrage-1",
         room_id: "room-1",
@@ -686,7 +751,7 @@ describe("BackendClient runtime v2", () => {
       "backend.ready with an unknown session state",
       {
         type: "backend.ready",
-        protocol_version: 2,
+        protocol_version: 3,
         session: {
           session_id: null,
           state: "connected",
@@ -700,7 +765,7 @@ describe("BackendClient runtime v2", () => {
       "session.status with a fractional timestamp",
       {
         type: "session.status",
-        protocol_version: 2,
+        protocol_version: 3,
         session: {
           session_id: "session-1",
           state: "running",
@@ -714,7 +779,7 @@ describe("BackendClient runtime v2", () => {
       "session.status with a negative revision",
       {
         type: "session.status",
-        protocol_version: 2,
+        protocol_version: 3,
         session: {
           session_id: "session-1",
           state: "running",
@@ -726,13 +791,13 @@ describe("BackendClient runtime v2", () => {
     ],
     [
       "backend.pong with a non-string request ID",
-      { type: "backend.pong", protocol_version: 2, request_id: 42 }
+      { type: "backend.pong", protocol_version: 3, request_id: 42 }
     ],
     [
       "ingest.ack with an oversized identifier",
       {
         type: "ingest.ack",
-        protocol_version: 2,
+        protocol_version: 3,
         session_id: "x".repeat(129),
         input_id: "input-1",
         input_kind: "text",
@@ -744,7 +809,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.ack with an unknown input kind",
       {
         type: "ingest.ack",
-        protocol_version: 2,
+        protocol_version: 3,
         session_id: "session-1",
         input_id: "input-1",
         input_kind: "video",
@@ -756,7 +821,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.ack with an unknown stage",
       {
         type: "ingest.ack",
-        protocol_version: 2,
+        protocol_version: 3,
         session_id: "session-1",
         input_id: "input-1",
         input_kind: "text",
@@ -768,7 +833,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.ack with a fractional timestamp",
       {
         type: "ingest.ack",
-        protocol_version: 2,
+        protocol_version: 3,
         session_id: "session-1",
         input_id: "input-1",
         input_kind: "text",
@@ -780,7 +845,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.ack with a negative timestamp",
       {
         type: "ingest.ack",
-        protocol_version: 2,
+        protocol_version: 3,
         session_id: "session-1",
         input_id: "input-1",
         input_kind: "text",
@@ -792,7 +857,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.ack with an extra field",
       {
         type: "ingest.ack",
-        protocol_version: 2,
+        protocol_version: 3,
         session_id: "session-1",
         input_id: "input-1",
         input_kind: "text",
@@ -805,7 +870,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.rejected with an unknown rejection code",
       {
         type: "ingest.rejected",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "not_really_rejected",
         message: "no"
       }
@@ -814,7 +879,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.rejected with an oversized message",
       {
         type: "ingest.rejected",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "invalid_input",
         message: "x".repeat(257)
       }
@@ -823,7 +888,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.rejected with an empty optional input ID",
       {
         type: "ingest.rejected",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "invalid_input",
         message: "no",
         input_id: ""
@@ -833,7 +898,7 @@ describe("BackendClient runtime v2", () => {
       "ingest.rejected with an invalid optional input kind",
       {
         type: "ingest.rejected",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "invalid_input",
         message: "no",
         input_kind: "camera"
@@ -843,7 +908,7 @@ describe("BackendClient runtime v2", () => {
       "protocol.error with an unknown protocol code",
       {
         type: "protocol.error",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "invalid_version",
         message: "no"
       }
@@ -852,7 +917,7 @@ describe("BackendClient runtime v2", () => {
       "protocol.error with an empty message",
       {
         type: "protocol.error",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "invalid_message",
         message: ""
       }
@@ -861,7 +926,7 @@ describe("BackendClient runtime v2", () => {
       "protocol.error with a fractional supported version",
       {
         type: "protocol.error",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "version_mismatch",
         message: "no",
         supported_version: 1.5
@@ -895,7 +960,7 @@ describe("BackendClient runtime v2", () => {
       "protocol.error without supported_version",
       {
         type: "protocol.error",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "invalid_message",
         message: "invalid"
       }
@@ -904,14 +969,14 @@ describe("BackendClient runtime v2", () => {
       "ingest.rejected without optional identity fields",
       {
         type: "ingest.rejected",
-        protocol_version: 2,
+        protocol_version: 3,
         code: "invalid_input",
         message: "invalid"
       }
     ],
     [
       "backend.pong with an empty unconstrained request ID",
-      { type: "backend.pong", protocol_version: 2, request_id: "" }
+      { type: "backend.pong", protocol_version: 3, request_id: "" }
     ]
   ])("accepts generated/Pydantic optional boundary: %s", (_, message) => {
     const client = new BackendClient({ localToken: "token" });
@@ -939,7 +1004,7 @@ describe("BackendClient runtime v2", () => {
     }))).toBeNull();
     expect(client.currentStatus()).toMatchObject({
       connection: "failed",
-      startupError: expect.stringContaining("需要 v2")
+      startupError: expect.stringContaining("需要 v3")
     });
   });
 });

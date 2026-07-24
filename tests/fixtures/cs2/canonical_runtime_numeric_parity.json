@@ -1,8 +1,8 @@
 {
-  "expected_config_hash": "fdcc56df738bd8e3b303d2bb775507a6c2e953fb47be17ad470b3d7783441260",
+  "expected_config_hash": "ffad67114e265bf6b5d4da3eb477b7b684b749a6855d4213170901fec3e71b48",
   "spec": {
-    "protocol_version": 2,
-    "audience_contract_version": 1,
+    "protocol_version": 3,
+    "audience_contract_version": 2,
     "config_revision": 7,
     "room": {
       "room_id": "numeric-parity-room",
@@ -71,7 +71,7 @@
         "mode_id": "numeric-parity-mode",
         "namespace_id": "numeric-parity-memes",
         "revision": 1,
-        "viewer_count": 2,
+        "target_concurrent_viewers": 2,
         "persona_ids": [
           "zero-bias",
           "one-bias"

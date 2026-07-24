@@ -6,7 +6,8 @@ from typing import Protocol
 from advx_backend.application.ports.session import Clock
 from advx_backend.domain.crowd_decision import CrowdDecision, DecisionSource
 from advx_backend.domain.meme import MemeCandidate
-from advx_backend.domain.observation_wave import ObservationWave
+from advx_backend.domain.observation_wave import ObservationTrigger, ObservationWave
+from advx_backend.domain.scene_assessment import SceneAssessment
 
 
 class DirectorProvider(Protocol):
@@ -18,7 +19,7 @@ class DirectorBudgetPolicy(Protocol):
 
 
 class DirectorFallbackPolicy(Protocol):
-    def decide(self, **context: object) -> CrowdDecision: ...
+    def decide(self, **context: object) -> object: ...
 
 
 class DirectorDecisionError(RuntimeError):
@@ -28,7 +29,6 @@ class DirectorDecisionError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class DirectorRequest:
     wave: ObservationWave
-    viewer_ids: tuple[str, ...]
     maximum: int
     runtime: object
     forced_viewer_ids: tuple[str, ...] = ()
@@ -37,7 +37,7 @@ class DirectorRequest:
 
 @dataclass(frozen=True, slots=True)
 class DirectorOutcome:
-    decision: CrowdDecision
+    assessment: SceneAssessment
     meme_candidate: MemeCandidate | None = None
 
 
@@ -78,7 +78,7 @@ def validate_meme_candidate(
 
 
 class DirectorService:
-    """Invoke the Director exactly once and validate its bounded identity decision."""
+    """Produce one scene assessment without centrally selecting speakers."""
 
     def __init__(
         self,
@@ -101,11 +101,10 @@ class DirectorService:
         runtime: object,
     ) -> DirectorOutcome:
         viewers = tuple(getattr(pool, "viewers", ()))
-        viewer_ids = tuple(viewer.viewer_instance_id for viewer in viewers)
         maximum = max(
             0,
             min(
-                len(viewer_ids),
+                len(viewers),
                 int(
                     self._budget_policy.maximum(
                         wave=wave,
@@ -115,111 +114,130 @@ class DirectorService:
                 ),
             ),
         )
-        if (wave.target_viewer_id or wave.target_persona_id) and viewer_ids:
+        if (wave.target_viewer_id or wave.target_persona_id) and viewers:
             maximum = max(1, maximum)
         request = DirectorRequest(
             wave=wave,
-            viewer_ids=viewer_ids,
             maximum=maximum,
             runtime=runtime,
             forced_viewer_ids=(
-                (wave.target_viewer_id,)
-                if wave.target_viewer_id is not None
-                else ()
+                (wave.target_viewer_id,) if wave.target_viewer_id is not None else ()
             ),
             forced_persona_id=wave.target_persona_id,
         )
         try:
             raw = await self._provider.decide(request)
-            outcome = self._coerce_outcome(raw)
-            self._validate(
-                outcome.decision,
+            outcome = self._coerce_outcome(raw, wave=wave, maximum=maximum)
+            self._validate(outcome.assessment, wave=wave, maximum=maximum)
+        except Exception as error:
+            if not self._is_resilient(runtime):
+                raise DirectorDecisionError(str(error)) from error
+            fallback = self._fallback.decide(
                 wave=wave,
-                viewers=viewers,
-                viewer_ids=set(viewer_ids),
+                pool=pool,
+                runtime=runtime,
                 maximum=maximum,
             )
-        except Exception as error:
-            if self._is_resilient(runtime):
-                fallback = self._fallback.decide(
-                    wave=wave,
-                    pool=pool,
-                    runtime=runtime,
-                    maximum=maximum,
+            outcome = self._coerce_outcome(fallback, wave=wave, maximum=maximum)
+            outcome = DirectorOutcome(
+                assessment=outcome.assessment.model_copy(
+                    update={"decision_source": DecisionSource.FALLBACK}
                 )
-                outcome = DirectorOutcome(
-                    decision=fallback.model_copy(
-                        update={"decision_source": DecisionSource.FALLBACK}
-                    )
-                )
-                self._validate(
-                    outcome.decision,
-                    wave=wave,
-                    viewers=viewers,
-                    viewer_ids=set(viewer_ids),
-                    maximum=maximum,
-                )
-            else:
-                raise DirectorDecisionError(str(error)) from error
-        validate_meme_candidate(
-            outcome.meme_candidate,
-            wave=wave,
-            runtime=runtime,
-        )
+            )
+            self._validate(outcome.assessment, wave=wave, maximum=maximum)
+        validate_meme_candidate(outcome.meme_candidate, wave=wave, runtime=runtime)
         return outcome
 
-    @staticmethod
-    def _coerce_outcome(raw: object) -> DirectorOutcome:
+    @classmethod
+    def _coerce_outcome(
+        cls,
+        raw: object,
+        *,
+        wave: ObservationWave,
+        maximum: int,
+    ) -> DirectorOutcome:
         if isinstance(raw, DirectorOutcome):
             return raw
+        if isinstance(raw, SceneAssessment):
+            return DirectorOutcome(assessment=raw)
         if isinstance(raw, CrowdDecision):
-            return DirectorOutcome(decision=raw)
+            return DirectorOutcome(
+                assessment=cls._legacy_assessment(raw, wave=wave, maximum=maximum)
+            )
+        assessment = getattr(raw, "assessment", None)
+        if isinstance(assessment, SceneAssessment):
+            return DirectorOutcome(
+                assessment=assessment,
+                meme_candidate=getattr(raw, "meme_candidate", None),
+            )
         decision = getattr(raw, "decision", None)
         if isinstance(decision, CrowdDecision):
-            candidate = getattr(raw, "meme_candidate", None)
-            return DirectorOutcome(decision=decision, meme_candidate=candidate)
+            return DirectorOutcome(
+                assessment=cls._legacy_assessment(
+                    decision,
+                    wave=wave,
+                    maximum=maximum,
+                ),
+                meme_candidate=getattr(raw, "meme_candidate", None),
+            )
         raise DirectorDecisionError("Director returned an invalid result")
 
-    def _validate(
-        self,
+    @staticmethod
+    def _legacy_assessment(
         decision: CrowdDecision,
         *,
         wave: ObservationWave,
-        viewers: tuple[object, ...],
-        viewer_ids: set[str],
+        maximum: int,
+    ) -> SceneAssessment:
+        highlight = bool(
+            {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
+            & set(wave.triggers)
+        )
+        return SceneAssessment(
+            assessment_id=decision.decision_id,
+            room_id=decision.room_id,
+            session_id=decision.session_id,
+            audience_epoch=decision.audience_epoch,
+            observation_id=decision.observation_id,
+            salience=0.8 if highlight else 0.55,
+            novelty=0.75,
+            emotional_intensity=0.5,
+            topics=list(decision.reason_codes),
+            replyable_event_ids=list(decision.evidence_event_ids),
+            evidence_event_ids=list(decision.evidence_event_ids),
+            evidence_frame_indexes=list(decision.evidence_frame_indexes),
+            maximum_responses=maximum,
+            reason_codes=["legacy_director_assessment", *decision.reason_codes],
+            decision_source=decision.decision_source,
+            created_at_ms=decision.created_at_ms,
+            expires_at_ms=decision.expires_at_ms,
+        )
+
+    def _validate(
+        self,
+        assessment: SceneAssessment,
+        *,
+        wave: ObservationWave,
         maximum: int,
     ) -> None:
         if (
-            decision.room_id != wave.room_id
-            or decision.session_id != wave.session_id
-            or decision.audience_epoch != wave.audience_epoch
-            or decision.observation_id != wave.observation_id
+            assessment.room_id != wave.room_id
+            or assessment.session_id != wave.session_id
+            or assessment.audience_epoch != wave.audience_epoch
+            or assessment.observation_id != wave.observation_id
         ):
-            raise DirectorDecisionError("Director decision scope does not match the wave")
-        if len(decision.selected_viewer_ids) > maximum:
+            raise DirectorDecisionError("Director assessment scope does not match the wave")
+        if assessment.maximum_responses > maximum:
             raise DirectorDecisionError("Director exceeded the local response budget")
-        if not set(decision.selected_viewer_ids).issubset(viewer_ids):
-            raise DirectorDecisionError("Director selected an unknown Viewer")
-        if (
-            wave.target_viewer_id is not None
-            and wave.target_viewer_id not in decision.selected_viewer_ids
-        ):
-            raise DirectorDecisionError("Director omitted the explicitly targeted Viewer")
-        if wave.target_persona_id is not None:
-            selected = set(decision.selected_viewer_ids)
-            if not any(
-                viewer.viewer_instance_id in selected
-                and viewer.persona_id == wave.target_persona_id
-                for viewer in viewers
-            ):
-                raise DirectorDecisionError("Director omitted the explicitly targeted Persona")
-        if not set(decision.evidence_event_ids).issubset(wave.event_ids):
+        if not set(assessment.evidence_event_ids).issubset(wave.event_ids):
             raise DirectorDecisionError("Director referenced an unknown event")
+        if not set(assessment.replyable_event_ids).issubset(wave.event_ids):
+            raise DirectorDecisionError("Director exposed an unknown replyable event")
         frame_count = 0 if wave.frame_bundle is None else len(wave.frame_bundle.frames)
-        if any(index >= frame_count for index in decision.evidence_frame_indexes):
+        if any(index >= frame_count for index in assessment.evidence_frame_indexes):
             raise DirectorDecisionError("Director referenced an unknown frame")
-        if self._clock.now_ms() >= decision.expires_at_ms:
-            raise DirectorDecisionError("Director decision is already expired")
+        if self._clock.now_ms() >= assessment.expires_at_ms:
+            raise DirectorDecisionError("Director assessment is already expired")
 
     @staticmethod
     def _is_resilient(runtime: object) -> bool:

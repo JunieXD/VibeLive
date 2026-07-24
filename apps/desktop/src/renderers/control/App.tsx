@@ -17,6 +17,7 @@ import { useModelConfig } from './hooks/useModelConfig'
 import { useOverlaySettings } from './hooks/useOverlaySettings'
 import { useVisualPipeline } from './hooks/useVisualPipeline'
 import { useSharedBrain } from './hooks/useSharedBrain'
+import { useLiveAudience } from './hooks/useLiveAudience'
 import {
   selectActiveView,
   selectDispatchSession,
@@ -83,6 +84,10 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     appendSystemActivity: activityFeed.appendSystemActivity,
     clearAudienceActivity: activityFeed.clearAudienceActivity,
   })
+  const liveAudience = useLiveAudience(
+    backend.status?.session.sessionId ?? null,
+    media.audienceSessionActive
+  )
   const activeAudienceMode =
     audience.workspace.modeState.modes.find(
       (mode) => mode.id === audience.workspace.modeState.activeModeId
@@ -261,6 +266,13 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             chat={{
               activity: activityFeed.activity,
               chatListRef: activityFeed.chatListRef
+            }}
+            audience={{
+              audience: liveAudience.audience,
+              pendingViewerId: liveAudience.pendingViewerId,
+              onMute: liveAudience.mute,
+              onUnmute: liveAudience.unmute,
+              onKick: liveAudience.kick
             }}
             mixer={{
               captureStream: media.captureStream,

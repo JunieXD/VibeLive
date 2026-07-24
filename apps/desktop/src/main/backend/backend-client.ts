@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   RealtimeIngestAck,
   RealtimeIngestRejected,
@@ -6,9 +7,12 @@ import type {
 } from "@advx/contracts";
 import type {
   BackendBarrageEvent,
+  BackendAudienceSnapshot,
   BackendConnectionState,
   BackendRuntimeStatus,
   BackendSessionSnapshot,
+  BackendViewerEvent,
+  BackendViewerSnapshot,
   ModelConfig,
   RuntimeModelProviderCandidate
 } from "../../shared/contracts";
@@ -33,7 +37,7 @@ import type {
 } from "../../shared/backend-client";
 import { encodeBinaryEnvelope } from "./realtime-binary";
 
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 const PROTOCOL_HEADER = "X-ADVX-Protocol-Version";
 const INGEST_ACK_TIMEOUT_MS = 10_000;
 const CONNECT_TIMEOUT_MS = 8_000;
@@ -56,6 +60,7 @@ type PendingIngest = {
 
 type StatusListener = (status: BackendRuntimeStatus) => void;
 type BarrageListener = (event: BackendBarrageEvent) => void;
+type ViewerListener = (event: BackendViewerEvent) => void;
 
 export class BackendClientError extends Error {
   readonly code: string;
@@ -85,6 +90,7 @@ export class BackendClient {
   private readonly pendingIngest = new Map<string, PendingIngest>();
   private readonly statusListeners = new Set<StatusListener>();
   private readonly barrageListeners = new Set<BarrageListener>();
+  private readonly viewerListeners = new Set<ViewerListener>();
   private audioQueue: Promise<void> = Promise.resolve();
 
   constructor(options: { baseUrl?: string; localToken: string }) {
@@ -102,6 +108,11 @@ export class BackendClient {
   onBarrage(listener: BarrageListener): () => void {
     this.barrageListeners.add(listener);
     return () => this.barrageListeners.delete(listener);
+  }
+
+  onViewerEvent(listener: ViewerListener): () => void {
+    this.viewerListeners.add(listener);
+    return () => this.viewerListeners.delete(listener);
   }
 
   async start(): Promise<void> {
@@ -229,6 +240,59 @@ export class BackendClient {
     return runtime;
   }
 
+  async queryAudience(sessionId: string): Promise<BackendAudienceSnapshot> {
+    return this.request(
+      `/runtime/sessions/${encodeURIComponent(sessionId)}/audience`,
+      "GET"
+    );
+  }
+
+  async muteViewer(
+    sessionId: string,
+    viewerId: string,
+    durationMs: number,
+    reason?: string
+  ): Promise<BackendViewerSnapshot> {
+    return this.viewerCommand(sessionId, viewerId, "mute", {
+      command_id: randomUUID(),
+      duration_ms: durationMs,
+      reason
+    });
+  }
+
+  async unmuteViewer(
+    sessionId: string,
+    viewerId: string
+  ): Promise<BackendViewerSnapshot> {
+    return this.viewerCommand(sessionId, viewerId, "unmute", {
+      command_id: randomUUID()
+    });
+  }
+
+  async kickViewer(
+    sessionId: string,
+    viewerId: string,
+    reason?: string
+  ): Promise<BackendViewerSnapshot> {
+    return this.viewerCommand(sessionId, viewerId, "kick", {
+      command_id: randomUUID(),
+      reason
+    });
+  }
+
+  private viewerCommand(
+    sessionId: string,
+    viewerId: string,
+    action: "mute" | "unmute" | "kick",
+    body: Record<string, unknown>
+  ): Promise<BackendViewerSnapshot> {
+    return this.request(
+      `/runtime/sessions/${encodeURIComponent(sessionId)}/viewers/${encodeURIComponent(viewerId)}/${action}`,
+      "POST",
+      body
+    );
+  }
+
   runtimeProviderAtRevision(
     sessionId: string,
     revision: number
@@ -257,7 +321,7 @@ export class BackendClient {
       {
         apply_id: applyId,
         base_revision: baseRevision,
-        audience_contract_version: 1,
+        audience_contract_version: 2,
         canonical_runtime_spec: compiled.spec,
         client_config_hash: compiled.configHash,
         provider_candidate: providerChanged ? providerCandidate : undefined
@@ -295,7 +359,7 @@ export class BackendClient {
         apply_id: applyId,
         base_revision: baseRevision,
         target_revision: targetRevision,
-        audience_contract_version: 1,
+        audience_contract_version: 2,
         provider_candidate:
           providerChanged && providerCandidateMatchesTarget ? providerCandidate : undefined
       }
@@ -774,6 +838,16 @@ export class BackendClient {
         for (const listener of this.barrageListeners) listener(event);
         break;
       }
+      case "viewer.joined":
+      case "viewer.left":
+      case "viewer.rejoined":
+      case "viewer.muted":
+      case "viewer.unmuted":
+      case "viewer.kicked":
+        for (const listener of this.viewerListeners) {
+          listener(message as BackendViewerEvent);
+        }
+        break;
       case "ingest.ack":
         this.resolveIngest(message);
         break;
@@ -1030,6 +1104,14 @@ function validateRealtimeServerMessage(value: unknown): RealtimeServerMessage {
       requireAllowedKeys(message, ["protocol_version", "type", "barrage"], message.type);
       validateBarrage(message.barrage);
       break;
+    case "viewer.joined":
+    case "viewer.left":
+    case "viewer.rejoined":
+    case "viewer.muted":
+    case "viewer.unmuted":
+    case "viewer.kicked":
+      validateViewerEvent(message);
+      break;
     default:
       throw new Error(`不支持的后端实时消息类型：${message.type}。`);
   }
@@ -1064,6 +1146,8 @@ function validateBarrage(value: unknown): void {
       "display_name",
       "viewer_sequence",
       "reaction_type",
+      "intent",
+      "target",
       "evidence_refs",
       "text",
       "created_at_ms",
@@ -1120,6 +1204,32 @@ function validateBarrage(value: unknown): void {
       }
     }
   }
+}
+
+function validateViewerEvent(value: Record<string, unknown>): void {
+  requireAllowedKeys(
+    value,
+    [
+      "protocol_version",
+      "type",
+      "session_id",
+      "audience_epoch",
+      "population_revision",
+      "occurred_at_ms",
+      "viewer"
+    ],
+    String(value.type)
+  );
+  requireBoundedString(value.session_id, "viewer event session_id", 128);
+  requireIntegerAtLeast(value.audience_epoch, "viewer event audience_epoch", 1);
+  requireIntegerAtLeast(value.population_revision, "viewer event population_revision", 1);
+  requireIntegerAtLeast(value.occurred_at_ms, "viewer event occurred_at_ms", 0);
+  const viewer = requireRecord(value.viewer, "viewer event viewer 必须是对象");
+  requireBoundedString(viewer.viewer_instance_id, "viewer.viewer_instance_id", 128);
+  requireBoundedString(viewer.username, "viewer.username", 64);
+  requireBoundedString(viewer.display_name, "viewer.display_name", 64);
+  requireBoundedString(viewer.persona_id, "viewer.persona_id", 128);
+  requireBoundedString(viewer.persona_display_name, "viewer.persona_display_name", 64);
 }
 
 function requireRecord(value: unknown, message: string): Record<string, unknown> {

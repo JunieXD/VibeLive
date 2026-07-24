@@ -13,11 +13,11 @@
     "room_historian": 1
   },
   "bundle": {
-    "audience_contract_version": 1,
+    "audience_contract_version": 2,
     "bundle_id": "cs2-6657-desktop-preset-recorded-v2",
     "canonical_runtime_spec": {
-      "protocol_version": 2,
-      "audience_contract_version": 1,
+    "protocol_version": 3,
+    "audience_contract_version": 2,
       "config_revision": 2,
       "room": {
         "room_id": "cs2-synthetic-room",
@@ -1148,7 +1148,7 @@
           "mode_id": "lively-game-room",
           "namespace_id": "lively-game-room",
           "revision": 1,
-          "viewer_count": 24,
+          "target_concurrent_viewers": 24,
           "persona_ids": [
             "reaction_qmark",
             "cheat_suspector",
@@ -1194,7 +1194,7 @@
           "mode_id": "room-6657",
           "namespace_id": "room-6657",
           "revision": 2,
-          "viewer_count": 28,
+          "target_concurrent_viewers": 28,
           "persona_ids": [
             "reaction_qmark",
             "hardmouth_antifan",
@@ -1240,7 +1240,7 @@
           "mode_id": "newcomer-friendly",
           "namespace_id": "newcomer-friendly",
           "revision": 1,
-          "viewer_count": 16,
+          "target_concurrent_viewers": 16,
           "persona_ids": [
             "newcomer",
             "newbie_host",
@@ -1284,7 +1284,7 @@
           "mode_id": "gentle-company",
           "namespace_id": "gentle-company",
           "revision": 1,
-          "viewer_count": 14,
+          "target_concurrent_viewers": 14,
           "persona_ids": [
             "comfort_voice",
             "question_catcher",
@@ -1324,7 +1324,7 @@
           "mode_id": "competitive-banter",
           "namespace_id": "competitive-banter",
           "revision": 1,
-          "viewer_count": 24,
+          "target_concurrent_viewers": 24,
           "persona_ids": [
             "cheat_suspector",
             "hardmouth_antifan",
@@ -1370,7 +1370,7 @@
           "mode_id": "just-for-laughs",
           "namespace_id": "just-for-laughs",
           "revision": 1,
-          "viewer_count": 14,
+          "target_concurrent_viewers": 14,
           "persona_ids": [
             "abstract_radio",
             "fun_seeker",
@@ -1430,7 +1430,7 @@
         "max_consecutive_ambient_waves": 2
       }
     },
-    "config_hash": "7553099c9332d6cc1174e784bc349d5808bed423981b225f2cad88424cfbbd73",
+    "config_hash": "fd407d76c824798af8644900ce695ba7023f628053c8a5312adeebf5ff3d694c",
     "created_at_ms": 2000,
     "events": [
       {
@@ -1500,7 +1500,9 @@
         "occurred_at_ms": 1400,
         "payload": {
           "generation_request_ids": [
-            "fake-memory-call-1"
+            "fake-memory-call-1",
+            "fake-memory-call-2",
+            "fake-memory-call-3"
           ]
         },
         "sequence": 6
@@ -1518,25 +1520,25 @@
       "fixture://cs2/dust2-highlight/frame-hashes.json",
       "fixture://cs2/dust2-highlight/final-transcript.txt.sha256"
     ],
-    "protocol_version": 2,
+    "protocol_version": 3,
     "recorded_provider_outputs": [
       {
         "generation_request_id": "fake-director-call-1",
         "output": {
-          "decision_id": "decision-cs2-1",
+          "assessment_id": "assessment-cs2-text",
           "evidence_event_ids": [
             "cs2-event-1"
           ],
-          "selected_persona_ids": [
-            "instigator",
-            "reaction_qmark"
-          ]
+          "maximum_responses": 0,
+          "salience": 0.7
         },
         "provider_role": "director"
       },
       {
         "generation_request_id": "fake-director-call-2",
         "output": {
+          "assessment_id": "assessment-cs2-voice",
+          "maximum_responses": 0,
           "reason_codes": [
             "recorded_voice"
           ]
@@ -1546,6 +1548,8 @@
       {
         "generation_request_id": "fake-director-call-3",
         "output": {
+          "assessment_id": "assessment-cs2-frame",
+          "maximum_responses": 1,
           "reason_codes": [
             "recorded_frame"
           ]
@@ -1573,6 +1577,20 @@
       },
       {
         "generation_request_id": "fake-memory-call-1",
+        "output": {
+          "candidates": []
+        },
+        "provider_role": "memory"
+      },
+      {
+        "generation_request_id": "fake-memory-call-2",
+        "output": {
+          "candidates": []
+        },
+        "provider_role": "memory"
+      },
+      {
+        "generation_request_id": "fake-memory-call-3",
         "output": {
           "candidates": [
             {
@@ -1661,8 +1679,8 @@
     }
   },
   "initial_canonical_runtime_spec": {
-    "protocol_version": 2,
-    "audience_contract_version": 1,
+    "protocol_version": 3,
+    "audience_contract_version": 2,
     "config_revision": 1,
     "room": {
       "room_id": "cs2-synthetic-room",
@@ -2793,7 +2811,7 @@
         "mode_id": "lively-game-room",
         "namespace_id": "lively-game-room",
         "revision": 1,
-        "viewer_count": 24,
+        "target_concurrent_viewers": 24,
         "persona_ids": [
           "reaction_qmark",
           "cheat_suspector",
@@ -2839,7 +2857,7 @@
         "mode_id": "room-6657",
         "namespace_id": "room-6657",
         "revision": 1,
-        "viewer_count": 28,
+          "target_concurrent_viewers": 28,
         "persona_ids": [
           "reaction_qmark",
           "hardmouth_antifan",
@@ -2885,7 +2903,7 @@
         "mode_id": "newcomer-friendly",
         "namespace_id": "newcomer-friendly",
         "revision": 1,
-        "viewer_count": 16,
+          "target_concurrent_viewers": 16,
         "persona_ids": [
           "newcomer",
           "newbie_host",
@@ -2929,7 +2947,7 @@
         "mode_id": "gentle-company",
         "namespace_id": "gentle-company",
         "revision": 1,
-        "viewer_count": 14,
+          "target_concurrent_viewers": 14,
         "persona_ids": [
           "comfort_voice",
           "question_catcher",
@@ -2969,7 +2987,7 @@
         "mode_id": "competitive-banter",
         "namespace_id": "competitive-banter",
         "revision": 1,
-        "viewer_count": 24,
+        "target_concurrent_viewers": 24,
         "persona_ids": [
           "cheat_suspector",
           "hardmouth_antifan",
@@ -3015,7 +3033,7 @@
         "mode_id": "just-for-laughs",
         "namespace_id": "just-for-laughs",
         "revision": 1,
-        "viewer_count": 14,
+          "target_concurrent_viewers": 14,
         "persona_ids": [
           "abstract_radio",
           "fun_seeker",

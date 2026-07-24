@@ -58,7 +58,9 @@ from advx_backend.application.shared_brain_service import SharedBrainService
 from advx_backend.application.transcript_target_resolver import (
     RuntimeTranscriptTargetResolver,
 )
+from advx_backend.application.viewer_audience_service import ViewerAudienceService
 from advx_backend.application.viewer_barrage_pipeline import ViewerBarragePipeline
+from advx_backend.application.viewer_behavior_service import ViewerBehaviorService
 from advx_backend.application.viewer_policies import (
     ActiveModeDirectorBudgetPolicy,
     DeterministicDirectorFallbackPolicy,
@@ -189,6 +191,7 @@ class BackendRuntime:
     room_event_store: PersistentRuntimeRoomEventStore
     runtime_session_service: RuntimeSessionService
     runtime_state: RuntimeStateStore
+    viewer_audience_service: ViewerAudienceService
     provider_configuration_store: ProviderConfigurationStore
     provider_controller: RuntimeProviderController
     provider_router: RuntimeProviderRouter
@@ -445,6 +448,10 @@ class BackendRuntime:
             id_generator=self.id_generator,
             max_in_flight=12,
             trace_recorder=self.debug_service,
+            behavior_state_sink=self.viewer_audience_service,
+        )
+        self.viewer_audience_service.bind_cancel_viewer(
+            viewer_runtime.cancel_viewer
         )
         director = DirectorService(
             provider=viewer_provider,
@@ -456,6 +463,8 @@ class BackendRuntime:
             runtime_state=self.runtime_state,
             director=director,
             viewer_runtime=viewer_runtime,
+            viewer_behavior=ViewerBehaviorService(),
+            population_controller=self.viewer_audience_service,
             frame_metadata=StoredFrameMetadataResolver(
                 frame_store=self.frame_store,
             ),
@@ -640,9 +649,10 @@ def build_runtime(
         app_version=BACKEND_VERSION,
     )
     session_resources.add_resource(runtime_state)
+    viewer_pool = ViewerPoolService(id_generator=id_generator)
     runtime_session_service = RuntimeSessionService(
         session_factory=database.session_factory,
-        viewer_pool=ViewerPoolService(id_generator=id_generator),
+        viewer_pool=viewer_pool,
         clock=clock,
         id_generator=id_generator,
         capability_probe=(
@@ -660,6 +670,14 @@ def build_runtime(
         provider_controller=provider_controller,
         app_version=BACKEND_VERSION,
     )
+    viewer_audience_service = ViewerAudienceService(
+        runtime_state=runtime_state,
+        session_factory=database.session_factory,
+        broker=broker,
+        clock=clock,
+        viewer_pool=viewer_pool,
+    )
+    session_resources.add_resource(viewer_audience_service)
     return BackendRuntime(
         session_service=session_service,
         realtime_broker=broker,
@@ -684,6 +702,7 @@ def build_runtime(
         room_event_store=room_event_store,
         runtime_session_service=runtime_session_service,
         runtime_state=runtime_state,
+        viewer_audience_service=viewer_audience_service,
         provider_configuration_store=provider_configuration_store,
         provider_controller=provider_controller,
         provider_router=provider_router,
