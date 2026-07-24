@@ -34,6 +34,13 @@ function describeBackendError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
+export function canStopBackendSession(snapshot: BackendSessionSnapshot): boolean {
+  return (
+    snapshot.sessionId !== null &&
+    ['starting', 'running', 'paused', 'error'].includes(snapshot.state)
+  )
+}
+
 export function useSessionMediaControls({
   sessionStatus,
   sessionStatusRef,
@@ -77,6 +84,13 @@ export function useSessionMediaControls({
     dispatchSession({ type: 'sync', status: snapshot.state })
     onBackendSessionSnapshotRef.current?.(snapshot)
   }, [dispatchSession, sessionStatusRef, setAudienceSessionActive])
+
+  const stopUnconfirmedBackendSession = useCallback(async (): Promise<boolean> => {
+    const status = await window.advx.getBackendStatus()
+    if (!canStopBackendSession(status.session)) return false
+    await window.advx.stopBackendSession()
+    return true
+  }, [])
 
   const releaseOverlay = useCallback(async (): Promise<string | null> => {
     const [clearResult, hideResult] = await Promise.allSettled([
@@ -165,8 +179,14 @@ export function useSessionMediaControls({
         } catch (error) {
           if (!devices.operation.isCurrent(operationId)) return
           startClientRequestIdRef.current = null
+          const cleanupFailed = await stopUnconfirmedBackendSession().then(
+            () => false,
+            () => true
+          )
           onSystemActivityRef.current(
-            `AI 观众未能接入：${describeBackendError(error, '连接异常。')} 继续进行仅画面直播。`
+            `AI 观众未能接入：${describeBackendError(error, '连接异常。')}${
+              cleanupFailed ? ' 后端 Session 可能仍在运行，请结束直播后重试。' : ''
+            } 继续进行仅画面直播。`
           )
         }
       } else {
@@ -242,6 +262,7 @@ export function useSessionMediaControls({
     releaseOverlay,
     sessionStatusRef,
     setAudienceSessionActive,
+    stopUnconfirmedBackendSession,
     syncBackendSession
   ])
 
@@ -249,7 +270,7 @@ export function useSessionMediaControls({
     const devices = devicesRef.current
     const operationId = devices.operation.begin(true)
     if (operationId === null) return
-    const backendSessionActive = backendSessionActiveRef.current
+    let backendSessionActive = backendSessionActiveRef.current
     sessionStatusRef.current = 'stopping'
     dispatchSession({ type: 'stop' })
     devices.stopCapture()
@@ -263,6 +284,10 @@ export function useSessionMediaControls({
     }
     let stopError: string | null = null
     try {
+      if (!backendSessionActive) {
+        const status = await window.advx.getBackendStatus()
+        backendSessionActive = canStopBackendSession(status.session)
+      }
       if (backendSessionActive) {
         const backendSession = await window.advx.stopBackendSession()
         syncBackendSession(backendSession)
