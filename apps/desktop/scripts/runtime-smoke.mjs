@@ -207,6 +207,7 @@ try {
   sessionStarted = true
   assert.equal(started.state, 'running')
   assert.ok(started.sessionId)
+  await controlPage.evaluate(() => window.advx.notifyVoiceActivity(Date.now()))
   let overlayPage
   if (!aiCallsOnly) {
     await controlPage.evaluate(() => window.advx.showOverlay())
