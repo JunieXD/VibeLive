@@ -16,6 +16,7 @@ from advx_backend.domain.observation import Observation
 
 __all__ = [
     "LatestWinsReactionScheduler",
+    "ReactionPreparationError",
     "ReactionExecutor",
     "ReactionSchedulerConfig",
 ]
@@ -34,6 +35,18 @@ class ReactionExecutor(Protocol):
     async def react(self, observation: Observation) -> ReactionResult: ...
 
 
+class ReactionPreparationError(RuntimeError):
+    """A failure before any Viewer model request has been started.
+
+    These failures are safe to retry once because no model output or room-side
+    effect can have been produced yet.
+    """
+
+
+class ReactionFailureReporter(Protocol):
+    async def __call__(self, observation: Observation, error: Exception) -> None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ReactionSchedulerConfig:
     """Resource limits for :class:`LatestWinsReactionScheduler`."""
@@ -42,6 +55,8 @@ class ReactionSchedulerConfig:
     max_tracked_sessions: int = 32
     max_pending_observations_per_session: int = 1_024
     observation_merge_window_ms: int = 0
+    preparation_retry_count: int = 1
+    preparation_retry_backoff_ms: int = 50
 
     def __post_init__(self) -> None:
         _require_positive_int("observation_ttl_ms", self.observation_ttl_ms)
@@ -56,6 +71,18 @@ class ReactionSchedulerConfig:
             or self.observation_merge_window_ms < 0
         ):
             raise ValueError("observation_merge_window_ms must be a non-negative integer")
+        if (
+            isinstance(self.preparation_retry_count, bool)
+            or not isinstance(self.preparation_retry_count, int)
+            or self.preparation_retry_count < 0
+        ):
+            raise ValueError("preparation_retry_count must be a non-negative integer")
+        if (
+            isinstance(self.preparation_retry_backoff_ms, bool)
+            or not isinstance(self.preparation_retry_backoff_ms, int)
+            or self.preparation_retry_backoff_ms < 0
+        ):
+            raise ValueError("preparation_retry_backoff_ms must be a non-negative integer")
 
 
 @dataclass(slots=True)
@@ -86,12 +113,14 @@ class LatestWinsReactionScheduler:
         clock: Clock,
         config: ReactionSchedulerConfig | None = None,
         merge_window_provider: Callable[[str], Awaitable[int]] | None = None,
+        failure_reporter: ReactionFailureReporter | None = None,
     ) -> None:
         self._executor = executor
         self._session_tasks = session_tasks
         self._clock = clock
         self._config = ReactionSchedulerConfig() if config is None else config
         self._merge_window_provider = merge_window_provider
+        self._failure_reporter = failure_reporter
         self._lock = asyncio.Lock()
         self._sessions: OrderedDict[str, _SessionSchedule] = OrderedDict()
 
@@ -194,9 +223,7 @@ class LatestWinsReactionScheduler:
 
         current_task = asyncio.current_task()
         cancellable = tuple(
-            task
-            for task, _ in tasks
-            if task is not current_task and not task.done()
+            task for task, _ in tasks if task is not current_task and not task.done()
         )
         for task in cancellable:
             task.cancel()
@@ -210,9 +237,7 @@ class LatestWinsReactionScheduler:
             async with self._lock:
                 if session_id is None:
                     workers = tuple(
-                        task
-                        for schedule in self._sessions.values()
-                        for task in schedule.tasks
+                        task for schedule in self._sessions.values() for task in schedule.tasks
                     )
                 else:
                     schedule = self._sessions.get(session_id)
@@ -253,26 +278,72 @@ class LatestWinsReactionScheduler:
         if not await self._session_tasks.accepts_results(observation.session_id):
             return None
 
-        try:
-            result = await self._executor.react(observation)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            logger.warning(
-                "reaction execution failed",
-                extra={
-                    "session_id": observation.session_id,
-                    "observation_id": observation.observation_id,
-                    "error_type": type(error).__name__,
-                },
-            )
-            return None
+        attempts = self._config.preparation_retry_count + 1
+        for attempt in range(attempts):
+            try:
+                result = await self._executor.react(observation)
+                break
+            except asyncio.CancelledError:
+                raise
+            except ReactionPreparationError as error:
+                if attempt + 1 < attempts:
+                    logger.warning(
+                        "reaction preparation failed; retrying",
+                        exc_info=True,
+                        extra={
+                            "session_id": observation.session_id,
+                            "observation_id": observation.observation_id,
+                            "attempt": attempt + 1,
+                        },
+                    )
+                    if self._config.preparation_retry_backoff_ms:
+                        await asyncio.sleep(self._config.preparation_retry_backoff_ms / 1_000)
+                    continue
+                await self._report_failure(observation, error)
+                logger.exception(
+                    "reaction preparation failed after retry",
+                    extra={
+                        "session_id": observation.session_id,
+                        "observation_id": observation.observation_id,
+                        "attempts": attempts,
+                    },
+                )
+                return None
+            except Exception as error:
+                await self._report_failure(observation, error)
+                logger.exception(
+                    "reaction execution failed",
+                    extra={
+                        "session_id": observation.session_id,
+                        "observation_id": observation.observation_id,
+                        "error_type": type(error).__name__,
+                    },
+                )
+                return None
 
         if self._is_expired(observation):
             return None
         if not await self._session_tasks.accepts_results(observation.session_id):
             return None
         return result
+
+    async def _report_failure(
+        self,
+        observation: Observation,
+        error: Exception,
+    ) -> None:
+        if self._failure_reporter is None:
+            return
+        try:
+            await self._failure_reporter(observation, error)
+        except Exception:
+            logger.exception(
+                "reaction failure reporting failed",
+                extra={
+                    "session_id": observation.session_id,
+                    "observation_id": observation.observation_id,
+                },
+            )
 
     def _is_expired(self, observation: Observation) -> bool:
         return self._clock.now_ms() >= observation.created_at_ms + self._config.observation_ttl_ms
@@ -306,14 +377,8 @@ class LatestWinsReactionScheduler:
     def _merge_observations(first: Observation, latest: Observation) -> Observation:
         if first.session_id != latest.session_id:
             raise ValueError("cannot merge observations from different sessions")
-        frames = {
-            frame.frame_id: frame
-            for frame in (*first.frames, *latest.frames)
-        }
-        events = {
-            event.event_id: event
-            for event in (*first.room_events, *latest.room_events)
-        }
+        frames = {frame.frame_id: frame for frame in (*first.frames, *latest.frames)}
+        events = {event.event_id: event for event in (*first.room_events, *latest.room_events)}
         target_viewer_id, target_persona_id, target_ambiguous = (
             LatestWinsReactionScheduler._merge_targets(first, latest)
         )
@@ -372,11 +437,7 @@ class LatestWinsReactionScheduler:
         if len(targets) != 1:
             return None, None, len(targets) > 1
         kind, target = next(iter(targets))
-        return (
-            (target, None, False)
-            if kind == "viewer"
-            else (None, target, False)
-        )
+        return (target, None, False) if kind == "viewer" else (None, target, False)
 
     def _remove_if_idle(self, session_id: str, schedule: _SessionSchedule) -> None:
         if not schedule.tasks and self._sessions.get(session_id) is schedule:

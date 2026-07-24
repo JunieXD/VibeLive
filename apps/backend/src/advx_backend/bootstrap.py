@@ -217,9 +217,7 @@ class BackendRuntime:
             return
         try:
             await self.database.start()
-            await self.session_record_store.recover_interrupted(
-                ended_at_ms=self.clock.now_ms()
-            )
+            await self.session_record_store.recover_interrupted(ended_at_ms=self.clock.now_ms())
         except Exception as error:
             # Keep the control plane alive for machine-readable health and recovery.
             logger.exception("SQLite startup failed; runtime is persistence-degraded")
@@ -439,9 +437,7 @@ class BackendRuntime:
             else None
         )
         asr_provider = (
-            owned_asr_provider
-            if asr_provider_override is None
-            else asr_provider_override
+            owned_asr_provider if asr_provider_override is None else asr_provider_override
         )
         viewer_runtime = ViewerRuntime(
             provider=viewer_provider,
@@ -462,9 +458,7 @@ class BackendRuntime:
             trace_recorder=self.debug_service,
             behavior_state_sink=self.viewer_audience_service,
         )
-        self.viewer_audience_service.bind_cancel_viewer(
-            viewer_runtime.cancel_viewer
-        )
+        self.viewer_audience_service.bind_cancel_viewer(viewer_runtime.cancel_viewer)
         coordinator = ViewerRuntimeCoordinator(
             runtime_state=self.runtime_state,
             viewer_runtime=viewer_runtime,
@@ -488,6 +482,7 @@ class BackendRuntime:
             session_tasks=self.session_service,
             clock=self.clock,
             merge_window_provider=self.observation_merge_window_ms,
+            failure_reporter=coordinator.record_reaction_failure,
         )
         ingest_service = IngestService(
             room_service=self.room_service,
