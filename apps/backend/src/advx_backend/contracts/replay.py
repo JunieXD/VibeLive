@@ -32,7 +32,13 @@ class ReplayEvent(ReplayContractModel):
 
 class RecordedProviderOutput(ReplayContractModel):
     generation_request_id: str = Field(min_length=1, max_length=128)
-    provider_role: Literal["viewer", "memory", "visual_summary", "asr"]
+    provider_role: Literal[
+        "viewer",
+        "memory",
+        "visual_summary",
+        "history_summary",
+        "asr",
+    ]
     output: dict[str, JsonValue]
 
     @model_validator(mode="after")
@@ -47,6 +53,7 @@ class RecordedProviderOutput(ReplayContractModel):
             },
             "memory": {"candidates"},
             "visual_summary": {"summary"},
+            "history_summary": {"summary"},
             "asr": {"text", "final", "started_at_ms", "ended_at_ms"},
         }[self.provider_role]
         if not self.output or not set(self.output).issubset(allowed):
@@ -151,7 +158,13 @@ class ReplayRequest(ReplayContractModel):
 
 
 class RecordedOutputConsumption(ReplayContractModel):
-    provider_role: Literal["viewer", "memory", "visual_summary", "asr"]
+    provider_role: Literal[
+        "viewer",
+        "memory",
+        "visual_summary",
+        "history_summary",
+        "asr",
+    ]
     generation_request_id: str = Field(min_length=1, max_length=128)
     call_index: int = Field(ge=1)
     runtime_request_id: str | None = Field(default=None, min_length=1, max_length=128)
@@ -164,7 +177,13 @@ class RecordedReplayEvidence(ReplayContractModel):
     memories: list[dict[str, JsonValue]]
     traces: list[dict[str, JsonValue]]
     consumed_provider_roles: list[
-        Literal["viewer", "memory", "visual_summary", "asr"]
+        Literal[
+            "viewer",
+            "memory",
+            "visual_summary",
+            "history_summary",
+            "asr",
+        ]
     ]
     consumed_provider_outputs: list[RecordedOutputConsumption]
     external_transport_call_count: Literal[0] = 0

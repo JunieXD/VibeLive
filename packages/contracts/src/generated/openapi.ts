@@ -908,7 +908,7 @@ export interface components {
          * AiCallRole
          * @enum {string}
          */
-        AiCallRole: "legacy_director" | "viewer" | "visual_summary" | "memory" | "asr";
+        AiCallRole: "legacy_director" | "viewer" | "visual_summary" | "history_summary" | "memory" | "asr";
         /**
          * AiCallStatus
          * @enum {string}
@@ -1729,7 +1729,7 @@ export interface components {
              * Provider Role
              * @enum {string}
              */
-            provider_role: "viewer" | "memory" | "visual_summary" | "asr";
+            provider_role: "viewer" | "memory" | "visual_summary" | "history_summary" | "asr";
             /** Generation Request Id */
             generation_request_id: string;
             /** Call Index */
@@ -1745,7 +1745,7 @@ export interface components {
              * Provider Role
              * @enum {string}
              */
-            provider_role: "viewer" | "memory" | "visual_summary" | "asr";
+            provider_role: "viewer" | "memory" | "visual_summary" | "history_summary" | "asr";
             /** Output */
             output: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -1772,7 +1772,7 @@ export interface components {
                 [key: string]: components["schemas"]["JsonValue"];
             }[];
             /** Consumed Provider Roles */
-            consumed_provider_roles: ("viewer" | "memory" | "visual_summary" | "asr")[];
+            consumed_provider_roles: ("viewer" | "memory" | "visual_summary" | "history_summary" | "asr")[];
             /** Consumed Provider Outputs */
             consumed_provider_outputs: components["schemas"]["RecordedOutputConsumption"][];
             /**

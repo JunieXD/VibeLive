@@ -161,6 +161,7 @@ class AiCallRole(StrEnum):
     LEGACY_DIRECTOR = "legacy_director"
     VIEWER = "viewer"
     VISUAL_SUMMARY = "visual_summary"
+    HISTORY_SUMMARY = "history_summary"
     MEMORY = "memory"
     ASR = "asr"
 

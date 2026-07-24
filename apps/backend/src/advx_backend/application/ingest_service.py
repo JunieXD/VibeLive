@@ -345,9 +345,22 @@ class IngestService:
             except Exception as error:
                 if not await self._is_active(session_id):
                     return
+                status_code = getattr(error, "status_code", None)
+                utterance_id = getattr(error, "utterance_id", None)
                 logger.warning(
-                    "ASR result stream failed",
-                    extra={"session_id": session_id, "error_type": type(error).__name__},
+                    "ASR result stream failed: %s",
+                    error,
+                    extra={
+                        "session_id": session_id,
+                        "utterance_id": (
+                            utterance_id if isinstance(utterance_id, str) else None
+                        ),
+                        "upstream_http_status": (
+                            status_code if isinstance(status_code, int) else None
+                        ),
+                        "retryable": bool(getattr(error, "retryable", False)),
+                        "error_type": type(error).__name__,
+                    },
                 )
 
     async def _consume_transcript(

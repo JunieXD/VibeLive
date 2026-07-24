@@ -27,6 +27,7 @@ from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleTransportError,
     default_reasoning_options,
 )
+from advx_backend.providers.model.provider_rate_gate import ProviderRateGate
 from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeConfig,
     ViewerRuntimeProtocolError,
@@ -111,6 +112,7 @@ class OpenAICompatibleMemoryExtractor:
         client: httpx.AsyncClient | None = None,
         max_concurrency: int = 1,
         ai_call_sink: AiCallSink | None = None,
+        rate_gate: ProviderRateGate | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least one")
@@ -119,6 +121,7 @@ class OpenAICompatibleMemoryExtractor:
         self._owns_client = client is None
         self._provider = self._role_provider()
         self._ai_call_sink = ai_call_sink
+        self._rate_gate = rate_gate or ProviderRateGate()
         self._slots = asyncio.Semaphore(max_concurrency)
         self._close_lock = asyncio.Lock()
         self._closed = False
@@ -213,50 +216,58 @@ class OpenAICompatibleMemoryExtractor:
                 raise ViewerRuntimeProviderBlockedError(
                     "Model provider credentials are not configured"
                 )
-            lifecycle.sent(build_openai_request_summary(payload))
             async with self._slots:
-                try:
-                    response = await self._provider._send(
-                        "POST",
-                        self._provider._chat_completions_endpoint(),
-                        payload=payload,
-                    )
-                except OpenAICompatibleProviderError as error:
-                    if (
-                        isinstance(error, OpenAICompatibleHttpError)
-                        and error.response is not None
-                    ):
-                        lifecycle.received(
-                            build_http_response_summary(error.response)
+                async with self._rate_gate.lease() as rate_limit_generation:
+                    lifecycle.sent(build_openai_request_summary(payload))
+                    try:
+                        response = await self._provider._send(
+                            "POST",
+                            self._provider._chat_completions_endpoint(),
+                            payload=payload,
                         )
-                    status_code = (
-                        error.status_code
-                        if isinstance(error, OpenAICompatibleHttpError)
-                        else None
-                    )
-                    raise ViewerRuntimeProviderError(
-                        str(error),
-                        status_code=status_code,
-                        retryable=(
-                            isinstance(
-                                error,
-                                (
-                                    OpenAICompatibleTimeoutError,
-                                    OpenAICompatibleTransportError,
-                                ),
+                    except OpenAICompatibleProviderError as error:
+                        if (
+                            isinstance(error, OpenAICompatibleHttpError)
+                            and error.response is not None
+                        ):
+                            lifecycle.received(
+                                build_http_response_summary(error.response)
                             )
-                            or status_code == 429
-                            or (
-                                isinstance(status_code, int)
-                                and 500 <= status_code <= 599
-                            )
-                        ),
-                        retry_after_seconds=(
-                            error.retry_after_seconds
+                        status_code = (
+                            error.status_code
                             if isinstance(error, OpenAICompatibleHttpError)
                             else None
-                        ),
-                    ) from None
+                        )
+                        normalized = ViewerRuntimeProviderError(
+                            str(error),
+                            status_code=status_code,
+                            retryable=(
+                                isinstance(
+                                    error,
+                                    (
+                                        OpenAICompatibleTimeoutError,
+                                        OpenAICompatibleTransportError,
+                                    ),
+                                )
+                                or status_code == 429
+                                or (
+                                    isinstance(status_code, int)
+                                    and 500 <= status_code <= 599
+                                )
+                            ),
+                            retry_after_seconds=(
+                                error.retry_after_seconds
+                                if isinstance(error, OpenAICompatibleHttpError)
+                                else None
+                            ),
+                        )
+                        if status_code == 429:
+                            await self._rate_gate.defer_for_rate_limit(
+                                normalized.retry_after_seconds
+                            )
+                        raise normalized from None
+                    else:
+                        await self._rate_gate.record_success(rate_limit_generation)
             lifecycle.received(build_http_response_summary(response))
             output = self._structured_output(response)
             try:

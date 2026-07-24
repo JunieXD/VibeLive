@@ -3,8 +3,6 @@ import base64
 import json
 import math
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from typing import Final, cast
 from urllib.parse import quote, urlsplit
 
@@ -23,6 +21,7 @@ from advx_backend.providers.model.base import (
     CapabilityProbeResult,
     CapabilityProbeStatus,
 )
+from advx_backend.providers.retry_after import parse_retry_after_seconds
 
 
 class OpenAICompatibleProviderError(RuntimeError):
@@ -483,24 +482,7 @@ class OpenAICompatibleProvider:
 
     @staticmethod
     def _retry_after_seconds(value: str | None) -> float | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            return None
-        try:
-            seconds = float(value)
-        except ValueError:
-            try:
-                retry_at = parsedate_to_datetime(value)
-            except (TypeError, ValueError, IndexError, OverflowError):
-                return None
-            if retry_at.tzinfo is None:
-                retry_at = retry_at.replace(tzinfo=UTC)
-            seconds = (retry_at - datetime.now(UTC)).total_seconds()
-        if not math.isfinite(seconds) or seconds < 0:
-            return None
-        return seconds
+        return parse_retry_after_seconds(value)
 
     async def _probe_chat(
         self,

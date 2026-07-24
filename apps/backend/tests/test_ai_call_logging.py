@@ -253,6 +253,62 @@ async def test_role_provider_records_blocked_visual_summary_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_history_summary_uses_lifecycle_and_returns_parsed_summary() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": json.dumps(
+                                {"summary": "主播完成了残局翻盘"},
+                                ensure_ascii=False,
+                            )
+                        },
+                    }
+                ]
+            },
+        )
+
+    sink = RecordingSink()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            OpenAICompatibleViewerRuntimeConfig(
+                base_url="https://example.com/v1",
+                provider=ProviderRuntimeSpec(
+                    provider_profile_id="profile-1",
+                    viewer_model="viewer",
+                    memory_model="memory",
+                    visual_summary_model="visual",
+                ),
+                api_key="secret",
+            ),
+            client=client,
+            ai_call_sink=sink,
+        )
+        summary = await provider.summarize_history(
+            session_id="session-1",
+            audience_epoch=1,
+            existing_summary=None,
+            older_history="主播进入残局并完成翻盘",
+        )
+        await provider.aclose()
+
+    assert summary == "主播完成了残局翻盘"
+    assert [trace.status for trace in sink.traces] == [
+        AiCallStatus.PREPARING,
+        AiCallStatus.SENT,
+        AiCallStatus.RECEIVED,
+        AiCallStatus.SUCCEEDED,
+    ]
+    assert sink.traces[-1].role is AiCallRole.HISTORY_SUMMARY
+    assert sink.traces[-1].session_id == "session-1"
+
+
+@pytest.mark.asyncio
 async def test_memory_extractor_records_request_and_parsed_candidates() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/chat/completions")
@@ -505,3 +561,207 @@ async def test_stepfun_asr_records_received_http_failure() -> None:
     assert final.error is not None
     assert final.error.http_status == 429
     assert final.error.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_stepfun_asr_retries_one_rate_limit_before_emitting_results() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(
+                429,
+                headers={"Retry-After": "0"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            request=request,
+            text='data: {"type":"transcript.text.done","text":"重试成功"}\n\n',
+        )
+
+    sink = RecordingSink()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = StepFunAsrProvider(
+            StepFunAsrConfig(
+                api_key="secret",
+                max_retries=1,
+                retry_backoff_seconds=0,
+            ),
+            client=client,
+            ai_call_sink=sink,
+        )
+        results = [
+            item
+            async for item in provider._transcribe_with_retry(
+                _AudioSegment(
+                    session_id="session-1",
+                    started_at_ms=100,
+                    ended_at_ms=400,
+                    sample_rate=16_000,
+                    channels=1,
+                    sample_width_bits=16,
+                    pcm=b"\x00\x01" * 160,
+                )
+            )
+        ]
+
+    terminal = [
+        trace
+        for trace in sink.traces
+        if trace.status in {AiCallStatus.FAILED, AiCallStatus.SUCCEEDED}
+    ]
+    assert attempts == 2
+    assert [item.text for item in results] == ["重试成功"]
+    assert [trace.status for trace in terminal] == [
+        AiCallStatus.FAILED,
+        AiCallStatus.SUCCEEDED,
+    ]
+    assert terminal[0].utterance_id == terminal[1].utterance_id
+    assert terminal[0].call_id != terminal[1].call_id
+
+
+@pytest.mark.asyncio
+async def test_stepfun_asr_retries_transport_failure_before_emitting_results() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("connection dropped", request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            text='data: {"type":"transcript.text.done","text":"连接恢复"}\n\n',
+        )
+
+    sink = RecordingSink()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = StepFunAsrProvider(
+            StepFunAsrConfig(
+                api_key="secret",
+                max_retries=1,
+                retry_backoff_seconds=0,
+            ),
+            client=client,
+            ai_call_sink=sink,
+        )
+        results = [
+            item
+            async for item in provider._transcribe_with_retry(
+                _AudioSegment(
+                    session_id="session-1",
+                    started_at_ms=100,
+                    ended_at_ms=400,
+                    sample_rate=16_000,
+                    channels=1,
+                    sample_width_bits=16,
+                    pcm=b"\x00\x01" * 160,
+                )
+            )
+        ]
+
+    terminal = [
+        trace
+        for trace in sink.traces
+        if trace.status in {AiCallStatus.FAILED, AiCallStatus.SUCCEEDED}
+    ]
+    assert attempts == 2
+    assert [item.text for item in results] == ["连接恢复"]
+    assert [trace.status for trace in terminal] == [
+        AiCallStatus.FAILED,
+        AiCallStatus.SUCCEEDED,
+    ]
+    assert terminal[0].utterance_id == terminal[1].utterance_id
+    assert terminal[0].call_id != terminal[1].call_id
+
+
+@pytest.mark.asyncio
+async def test_stepfun_asr_stops_after_the_configured_rate_limit_retry() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            429,
+            headers={"Retry-After": "0"},
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = StepFunAsrProvider(
+            StepFunAsrConfig(
+                api_key="secret",
+                max_retries=1,
+                retry_backoff_seconds=0,
+            ),
+            client=client,
+        )
+        with pytest.raises(StepFunAsrError, match="HTTP 429") as raised:
+            _ = [
+                item
+                async for item in provider._transcribe_with_retry(
+                    _AudioSegment(
+                        session_id="session-1",
+                        started_at_ms=100,
+                        ended_at_ms=400,
+                        sample_rate=16_000,
+                        channels=1,
+                        sample_width_bits=16,
+                        pcm=b"\x00\x01" * 160,
+                    )
+                )
+            ]
+
+    assert attempts == 2
+    assert raised.value.retry_after_seconds == 0
+    assert raised.value.utterance_id is not None
+
+
+@pytest.mark.asyncio
+async def test_stepfun_asr_does_not_retry_after_streaming_partial_text() -> None:
+    attempts = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            200,
+            request=request,
+            text=(
+                'data: {"type":"transcript.text.delta","delta":"半"}\n\n'
+                "data: not-json\n\n"
+            ),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = StepFunAsrProvider(
+            StepFunAsrConfig(
+                api_key="secret",
+                max_retries=1,
+                retry_backoff_seconds=0,
+            ),
+            client=client,
+        )
+        stream = provider._transcribe_with_retry(
+            _AudioSegment(
+                session_id="session-1",
+                started_at_ms=100,
+                ended_at_ms=400,
+                sample_rate=16_000,
+                channels=1,
+                sample_width_bits=16,
+                pcm=b"\x00\x01" * 160,
+            )
+        )
+        partial = await anext(stream)
+        with pytest.raises(StepFunAsrError, match="invalid SSE JSON"):
+            await anext(stream)
+
+    assert partial.text == "半"
+    assert not partial.final
+    assert attempts == 1

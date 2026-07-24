@@ -88,6 +88,25 @@ class _PreparationFailureExecutor:
             raise ReactionPreparationError("preparation failed") from error
 
 
+class _FlakyHistorySummarizer:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
+    ) -> str:
+        del session_id, audience_epoch, existing_summary
+        self.calls.append(older_history)
+        if len(self.calls) == 1:
+            raise RuntimeError("temporary history summary failure")
+        return "已压缩的历史"
+
+
 class _Ids:
     def __init__(self) -> None:
         self.value = 0
@@ -219,6 +238,57 @@ async def test_preparation_failure_retries_once_and_is_reported() -> None:
     assert await result is None
     assert executor.attempts == 2
     assert reported == [("failed", "ValueError")]
+
+
+@pytest.mark.asyncio
+async def test_failed_history_compaction_retries_older_events_on_next_wave() -> None:
+    summarizer = _FlakyHistorySummarizer()
+    coordinator = ViewerRuntimeCoordinator(
+        runtime_state=object(),
+        viewer_runtime=object(),
+        history_summarizer=summarizer,
+    )
+    events = tuple(
+        RoomEvent(
+            event_id=f"event-{index}",
+            session_id="session",
+            sequence=index,
+            source_type="user_text",
+            source_id="host",
+            created_at_ms=index,
+            text=f"{index}:{'x' * 5_000}",
+        )
+        for index in range(1, 7)
+    )
+    observation = Observation(
+        session_id="session",
+        observation_id="observation",
+        created_at_ms=1_000,
+        room_events=events,
+    )
+    committed = SimpleNamespace(audience_epoch=1)
+
+    first_recent, first_summary = await coordinator._compact_history(
+        observation,
+        committed,
+    )
+    state = coordinator._conversation_history["session"]
+
+    assert first_summary is None
+    assert len(first_recent) < len(events)
+    assert state.covered_event_ids == set()
+
+    second_recent, second_summary = await coordinator._compact_history(
+        observation,
+        committed,
+    )
+
+    assert summarizer.calls[0] == summarizer.calls[1]
+    assert second_recent == first_recent
+    assert second_summary == "已压缩的历史"
+    assert state.covered_event_ids == {
+        event.event_id for event in events if event not in first_recent
+    }
 
 
 @pytest.mark.asyncio

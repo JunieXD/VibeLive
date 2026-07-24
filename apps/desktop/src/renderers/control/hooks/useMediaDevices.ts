@@ -392,8 +392,12 @@ export function useMediaDevices({
         const now = Date.now()
         if (audioSegmentStartedAtRef.current === null) {
           if (level < AUDIO_SPEECH_THRESHOLD) return
-          window.advx.notifyVoiceActivity(now)
           audioSegmentStartedAtRef.current = now
+          try {
+            window.advx.notifyVoiceActivity(now)
+          } catch (error) {
+            console.error('Voice activity notification failed; continuing audio ingestion', error)
+          }
         }
         const copy = new Float32Array(samples)
         audioChunksRef.current.push(copy)

@@ -178,6 +178,7 @@ class _RecordedViewerProvider:
         self._ledger = ledger
         self.viewer_calls = 0
         self.visual_calls = 0
+        self.history_calls = 0
 
     async def generate(self, request: object) -> ViewerGenerationResponse:
         self.viewer_calls += 1
@@ -223,6 +224,22 @@ class _RecordedViewerProvider:
         summary = visual.get("summary")
         if not isinstance(summary, str) or not summary.strip():
             raise ViewerRuntimeProtocolError("recorded visual summary is blank")
+        return summary.strip()
+
+    async def summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
+    ) -> str:
+        del session_id, audience_epoch, existing_summary, older_history
+        self.history_calls += 1
+        history = self._ledger.consume("history_summary")
+        summary = history.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ViewerRuntimeProtocolError("recorded history summary is blank")
         return summary.strip()
 
     async def aclose(self) -> None:

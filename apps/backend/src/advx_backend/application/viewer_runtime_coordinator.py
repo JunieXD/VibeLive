@@ -1037,9 +1037,11 @@ class ViewerRuntimeCoordinator:
                         observation.session_id,
                         error,
                     )
-                # Each wave calls the summary model at most once. On failure,
-                # retain the latest events and let a future wave compact again.
-                state.covered_event_ids.update(event.event_id for event in older)
+                else:
+                    state.covered_event_ids.update(event.event_id for event in older)
+                # Each wave calls the summary model at most once. Keep only the
+                # latest events in this wave, but retry uncommitted older events
+                # on a future wave when summary generation failed.
                 recent = list(newer)
         return tuple(recent), state.summary
 
