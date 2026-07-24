@@ -58,7 +58,7 @@ export function RoomInteractionView({
                 ? '说点什么，AI 观众会回应你'
                 : '开始直播后可发送'
           }
-          disabled={!canMessage || messageSending}
+          disabled={!canMessage}
           aria-label="发送房间消息"
         />
         <button
