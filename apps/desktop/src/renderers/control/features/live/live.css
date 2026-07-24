@@ -568,6 +568,29 @@
   border-bottom: 1px solid var(--border);
 }
 
+.viewer-panel-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.viewer-panel-heading-actions button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel-raise);
+  color: var(--text-dim);
+}
+
+.viewer-panel-heading-actions button:hover {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
 .viewer-filter {
   display: inline-flex;
 }

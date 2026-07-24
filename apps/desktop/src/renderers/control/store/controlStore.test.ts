@@ -21,9 +21,9 @@ describe('control store', () => {
     expect(selectSessionStatus(state)).toBe('idle')
     expect(selectSessionError(state)).toBeNull()
 
-    selectSetActiveView(state)('audience')
+    selectSetActiveView(state)('viewers')
     state = useControlStore.getState()
-    expect(selectActiveView(state)).toBe('audience')
+    expect(selectActiveView(state)).toBe('viewers')
   })
 
   it('uses the shared session transitions and ignores invalid actions', () => {

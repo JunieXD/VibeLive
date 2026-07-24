@@ -76,6 +76,7 @@ export type LiveChatProps = {
 export type LiveAudienceProps = {
   audience: BackendAudienceSnapshot | null
   pendingViewerId: string | null
+  onViewAll?: () => void
   onMute: (viewerId: string, durationMs: number) => Promise<void>
   onUnmute: (viewerId: string) => Promise<void>
   onKick: (viewerId: string) => Promise<void>

@@ -4,6 +4,7 @@ import { AppShell, type AppShellStatusItem } from './app/AppShell'
 import { AudienceWorkspace } from './AudienceWorkspace'
 import { LiveView } from './features/live/LiveView'
 import { SettingsView } from './features/settings/SettingsView'
+import { ViewerManagementView } from './features/viewers/ViewerManagementView'
 import { SourcePickerDialog } from './features/source-picker/SourcePickerDialog'
 import { useActivityFeed } from './hooks/useActivityFeed'
 import { useAudienceWorkspacePersistence } from './hooks/useAudienceWorkspacePersistence'
@@ -203,7 +204,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
         colorTheme={colorTheme}
         onColorThemeToggle={toggleColorTheme}
         sessionStatus={session.status}
-        audienceCount={barrage.activeAudience.length}
+        audienceCount={liveAudience.audience?.active_count ?? 0}
         modeName={activeAudienceMode?.name ?? '未选择'}
         elapsedSeconds={elapsedSeconds}
         barrageTotal={barrage.barrageTotal}
@@ -283,6 +284,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             audience={{
               audience: liveAudience.audience,
               pendingViewerId: liveAudience.pendingViewerId,
+              onViewAll: () => setActiveView('viewers'),
               onMute: liveAudience.mute,
               onUnmute: liveAudience.unmute,
               onKick: liveAudience.kick
@@ -323,6 +325,17 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               onChangeCamera: media.changeCamera,
               onToggleCamera: media.toggleCamera
             }}
+          />
+        )}
+
+        {activeView === 'viewers' && (
+          <ViewerManagementView
+            sessionStatus={session.status}
+            audience={liveAudience.audience}
+            pendingViewerId={liveAudience.pendingViewerId}
+            onMute={liveAudience.mute}
+            onUnmute={liveAudience.unmute}
+            onKick={liveAudience.kick}
           />
         )}
 

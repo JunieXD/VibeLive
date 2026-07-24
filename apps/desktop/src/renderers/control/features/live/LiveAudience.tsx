@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { UserMinus, Volume2, VolumeX } from 'lucide-react'
+import { ArrowRight, UserMinus, Volume2, VolumeX } from 'lucide-react'
 import type { LiveAudienceProps } from './liveTypes'
 
 type Filter = 'active' | 'muted' | 'all'
@@ -7,6 +7,7 @@ type Filter = 'active' | 'muted' | 'all'
 export function LiveAudience({
   audience,
   pendingViewerId,
+  onViewAll,
   onMute,
   onUnmute,
   onKick
@@ -22,14 +23,31 @@ export function LiveAudience({
     if (filter === 'active') {
       return items.filter((viewer) => viewer.presence_state === 'active')
     }
-    return items.filter((viewer) => viewer.presence_state !== 'removed')
+    return items.filter(
+      (viewer) =>
+        viewer.joined_at_ms !== null &&
+        viewer.presence_state !== 'removed' &&
+        viewer.presence_state !== 'ended'
+    )
   }, [audience, filter, now])
 
   return (
     <section className="viewer-panel">
       <div className="panel-heading compact">
         <span className="panel-title">当前观众</span>
-        <span className="chat-count">{audience?.active_count ?? 0}</span>
+        <span className="viewer-panel-heading-actions">
+          <span className="chat-count">{audience?.active_count ?? 0}</span>
+          {onViewAll && (
+            <button
+              type="button"
+              onClick={onViewAll}
+              title="查看全部直播观众"
+              aria-label="查看全部直播观众"
+            >
+              <ArrowRight size={14} />
+            </button>
+          )}
+        </span>
       </div>
       <div className="viewer-toolbar">
         <div className="viewer-filter" role="tablist" aria-label="观众筛选">
@@ -88,7 +106,13 @@ export function LiveAudience({
                   <button
                     className="danger"
                     disabled={pending}
-                    onClick={() => void onKick(viewer.viewer_instance_id)}
+                    onClick={() => {
+                      if (window.confirm(
+                        `确定将“${viewer.display_name}”踢出本场直播吗？该操作本场不可撤销。`
+                      )) {
+                        void onKick(viewer.viewer_instance_id)
+                      }
+                    }}
                     title="踢出本场直播"
                     type="button"
                   >

@@ -6,6 +6,7 @@ import {
   Moon,
   RefreshCw,
   Settings,
+  SlidersHorizontal,
   Sun,
   Users
 } from 'lucide-react'
@@ -13,7 +14,7 @@ import type { JSX, ReactNode } from 'react'
 import type { ColorTheme } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
 
-export type AppShellView = 'live' | 'audience' | 'settings'
+export type AppShellView = 'live' | 'viewers' | 'audience' | 'settings'
 
 export type AppShellStatusTone = 'offline' | 'online' | 'warning' | 'failed'
 
@@ -55,7 +56,8 @@ export type AppShellProps = {
 
 const viewLabels: Record<AppShellView, string> = {
   live: '直播控制台',
-  audience: 'AI 观众',
+  viewers: '直播观众',
+  audience: '观众配置',
   settings: '设置'
 }
 
@@ -118,7 +120,8 @@ export function AppShell({
 }: AppShellProps): JSX.Element {
   const navigationItems = [
     { view: 'live' as const, label: viewLabels.live, icon: LayoutDashboard },
-    { view: 'audience' as const, label: viewLabels.audience, icon: Users },
+    { view: 'viewers' as const, label: viewLabels.viewers, icon: Users },
+    { view: 'audience' as const, label: viewLabels.audience, icon: SlidersHorizontal },
     { view: 'settings' as const, label: viewLabels.settings, icon: Settings }
   ]
   const themeSwitchLabel =
@@ -163,7 +166,7 @@ export function AppShell({
               >
                 <Icon size={18} aria-hidden="true" />
                 <span>{label}</span>
-                {view === 'audience' && (
+                {view === 'viewers' && (
                   <span
                     className={[
                       'min-w-5.5 rounded-full px-1.5 py-0.5 text-center text-[11px]',
