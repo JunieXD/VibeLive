@@ -19,6 +19,7 @@ import {
   AUDIO_SENTENCE_SILENCE_SECONDS,
   AUDIO_SPEECH_CONFIRMATION_MS,
   encodePcm16Mono,
+  shouldHardFlushMicrophoneSegment,
   speechThresholds,
   updateNoiseFloor
 } from '../audio'
@@ -258,19 +259,25 @@ export function useMediaDevices({
       // Select the system range only after the previous turn settles, so a slow
       // upload cannot cause this turn to submit already-consumed audio again.
       const systemSnapshot = systemAudioWasActive
-        ? pendingSystemAudioSnapshot(systemChannel, endedAtMs)
+        ? pendingSystemAudioSnapshot(systemChannel, endedAtMs, capturedAtMs)
         : null
       const turnId = crypto.randomUUID()
-      let systemSend: Promise<void> | null = null
+      let systemSubmission: {
+        snapshot: NonNullable<typeof systemSnapshot>
+        send: Promise<void>
+      } | null = null
       if (systemSnapshot !== null) {
         const systemSequence = systemChannel.sequence + 1
         systemChannel.sequence = systemSequence
-        systemSend = enqueueAudioSegment(systemChannel, {
-          inputId: `system_audio-${systemSnapshot.capturedAtMs}-${systemSequence}`,
-          capturedAtMs: systemSnapshot.capturedAtMs,
-          body: encodePcm16Mono(systemSnapshot.chunks, systemSnapshot.sampleRate),
-          turnId
-        })
+        systemSubmission = {
+          snapshot: systemSnapshot,
+          send: enqueueAudioSegment(systemChannel, {
+            inputId: `system_audio-${systemSnapshot.capturedAtMs}-${systemSequence}`,
+            capturedAtMs: systemSnapshot.capturedAtMs,
+            body: encodePcm16Mono(systemSnapshot.chunks, systemSnapshot.sampleRate),
+            turnId
+          })
+        }
       }
       const microphoneSend = window.advx.submitAudioSegment({
         source: 'microphone',
@@ -280,18 +287,20 @@ export function useMediaDevices({
         turnId,
         systemAudioRequired: systemSnapshot !== null
       })
-      if (systemSend === null) {
+      if (systemSubmission === null) {
         await microphoneSend
         return
       }
+      const submission = systemSubmission
       const [systemResult, microphoneResult] = await Promise.allSettled([
-        systemSend,
+        submission.send,
         microphoneSend
       ])
       if (systemResult.status === 'fulfilled') {
-        markSystemAudioSubmitted(systemChannel, systemSnapshot.endedAtMs)
+        markSystemAudioSubmitted(systemChannel, submission.snapshot.endedAtMs)
       }
       if (microphoneResult.status === 'rejected') throw microphoneResult.reason
+      if (systemResult.status === 'rejected') throw systemResult.reason
     })
     return observeAudioTransport(channel, send)
   }, [enqueueAudioSegment, observeAudioTransport])
@@ -558,6 +567,12 @@ export function useMediaDevices({
         }
         channel.chunks.push(copy)
         channel.sampleCount += copy.length
+        if (shouldHardFlushMicrophoneSegment(channel.segmentStartedAt, now)) {
+          void flushMicrophoneSegment(channel)
+          channel.segmentStartedAt = now
+          channel.lastSpeechAt = now
+          return
+        }
         if (level >= thresholds.continue) {
           channel.lastSpeechAt = now
         } else if (

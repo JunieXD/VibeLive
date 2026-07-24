@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from advx_backend.application.ingest_service import (
+    DuplicateIngestInputError,
     IngestInputOutOfOrderError,
     IngestService,
 )
@@ -35,12 +36,16 @@ class _Asr:
     def __init__(self) -> None:
         self.chunks: list[AudioChunk] = []
         self.commits: list[AudioSource] = []
+        self.discards: list[AudioSource] = []
 
     async def push_audio(self, chunk: AudioChunk) -> None:
         self.chunks.append(chunk)
 
     async def commit(self, source: AudioSource = AudioSource.MICROPHONE) -> None:
         self.commits.append(source)
+
+    async def discard(self, source: AudioSource = AudioSource.MICROPHONE) -> None:
+        self.discards.append(source)
 
 
 class _Room:
@@ -440,12 +445,14 @@ async def test_empty_microphone_final_never_schedules_ai() -> None:
 
 
 @pytest.mark.asyncio
-async def test_required_system_audio_timeout_never_schedules_ai() -> None:
+async def test_required_system_audio_timeout_degrades_and_late_system_only_persists() -> None:
     room = _Room()
+    context = _Context()
     scheduler = _Scheduler()
     ingest = _ingest(
         asr=_Asr(),
         room=room,
+        context=context,
         scheduler=scheduler,
         coordinated_turn_timeout_ms=5,
     )
@@ -473,7 +480,100 @@ async def test_required_system_audio_timeout_never_schedules_ai() -> None:
     await asyncio.sleep(0.02)
 
     assert [event.text for event in room.events] == ["主播的问题"]
-    assert scheduler.observations == []
+    assert len(scheduler.observations) == 1
+    assert context.calls[0]["user_context"] == {
+        "turn_id": "turn-1",
+        "system_audio_degraded": "true",
+    }
+
+    await _commit_audio(
+        ingest,
+        input_id="system-1",
+        source=AudioSource.SYSTEM_AUDIO,
+        turn_id="turn-1",
+        captured_at_ms=300,
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.SYSTEM_AUDIO,
+            text="迟到的系统声音",
+            started_at_ms=300,
+            ended_at_ms=310,
+            final=True,
+            utterance_id="system-1",
+        ),
+    )
+    await asyncio.sleep(0.01)
+
+    assert [event.text for event in room.events] == ["主播的问题", "迟到的系统声音"]
+    assert len(scheduler.observations) == 1
+
+
+@pytest.mark.asyncio
+async def test_atomic_audio_is_idempotent_and_rejects_same_id_with_new_content() -> None:
+    asr = _Asr()
+    ingest = _ingest(asr=asr)
+    input = AudioInput(
+        session_id="session",
+        input_id="audio-atomic",
+        captured_at_ms=100,
+        format=AUDIO_FORMAT,
+        body=b"\x00\x00",
+        turn_id="turn-atomic",
+        connection_id="connection-1",
+    )
+
+    first = await ingest.submit_audio_and_commit(input)
+    duplicate = await ingest.submit_audio_and_commit(input)
+
+    assert duplicate == first
+    assert asr.commits == [AudioSource.MICROPHONE]
+    assert len(asr.chunks) == 1
+    with pytest.raises(DuplicateIngestInputError):
+        await ingest.submit_audio_and_commit(
+            AudioInput(
+                session_id="session",
+                input_id="audio-atomic",
+                captured_at_ms=100,
+                format=AUDIO_FORMAT,
+                body=b"\x01\x00",
+                turn_id="turn-atomic",
+                connection_id="connection-1",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_disconnect_clears_connection_owned_pending_audio() -> None:
+    asr = _Asr()
+    ingest = _ingest(asr=asr)
+    await ingest.submit_audio(
+        AudioInput(
+            session_id="session",
+            input_id="lost-audio",
+            captured_at_ms=100,
+            format=AUDIO_FORMAT,
+            body=b"\x00\x00",
+            connection_id="connection-1",
+        )
+    )
+
+    await ingest.clear_connection("connection-1")
+    receipt = await ingest.submit_audio(
+        AudioInput(
+            session_id="session",
+            input_id="next-audio",
+            captured_at_ms=101,
+            format=AUDIO_FORMAT,
+            body=b"\x00\x00",
+            connection_id="connection-2",
+        )
+    )
+
+    assert receipt.input_id == "next-audio"
+    assert asr.discards == [AudioSource.MICROPHONE]
 
 
 @pytest.mark.asyncio

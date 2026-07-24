@@ -1,14 +1,29 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AUDIO_MICROPHONE_SEGMENT_SECONDS,
   concatenateFloat32,
   encodePcm16Mono,
   float32ToPcm16Le,
   resampleMono,
+  shouldHardFlushMicrophoneSegment,
   speechThresholds,
   updateNoiseFloor
 } from './audio'
 
 describe('desktop realtime audio encoding', () => {
+  it('hard-splits continuous microphone speech every 30 seconds beyond 90 seconds', () => {
+    let segmentStartedAtMs: number | null = 0
+    let splits = 0
+    for (let nowMs = 0; nowMs <= 95_000; nowMs += 1_000) {
+      if (!shouldHardFlushMicrophoneSegment(segmentStartedAtMs, nowMs)) continue
+      splits += 1
+      segmentStartedAtMs = nowMs
+    }
+
+    expect(AUDIO_MICROPHONE_SEGMENT_SECONDS).toBe(30)
+    expect(splits).toBe(3)
+  })
+
   it('concatenates captured chunks in order', () => {
     expect([...concatenateFloat32([new Float32Array([1, 2]), new Float32Array([3])])]).toEqual([
       1, 2, 3

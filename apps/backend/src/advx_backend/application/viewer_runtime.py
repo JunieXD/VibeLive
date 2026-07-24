@@ -26,7 +26,11 @@ from advx_backend.contracts.viewer_runtime import (
 )
 from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.memory import RoomMemorySlice
-from advx_backend.domain.observation_wave import ObservationWave, ViewerVisualInputMode
+from advx_backend.domain.observation_wave import (
+    ObservationTrigger,
+    ObservationWave,
+    ViewerVisualInputMode,
+)
 from advx_backend.domain.persona import PersonaTemplate
 from advx_backend.domain.viewer import ViewerInstance, ViewerLifecycleState
 from advx_backend.providers.model.viewer_runtime import (
@@ -101,6 +105,8 @@ class _WorkItem:
     available_viewer_ids: tuple[str, ...]
     runtime: object
     generation: int
+    wave_generation: int
+    priority: int
     future: asyncio.Future[_DispatchResult]
     queued_at_ms: int
     dispatched_at_ms: int | None = None
@@ -112,6 +118,8 @@ class _WorkItem:
     queued: bool = False
     was_queued: bool = False
     replacement: "_WorkItem | None" = None
+    superseded_reason: str | None = None
+    provider_task: asyncio.Task[object] | None = None
     ready: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -119,7 +127,7 @@ class _WorkItem:
 class _ViewerMailbox:
     task: asyncio.Task[None] | None = None
     current: _WorkItem | None = None
-    pending: deque[_WorkItem] = field(default_factory=deque)
+    pending: _WorkItem | None = None
 
 
 @dataclass(slots=True)
@@ -136,6 +144,8 @@ class _RequestContext:
     mode_context: dict[str, Any] = field(default_factory=dict)
     public_context_event_ids: list[str] = field(default_factory=list)
     public_context: list[ViewerPublicEvent] = field(default_factory=list)
+    reply_context_event_ids: list[str] = field(default_factory=list)
+    reply_context: list[ViewerPublicEvent] = field(default_factory=list)
     conversation_history_summary: str | None = None
     room_memory_slice: RoomMemorySlice | None = None
 
@@ -197,6 +207,8 @@ class ViewerRuntime:
         self._lock = asyncio.Lock()
         self._active_session_id: str | None = None
         self._generation = 0
+        self._wave_generation = 0
+        self._wave_fences: dict[tuple[str, int], tuple[int, int, str]] = {}
 
     async def start_session(self, session_id: str) -> None:
         if not session_id:
@@ -227,7 +239,7 @@ class ViewerRuntime:
                             if mailbox.current is not None and mailbox.current.queued
                             else None
                         ),
-                        *mailbox.pending,
+                        mailbox.pending,
                     )
                     if item is not None
                 }.values()
@@ -245,6 +257,7 @@ class ViewerRuntime:
             self._lanes.clear()
             self._sequences.clear()
             self._sequence_epochs.clear()
+            self._wave_fences.clear()
         for task in tasks:
             task.cancel()
         if tasks:
@@ -265,7 +278,7 @@ class ViewerRuntime:
             items = tuple(
                 {
                     id(item): item
-                    for item in (mailbox.current, *mailbox.pending)
+                    for item in (mailbox.current, mailbox.pending)
                     if item is not None
                 }.values()
             )
@@ -300,6 +313,9 @@ class ViewerRuntime:
             and wave.frame_bundle is None
         ):
             return ViewerDispatchSummary(selected=selected, rejected=selected)
+        wave_generation = await self._advance_wave_fence(wave)
+        if wave_generation is None:
+            return ViewerDispatchSummary(selected=selected, superseded=selected)
 
         viewers = {
             item.viewer_instance_id: item
@@ -320,6 +336,7 @@ class ViewerRuntime:
                 decision=decision,
                 available_viewer_ids=available_viewer_ids,
                 runtime=runtime,
+                wave_generation=wave_generation,
             )
             futures.append(future)
         if not futures:
@@ -366,6 +383,7 @@ class ViewerRuntime:
         decision: CrowdDecision,
         available_viewer_ids: tuple[str, ...],
         runtime: object,
+        wave_generation: int,
     ) -> asyncio.Future[_DispatchResult]:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[_DispatchResult] = loop.create_future()
@@ -392,6 +410,8 @@ class ViewerRuntime:
                 available_viewer_ids=available_viewer_ids,
                 runtime=runtime,
                 generation=self._generation,
+                wave_generation=wave_generation,
+                priority=self._wave_priority(wave),
                 future=future,
                 queued_at_ms=self._clock.now_ms(),
             )
@@ -410,6 +430,17 @@ class ViewerRuntime:
             item.lane = lane
             mailbox = self._mailboxes.setdefault(viewer.viewer_instance_id, _ViewerMailbox())
             mailbox_busy = mailbox.task is not None and not mailbox.task.done()
+            if (
+                mailbox.current is not None
+                and mailbox.current.priority > item.priority
+                and mailbox.current.superseded_reason is None
+                and not mailbox.current.future.done()
+            ):
+                self._record_superseded(item, reason="lower_priority_than_current_request")
+                return future
+            if mailbox.pending is not None and mailbox.pending.priority > item.priority:
+                self._record_superseded(item, reason="lower_priority_than_pending_request")
+                return future
             needs_queue = mailbox_busy or lane.active >= lane.max_in_flight
             if needs_queue and lane.queued >= lane.queue_capacity:
                 self._record_trace(
@@ -438,10 +469,17 @@ class ViewerRuntime:
                 )
                 self._promote_locked(lane)
             else:
+                previous_pending = mailbox.pending
+                if previous_pending is not None:
+                    self._record_superseded(
+                        previous_pending,
+                        reason=self._supersede_reason(item.priority, previous_pending.priority),
+                    )
+                    self._discard_item_locked(previous_pending)
                 lane.queued += 1
                 item.queued = True
                 item.was_queued = True
-                mailbox.pending.append(item)
+                mailbox.pending = item
         return future
 
     async def _claim_sequence(self, request: ViewerGenerationRequest) -> bool:
@@ -455,12 +493,71 @@ class ViewerRuntime:
             viewer_sequence=request.viewer_sequence,
         )
 
+    async def _advance_wave_fence(self, wave: ObservationWave) -> int | None:
+        priority = self._wave_priority(wave)
+        key = (wave.session_id, wave.audience_epoch)
+        async with self._lock:
+            current = self._wave_fences.get(key)
+            if current is not None:
+                generation, current_priority, observation_id = current
+                if observation_id == wave.observation_id:
+                    return generation
+                if priority < current_priority and self._wave_has_live_work_locked(generation):
+                    return None
+            self._wave_generation += 1
+            generation = self._wave_generation
+            self._wave_fences[key] = (generation, priority, wave.observation_id)
+            for mailbox in self._mailboxes.values():
+                pending = mailbox.pending
+                if (
+                    pending is not None
+                    and pending.request.session_id == wave.session_id
+                    and pending.request.audience_epoch == wave.audience_epoch
+                    and pending.priority <= priority
+                    and pending.wave_generation != generation
+                ):
+                    mailbox.pending = None
+                    self._record_superseded(
+                        pending,
+                        reason=self._supersede_reason(priority, pending.priority),
+                    )
+                    self._discard_item_locked(pending)
+                active = mailbox.current
+                if (
+                    active is not None
+                    and active.request.session_id == wave.session_id
+                    and active.request.audience_epoch == wave.audience_epoch
+                    and active.priority <= priority
+                    and active.wave_generation != generation
+                ):
+                    active.superseded_reason = self._supersede_reason(
+                        priority,
+                        active.priority,
+                    )
+                    if active.queued:
+                        self._discard_item_locked(active)
+                        active.ready.set()
+                    if active.provider_task is not None and not active.provider_task.done():
+                        active.provider_task.cancel()
+            return generation
+
+    def _wave_has_live_work_locked(self, generation: int) -> bool:
+        return any(
+            item is not None
+            and item.wave_generation == generation
+            and not item.future.done()
+            for mailbox in self._mailboxes.values()
+            for item in (mailbox.current, mailbox.pending)
+        )
+
     async def _run_mailbox(self, viewer_id: str, item: _WorkItem) -> None:
         current: _WorkItem | None = item
         try:
             while current is not None:
                 while True:
-                    if current.slot_reserved:
+                    while current.replacement is not None:
+                        current = current.replacement
+                    if current.slot_reserved or current.superseded_reason is not None:
                         break
                     await current.ready.wait()
                 outcome = await self._execute(current)
@@ -471,7 +568,8 @@ class ViewerRuntime:
                     if mailbox is None:
                         current = None
                     else:
-                        current = mailbox.pending.popleft() if mailbox.pending else None
+                        current = mailbox.pending
+                        mailbox.pending = None
                         mailbox.current = current
                         if current is None:
                             mailbox.task = None
@@ -495,8 +593,9 @@ class ViewerRuntime:
                     self._discard_item_locked(current)
                 mailbox = self._mailboxes.pop(viewer_id, None)
                 if mailbox is not None:
-                    while mailbox.pending:
-                        pending = mailbox.pending.popleft()
+                    if mailbox.pending is not None:
+                        pending = mailbox.pending
+                        mailbox.pending = None
                         self._record_trace(
                             pending,
                             status=TraceResponseStatus.CANCELLED,
@@ -510,6 +609,8 @@ class ViewerRuntime:
 
     async def _execute(self, item: _WorkItem) -> str:
         request = item.request
+        if item.superseded_reason is not None:
+            return self._finalize_superseded(item)
         if not self._is_current(item) or self._expired(request):
             return self._finalize_pre_dispatch(item)
         try:
@@ -528,6 +629,9 @@ class ViewerRuntime:
             response = await self._generate_with_retry(item)
             item.completed_at_ms = self._clock.now_ms()
         except asyncio.CancelledError:
+            if item.superseded_reason is not None:
+                item.completed_at_ms = self._clock.now_ms()
+                return self._finalize_superseded(item)
             raise
         except _ViewerRequestExpired:
             item.completed_at_ms = self._clock.now_ms()
@@ -579,12 +683,13 @@ class ViewerRuntime:
             fenced = await self._final_fence_outcome(item)
             if fenced is not None:
                 return fenced
+            if not await self._commit_silence(item):
+                return self._finalize_after_provider(item, phase="silence_commit")
             self._record_trace(
                 item,
                 status=TraceResponseStatus.SILENCE,
                 accepted=True,
             )
-            await self._record_behavior_silence(request)
             return "silenced"
         validation = self._barrage_pipeline.validate(request=request, response=response)
         if not validation.accepted:
@@ -642,7 +747,6 @@ class ViewerRuntime:
                     "generation_request_id": request.generation_request_id,
                 },
             )
-        await self._record_behavior_published(request, validation.event)
         self._record_trace(
             item,
             status=TraceResponseStatus.PUBLISHED,
@@ -688,13 +792,16 @@ class ViewerRuntime:
         event: object,
     ) -> tuple[str, bool]:
         async def commit_once() -> tuple[str, bool]:
-            if self._expired(item.request) or not self._is_current(item):
-                return "stale", False
-            try:
-                await self._room_service.append_published_barrage(event)
-            except Exception:
-                return "failed", False
-            return "published", await self._deliver_realtime(item, event)
+            async with self._lock:
+                if self._expired(item.request) or not self._is_current(item):
+                    return "stale", False
+                try:
+                    await self._room_service.append_published_barrage(event)
+                except Exception:
+                    return "failed", False
+                delivery_failed = await self._deliver_realtime(item, event)
+                await self._record_behavior_published(item.request, event)
+                return "published", delivery_failed
 
         async def commit_to_completion() -> tuple[str, bool]:
             commit = asyncio.create_task(
@@ -723,6 +830,13 @@ class ViewerRuntime:
         if not accepted or result is None:
             return "stale", False
         return result
+
+    async def _commit_silence(self, item: _WorkItem) -> bool:
+        async with self._lock:
+            if self._expired(item.request) or not self._is_current(item):
+                return False
+            await self._record_behavior_silence(item.request)
+            return True
 
     async def _deliver_realtime(
         self,
@@ -781,7 +895,7 @@ class ViewerRuntime:
         monotonic_deadline = loop.time() + self._remaining_ttl_seconds(request)
         try:
             return await self._provider_attempt(
-                request,
+                item,
                 timeout_seconds=self._remaining_attempt_seconds(
                     request,
                     monotonic_deadline,
@@ -811,7 +925,7 @@ class ViewerRuntime:
                 raise _ViewerRequestExpired("insufficient TTL for Viewer retry")
             item.retry_count = 1
             return await self._provider_attempt(
-                request,
+                item,
                 timeout_seconds=retry_budget,
             )
 
@@ -829,19 +943,23 @@ class ViewerRuntime:
 
     async def _provider_attempt(
         self,
-        request: ViewerGenerationRequest,
+        item: _WorkItem,
         *,
         timeout_seconds: float,
     ) -> object:
         if timeout_seconds <= 0:
             raise _ViewerRequestExpired("Viewer request TTL expired")
-        attempt = asyncio.create_task(self._provider.generate(request))
+        attempt = asyncio.create_task(self._provider.generate(item.request))
+        item.provider_task = attempt
         try:
             done, _ = await asyncio.wait({attempt}, timeout=timeout_seconds)
         except BaseException:
             attempt.cancel()
             attempt.add_done_callback(self._consume_task_result)
             raise
+        finally:
+            if item.provider_task is attempt:
+                item.provider_task = None
         if attempt in done:
             return attempt.result()
         attempt.cancel()
@@ -882,7 +1000,49 @@ class ViewerRuntime:
         )
         return "expired" if expired else "stale"
 
+    def _finalize_superseded(self, item: _WorkItem) -> str:
+        self._record_trace(
+            item,
+            status=TraceResponseStatus.CANCELLED,
+            accepted=False,
+            reason=item.superseded_reason or "superseded_by_newer_request",
+            validation_codes=("superseded",),
+        )
+        return "superseded"
+
+    def _record_superseded(self, item: _WorkItem, *, reason: str) -> None:
+        item.superseded_reason = reason
+        self._record_trace(
+            item,
+            status=TraceResponseStatus.CANCELLED,
+            accepted=False,
+            reason=reason,
+            validation_codes=("superseded",),
+        )
+        self._resolve(item, "superseded")
+
+    @staticmethod
+    def _supersede_reason(new_priority: int, old_priority: int) -> str:
+        return (
+            "superseded_by_higher_priority_wave"
+            if new_priority > old_priority
+            else "superseded_by_newer_equal_priority_wave"
+        )
+
+    @staticmethod
+    def _wave_priority(wave: ObservationWave) -> int:
+        if any(
+            trigger in {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
+            for trigger in wave.triggers
+        ):
+            return 3
+        if ObservationTrigger.SCREEN_CHANGE in wave.triggers:
+            return 2
+        return 1
+
     def _finalize_after_provider(self, item: _WorkItem, *, phase: str) -> str:
+        if item.superseded_reason is not None:
+            return self._finalize_superseded(item)
         expired = self._expired(item.request)
         self._record_trace(
             item,
@@ -989,6 +1149,8 @@ class ViewerRuntime:
             input_event_ids=wave.trigger_event_ids,
             public_context_event_ids=context.public_context_event_ids,
             public_context=context.public_context,
+            reply_context_event_ids=context.reply_context_event_ids,
+            reply_context=context.reply_context,
             conversation_history_summary=context.conversation_history_summary,
             viewer_private_state=viewer.private_state,
             room_memory_slice=memory,
@@ -1020,31 +1182,37 @@ class ViewerRuntime:
         memory = getattr(runtime, "room_memory_slice", None)
         if not isinstance(memory, RoomMemorySlice) or memory.room_id != wave.room_id:
             memory = None
-        public_events: list[ViewerPublicEvent] = []
-        for event in getattr(runtime, "public_context", ()):
+        def public_event(event: object) -> ViewerPublicEvent:
             payload = getattr(event, "payload", {})
             viewer_id = payload.get("viewer_instance_id")
             display_name = payload.get("display_name")
             target_viewer_id = payload.get("target_viewer_id")
-            public_events.append(
-                ViewerPublicEvent(
-                    event_id=event.event_id,
-                    sequence=event.sequence,
-                    source_type=event.source_type.value,
-                    source_id=event.source_id,
-                    text=event.text,
-                    viewer_instance_id=(viewer_id if isinstance(viewer_id, str) else None),
-                    display_name=(display_name if isinstance(display_name, str) else None),
-                    target_viewer_id=(
-                        target_viewer_id if isinstance(target_viewer_id, str) else None
-                    ),
-                    occurred_at_ms=event.created_at_ms,
-                )
+            return ViewerPublicEvent(
+                event_id=event.event_id,
+                sequence=event.sequence,
+                source_type=event.source_type.value,
+                source_id=event.source_id,
+                text=event.text,
+                viewer_instance_id=(viewer_id if isinstance(viewer_id, str) else None),
+                display_name=(display_name if isinstance(display_name, str) else None),
+                target_viewer_id=(
+                    target_viewer_id if isinstance(target_viewer_id, str) else None
+                ),
+                occurred_at_ms=event.created_at_ms,
             )
+        public_events = [public_event(event) for event in getattr(runtime, "public_context", ())]
+        reply_events = [
+            public_event(event) for event in getattr(runtime, "reply_context", ())[-32:]
+        ]
+        reply_ids = getattr(runtime, "reply_context_event_ids", ())
+        if not isinstance(reply_ids, (list, tuple)):
+            reply_ids = ()
         return _RequestContext(
             mode_context=mode_context,
             public_context_event_ids=list(public_ids),
             public_context=public_events,
+            reply_context_event_ids=list(reply_ids)[-32:],
+            reply_context=reply_events,
             conversation_history_summary=(
                 getattr(runtime, "conversation_history_summary", None)
                 if isinstance(getattr(runtime, "conversation_history_summary", None), str)
@@ -1188,9 +1356,15 @@ class ViewerRuntime:
         )
 
     def _is_current(self, item: _WorkItem) -> bool:
+        wave_fence = self._wave_fences.get(
+            (item.request.session_id, item.request.audience_epoch)
+        )
         return (
             item.generation == self._generation
             and self._active_session_id == item.request.session_id
+            and wave_fence is not None
+            and wave_fence[0] == item.wave_generation
+            and wave_fence[2] == item.request.observation_id
             and item.viewer.lifecycle_state is ViewerLifecycleState.ACTIVE
             and item.viewer.room_id == item.request.room_id
             and item.viewer.session_id == item.request.session_id

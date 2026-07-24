@@ -6,7 +6,7 @@ import type {
   BackendBarrageEvent,
   RuntimeModelProviderCandidate
 } from "../../shared/contracts";
-import { BackendClient } from "./backend-client";
+import { BackendClient, BackendClientError } from "./backend-client";
 
 const providerCandidate: RuntimeModelProviderCandidate = {
   provider_profile_id: "default",
@@ -199,7 +199,7 @@ describe("BackendClient runtime v2", () => {
 
   it("sends structured Viewer and Persona targets without embedding them in text", async () => {
     const client = new BackendClient({ localToken: "token" });
-    const sendJson = vi.fn();
+    const send = vi.fn();
     const bridge = client as unknown as {
       session: {
         sessionId: string;
@@ -208,8 +208,10 @@ describe("BackendClient runtime v2", () => {
         updatedAtMs: number;
         revision: number;
       };
+      connection: "connected";
+      realtimeProtocolVersion: 3;
+      socket: { readyState: number; send(message: unknown): void };
       waitForIngest(): Promise<void>;
-      sendJson(message: unknown): void;
     };
     bridge.session = {
       sessionId: "session-1",
@@ -218,24 +220,24 @@ describe("BackendClient runtime v2", () => {
       updatedAtMs: 1,
       revision: 1
     };
+    bridge.connection = "connected";
+    bridge.realtimeProtocolVersion = 3;
+    bridge.socket = { readyState: WebSocket.OPEN, send };
     bridge.waitForIngest = async () => undefined;
-    bridge.sendJson = sendJson;
 
     await client.submitText("text-1", 10, "你好", {
       targetViewerId: "viewer:room:critic:01"
     });
 
-    expect(sendJson).toHaveBeenCalledWith(expect.objectContaining({
+    expect(JSON.parse(send.mock.calls[0][0] as string)).toEqual(expect.objectContaining({
       text: "你好",
-      target_viewer_id: "viewer:room:critic:01",
-      target_persona_id: undefined
+      target_viewer_id: "viewer:room:critic:01"
     }));
   });
 
-  it("carries audio source and turn requirements through commit messages", async () => {
+  it("keeps v3 audio binary plus legacy commit messages", async () => {
     const client = new BackendClient({ localToken: "token" });
-    const sendBinary = vi.fn();
-    const sendJson = vi.fn();
+    const send = vi.fn();
     const bridge = client as unknown as {
       session: {
         sessionId: string;
@@ -244,9 +246,10 @@ describe("BackendClient runtime v2", () => {
         updatedAtMs: number;
         revision: number;
       };
+      connection: "connected";
+      realtimeProtocolVersion: 3;
+      socket: { readyState: number; send(message: unknown): void };
       waitForIngest(): Promise<void>;
-      sendBinary(message: Uint8Array): void;
-      sendJson(message: unknown): void;
     };
     bridge.session = {
       sessionId: "session-1",
@@ -255,9 +258,10 @@ describe("BackendClient runtime v2", () => {
       updatedAtMs: 1,
       revision: 1
     };
+    bridge.connection = "connected";
+    bridge.realtimeProtocolVersion = 3;
+    bridge.socket = { readyState: WebSocket.OPEN, send };
     bridge.waitForIngest = async () => undefined;
-    bridge.sendBinary = sendBinary;
-    bridge.sendJson = sendJson;
 
     await client.submitAudioSegment({
       inputId: "audio-1",
@@ -276,12 +280,11 @@ describe("BackendClient runtime v2", () => {
     });
     client.notifyVoiceActivity("system_audio", 20);
 
-    const binary = sendBinary.mock.calls[0][0] as Uint8Array;
+    const binary = send.mock.calls[0][0] as Uint8Array;
     expect(binary[4]).toBe(2);
     expect(binary[5]).toBe(1);
     expect(binary[6]).toBe(2);
-    expect(sendJson).toHaveBeenNthCalledWith(
-      1,
+    expect(JSON.parse(send.mock.calls[1][0] as string)).toEqual(
       expect.objectContaining({
         type: "client.audio.commit",
         input_id: "audio-1",
@@ -289,8 +292,7 @@ describe("BackendClient runtime v2", () => {
         turn_id: "turn-1"
       })
     );
-    expect(sendJson).toHaveBeenNthCalledWith(
-      2,
+    expect(JSON.parse(send.mock.calls[3][0] as string)).toEqual(
       expect.objectContaining({
         type: "client.audio.commit",
         input_id: "audio-2",
@@ -299,7 +301,7 @@ describe("BackendClient runtime v2", () => {
         system_audio_required: true
       })
     );
-    expect(sendJson).toHaveBeenNthCalledWith(3, {
+    expect(JSON.parse(send.mock.calls[4][0] as string)).toEqual({
       type: "client.voice.activity",
       protocol_version: 3,
       session_id: "session-1",
@@ -308,10 +310,166 @@ describe("BackendClient runtime v2", () => {
     });
   });
 
+  it("uses atomic ADVX-BIN/3 audio metadata on negotiated realtime v4", async () => {
+    const client = new BackendClient({ localToken: "token" });
+    const send = vi.fn();
+    const stages: string[] = [];
+    const bridge = client as unknown as {
+      session: {
+        sessionId: string;
+        state: "running";
+        startedAtMs: number;
+        updatedAtMs: number;
+        revision: number;
+      };
+      connection: "connected";
+      realtimeProtocolVersion: 4;
+      socket: { readyState: number; send(message: unknown): void };
+      waitForIngest(inputId: string, stage: "received" | "committed"): Promise<void>;
+    };
+    bridge.session = {
+      sessionId: "session-1",
+      state: "running",
+      startedAtMs: 1,
+      updatedAtMs: 1,
+      revision: 1
+    };
+    bridge.connection = "connected";
+    bridge.realtimeProtocolVersion = 4;
+    bridge.socket = { readyState: WebSocket.OPEN, send };
+    bridge.waitForIngest = async (_inputId, stage) => {
+      stages.push(stage);
+    };
+
+    await client.submitAudioSegment({
+      inputId: "audio-v4",
+      capturedAtMs: 11,
+      body: new Uint8Array([3, 4]),
+      source: "microphone",
+      systemAudioRequired: true
+    });
+
+    const binary = Buffer.from(send.mock.calls[0][0] as Uint8Array);
+    const headerLength = binary.readUInt32BE(5);
+    const header = JSON.parse(binary.subarray(9, 9 + headerLength).toString("utf8"));
+    expect(binary.subarray(0, 5)).toEqual(Buffer.from([65, 68, 86, 88, 3]));
+    expect(header).toMatchObject({
+      media_type: "audio",
+      source: "microphone",
+      turn_id: expect.any(String),
+      system_audio_required: true,
+      body_length: 2
+    });
+    expect(stages).toEqual(["committed"]);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("unregisters an ingest waiter when WebSocket send fails synchronously", async () => {
+    const client = new BackendClient({ localToken: "token" });
+    const bridge = client as unknown as {
+      session: {
+        sessionId: string;
+        state: "running";
+        startedAtMs: number;
+        updatedAtMs: number;
+        revision: number;
+      };
+      connection: "connected";
+      realtimeProtocolVersion: 4;
+      socket: { readyState: number; send(message: unknown): void };
+      pendingIngest: Map<string, unknown>;
+    };
+    bridge.session = {
+      sessionId: "session-1",
+      state: "running",
+      startedAtMs: 1,
+      updatedAtMs: 1,
+      revision: 1
+    };
+    bridge.connection = "connected";
+    bridge.realtimeProtocolVersion = 4;
+    bridge.socket = {
+      readyState: WebSocket.OPEN,
+      send: () => {
+        throw new Error("sync send failed");
+      }
+    };
+
+    await expect(client.submitFrame({
+      inputId: "frame-sync-failure",
+      capturedAtMs: 1,
+      mimeType: "image/jpeg",
+      body: new Uint8Array([1])
+    })).rejects.toThrow("sync send failed");
+    expect(bridge.pendingIngest.size).toBe(0);
+  });
+
+  it("unregisters a timed-out ingest waiter without leaving an orphan rejection", async () => {
+    vi.useFakeTimers();
+    const client = new BackendClient({ localToken: "token" });
+    const bridge = client as unknown as {
+      waitForIngest(inputId: string, stage: "received" | "committed"): Promise<void>;
+      pendingIngest: Map<string, unknown>;
+    };
+    try {
+      const acknowledgement = bridge.waitForIngest("frame-timeout-cleanup", "received");
+      const rejected = expect(acknowledgement).rejects.toMatchObject({
+        code: "ingest_timeout"
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejected;
+      expect(bridge.pendingIngest.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries the exact frame once only after an ACK timeout", async () => {
+    const client = new BackendClient({ localToken: "token" });
+    const send = vi.fn();
+    const waitForIngest = vi.fn()
+      .mockRejectedValueOnce(new BackendClientError("ingest_timeout", "late ACK"))
+      .mockResolvedValueOnce(undefined);
+    const bridge = client as unknown as {
+      session: {
+        sessionId: string;
+        state: "running";
+        startedAtMs: number;
+        updatedAtMs: number;
+        revision: number;
+      };
+      connection: "connected";
+      realtimeProtocolVersion: 4;
+      socket: { readyState: number; send(message: unknown): void };
+      waitForIngest: typeof waitForIngest;
+    };
+    bridge.session = {
+      sessionId: "session-1",
+      state: "running",
+      startedAtMs: 1,
+      updatedAtMs: 1,
+      revision: 1
+    };
+    bridge.connection = "connected";
+    bridge.realtimeProtocolVersion = 4;
+    bridge.socket = { readyState: WebSocket.OPEN, send };
+    bridge.waitForIngest = waitForIngest;
+
+    await client.submitFrame({
+      inputId: "frame-timeout",
+      capturedAtMs: 1,
+      mimeType: "image/jpeg",
+      body: new Uint8Array([1, 2, 3])
+    });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][0]).toBe(send.mock.calls[0][0]);
+    expect(waitForIngest).toHaveBeenCalledTimes(2);
+  });
+
   it("serializes audio independently per source", async () => {
     const client = new BackendClient({ localToken: "token" });
-    const sendBinary = vi.fn();
-    const sendJson = vi.fn();
+    const send = vi.fn();
     let releaseMicrophoneReceived: (() => void) | undefined;
     const microphoneReceived = new Promise<void>((resolve) => {
       releaseMicrophoneReceived = resolve;
@@ -324,9 +482,10 @@ describe("BackendClient runtime v2", () => {
         updatedAtMs: number;
         revision: number;
       };
+      connection: "connected";
+      realtimeProtocolVersion: 3;
+      socket: { readyState: number; send(message: unknown): void };
       waitForIngest(inputId: string, stage: "received" | "committed"): Promise<void>;
-      sendBinary(message: Uint8Array): void;
-      sendJson(message: unknown): void;
     };
     bridge.session = {
       sessionId: "session-1",
@@ -335,12 +494,13 @@ describe("BackendClient runtime v2", () => {
       updatedAtMs: 1,
       revision: 1
     };
+    bridge.connection = "connected";
+    bridge.realtimeProtocolVersion = 3;
+    bridge.socket = { readyState: WebSocket.OPEN, send };
     bridge.waitForIngest = (inputId, stage) =>
       inputId === "microphone-1" && stage === "received"
         ? microphoneReceived
         : Promise.resolve();
-    bridge.sendBinary = sendBinary;
-    bridge.sendJson = sendJson;
 
     const microphone = client.submitAudioSegment({
       inputId: "microphone-1",
@@ -355,12 +515,18 @@ describe("BackendClient runtime v2", () => {
       source: "system_audio"
     });
 
-    expect(sendBinary.mock.calls.map(([message]) => (message as Uint8Array)[6])).toEqual([
+    const binaries = send.mock.calls
+      .map(([message]) => message)
+      .filter((message): message is Uint8Array => message instanceof Uint8Array);
+    expect(binaries.map((message) => message[6])).toEqual([
       1,
       2
     ]);
-    expect(sendJson).toHaveBeenCalledTimes(1);
-    expect(sendJson).toHaveBeenCalledWith(
+    const jsonMessages = send.mock.calls
+      .map(([message]) => message)
+      .filter((message): message is string => typeof message === "string");
+    expect(jsonMessages).toHaveLength(1);
+    expect(JSON.parse(jsonMessages[0])).toEqual(
       expect.objectContaining({
         type: "client.audio.commit",
         input_id: "system-1",
@@ -934,7 +1100,7 @@ describe("BackendClient runtime v2", () => {
     }))).toBeNull();
     expect(client.currentStatus()).toMatchObject({
       connection: "failed",
-      startupError: expect.stringContaining("需要 v3")
+      startupError: expect.stringContaining("需要 v4 或 v3")
     });
   });
 });

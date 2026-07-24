@@ -35,6 +35,18 @@ describe('canonical desktop runtime spec', () => {
           frame_quality: 82
         },
         viewer_visual_input_mode: 'direct_frames',
+        max_in_flight_viewer_requests: 6,
+        viewer_request_ttl_ms: 30_000,
+        viewer_queue_capacity: 64,
+        observation_merge_window_ms: 1_000,
+        public_context_window_ms: 60_000,
+        public_context_max_events: 48,
+        replyable_event_window_ms: 30_000,
+        max_replyable_events: 8,
+        viewer_user_speaker_budget: 6,
+        viewer_screen_speaker_budget: 4,
+        viewer_ambient_speaker_budget: 2,
+        max_direct_frame_age_ms: 30_000,
         screen_change_threshold: 0.2,
         screen_change_cooldown_ms: 2_000
       }

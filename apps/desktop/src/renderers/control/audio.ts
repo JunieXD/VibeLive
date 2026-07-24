@@ -3,6 +3,8 @@ export const AUDIO_SENTENCE_SILENCE_SECONDS = 0.8
 export const AUDIO_MIN_SPEECH_THRESHOLD = 0.015
 export const AUDIO_SPEECH_CONFIRMATION_MS = 200
 export const AUDIO_SYSTEM_BUFFER_SECONDS = 60
+export const AUDIO_SYSTEM_SNAPSHOT_SECONDS = 30
+export const AUDIO_MICROPHONE_SEGMENT_SECONDS = 30
 
 const AUDIO_NOISE_FLOOR_ALPHA = 0.08
 const AUDIO_NOISE_FLOOR_MAX_STEP = 0.01
@@ -10,6 +12,16 @@ const AUDIO_NOISE_FLOOR_MAX_STEP = 0.01
 export type SpeechThresholds = {
   start: number
   continue: number
+}
+
+export function shouldHardFlushMicrophoneSegment(
+  segmentStartedAtMs: number | null,
+  nowMs: number
+): boolean {
+  return (
+    segmentStartedAtMs !== null &&
+    nowMs - segmentStartedAtMs >= AUDIO_MICROPHONE_SEGMENT_SECONDS * 1_000
+  )
 }
 
 export function updateNoiseFloor(current: number, level: number): number {

@@ -39,9 +39,14 @@ import type {
   RuntimeQuerySnapshot,
   TextSubmitTarget
 } from "../../shared/backend-client";
-import { encodeBinaryEnvelope } from "./realtime-binary";
+import {
+  encodeAtomicBinaryEnvelope,
+  encodeBinaryEnvelope
+} from "./realtime-binary";
 
 const PROTOCOL_VERSION = 3;
+const PREFERRED_REALTIME_PROTOCOL_VERSION = 4;
+const SUPPORTED_REALTIME_PROTOCOL_VERSIONS = [4, 3] as const;
 const PROTOCOL_HEADER = "X-ADVX-Protocol-Version";
 const INGEST_ACK_TIMEOUT_MS = 10_000;
 const CONNECT_TIMEOUT_MS = 8_000;
@@ -63,6 +68,8 @@ type PendingIngest = {
   timeout: NodeJS.Timeout;
 };
 
+type RealtimeProtocolVersion = (typeof SUPPORTED_REALTIME_PROTOCOL_VERSIONS)[number];
+
 type StatusListener = (status: BackendRuntimeStatus) => void;
 type BarrageListener = (event: BackendBarrageEvent) => void;
 type ViewerListener = (event: BackendViewerEvent) => void;
@@ -83,6 +90,7 @@ export class BackendClient {
   private readonly websocketUrl: string;
   private readonly localToken: string;
   private socket: WebSocket | null = null;
+  private realtimeProtocolVersion: RealtimeProtocolVersion | null = null;
   private connectPromise: Promise<void> | null = null;
   private connection: BackendConnectionState = "starting";
   private providersConfigured = false;
@@ -470,10 +478,10 @@ export class BackendClient {
     target: TextSubmitTarget = {}
   ): Promise<void> {
     const sessionId = this.requireRunningSession();
-    const acknowledgement = this.waitForIngest(inputId, "received");
-    this.sendJson({
+    const socket = this.requireSocket();
+    const message = JSON.stringify({
       type: "client.text.submit",
-      protocol_version: PROTOCOL_VERSION,
+      protocol_version: this.requireRealtimeProtocolVersion(),
       session_id: sessionId,
       input_id: inputId,
       created_at_ms: createdAtMs,
@@ -481,7 +489,7 @@ export class BackendClient {
       target_viewer_id: target.targetViewerId,
       target_persona_id: target.targetPersonaId
     });
-    await acknowledgement;
+    await this.sendWithIngestAck(socket, message, inputId, "received");
   }
 
   listRoomMemories(roomId: string): Promise<RoomLongTermMemory[]> {
@@ -646,18 +654,39 @@ export class BackendClient {
     body: Uint8Array;
   }): Promise<void> {
     const sessionId = this.requireRunningSession();
-    const acknowledgement = this.waitForIngest(input.inputId, "received");
-    this.sendBinary(
-      encodeBinaryEnvelope({
+    const protocolVersion = this.requireRealtimeProtocolVersion();
+    const encoded = protocolVersion === 4
+      ? encodeAtomicBinaryEnvelope({
+          mediaType: "image",
+          sessionId,
+          inputId: input.inputId,
+          capturedAtMs: input.capturedAtMs,
+          format: input.mimeType,
+          body: input.body
+        })
+      : encodeBinaryEnvelope({
         mediaType: "image",
         sessionId,
         inputId: input.inputId,
         capturedAtMs: input.capturedAtMs,
         format: input.mimeType,
         body: input.body
-      })
-    );
-    await acknowledgement;
+      });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const socket = this.requireSocket();
+        await this.sendWithIngestAck(socket, encoded, input.inputId, "received");
+        return;
+      } catch (error) {
+        if (
+          attempt === 1 ||
+          !(error instanceof BackendClientError) ||
+          error.code !== "ingest_timeout"
+        ) {
+          throw error;
+        }
+      }
+    }
   }
 
   submitAudioSegment(input: {
@@ -670,9 +699,23 @@ export class BackendClient {
   }): Promise<void> {
     const send = async (): Promise<void> => {
       const sessionId = this.requireRunningSession();
-      const received = this.waitForIngest(input.inputId, "received");
-      this.sendBinary(
-        encodeBinaryEnvelope({
+      const protocolVersion = this.requireRealtimeProtocolVersion();
+      const turnId = protocolVersion === 4 || input.systemAudioRequired
+        ? input.turnId ?? randomUUID()
+        : input.turnId;
+      const encoded = protocolVersion === 4
+        ? encodeAtomicBinaryEnvelope({
+            mediaType: "audio",
+            source: input.source,
+            sessionId,
+            inputId: input.inputId,
+            capturedAtMs: input.capturedAtMs,
+            format: "audio/pcm;rate=16000;channels=1;format=s16le",
+            body: input.body,
+            turnId,
+            systemAudioRequired: input.systemAudioRequired
+          })
+        : encodeBinaryEnvelope({
           mediaType: "audio",
           source: input.source,
           sessionId,
@@ -680,24 +723,32 @@ export class BackendClient {
           capturedAtMs: input.capturedAtMs,
           format: "audio/pcm;rate=16000;channels=1;format=s16le",
           body: input.body
-        })
-      );
-      await received;
+        });
+      const socket = this.requireSocket();
+      if (protocolVersion === 4) {
+        await this.sendWithIngestAck(socket, encoded, input.inputId, "committed");
+        return;
+      }
 
-      const committed = this.waitForIngest(input.inputId, "committed");
-      this.sendJson({
+      await this.sendWithIngestAck(socket, encoded, input.inputId, "received");
+      const commit = JSON.stringify({
         type: "client.audio.commit",
-        protocol_version: PROTOCOL_VERSION,
+        protocol_version: protocolVersion,
         session_id: sessionId,
         input_id: input.inputId,
         source: input.source,
         committed_at_ms: Date.now(),
-        ...(input.turnId ? { turn_id: input.turnId } : {}),
+        ...(turnId ? { turn_id: turnId } : {}),
         ...(input.source === "microphone" && input.systemAudioRequired
           ? { system_audio_required: true }
           : {})
       });
-      await committed;
+      await this.sendWithIngestAck(
+        this.requireSocket(),
+        commit,
+        input.inputId,
+        "committed"
+      );
     };
     const queue = this.audioQueues[input.source];
     const queued = queue.then(send, send);
@@ -709,7 +760,7 @@ export class BackendClient {
     const sessionId = this.requireRunningSession();
     this.sendJson({
       type: "client.voice.activity",
-      protocol_version: PROTOCOL_VERSION,
+      protocol_version: this.requireRealtimeProtocolVersion(),
       session_id: sessionId,
       source,
       occurred_at_ms: occurredAtMs
@@ -790,6 +841,7 @@ export class BackendClient {
 
   private connect(): Promise<void> {
     this.setConnection("connecting");
+    this.realtimeProtocolVersion = null;
     return new Promise((resolve, reject) => {
       const socket = new WebSocket(this.websocketUrl);
       this.socket = socket;
@@ -804,7 +856,8 @@ export class BackendClient {
         socket.send(
           JSON.stringify({
             type: "client.hello",
-            protocol_version: PROTOCOL_VERSION,
+            protocol_version: PREFERRED_REALTIME_PROTOCOL_VERSION,
+            supported_protocol_versions: SUPPORTED_REALTIME_PROTOCOL_VERSIONS,
             token: this.localToken
           })
         );
@@ -824,6 +877,8 @@ export class BackendClient {
           return;
         }
         if (message.type === "backend.ready") {
+          this.realtimeProtocolVersion =
+            message.protocol_version as RealtimeProtocolVersion;
           ready = true;
           clearTimeout(timeout);
           this.applySession(message.session);
@@ -849,7 +904,10 @@ export class BackendClient {
 
   private parseMessage(value: string): RealtimeServerMessage | null {
     try {
-      return validateRealtimeServerMessage(JSON.parse(value));
+      return validateRealtimeServerMessage(
+        JSON.parse(value),
+        this.realtimeProtocolVersion
+      );
     } catch (error) {
       this.failProtocol(error);
       return null;
@@ -859,7 +917,7 @@ export class BackendClient {
   private handleMessage(value: unknown): void {
     let message: RealtimeServerMessage;
     try {
-      message = validateRealtimeServerMessage(value);
+      message = validateRealtimeServerMessage(value, this.realtimeProtocolVersion);
     } catch (error) {
       this.failProtocol(error);
       return;
@@ -952,7 +1010,7 @@ export class BackendClient {
   private waitForIngest(inputId: string, stage: "received" | "committed"): Promise<void> {
     const key = ingestKey(inputId, stage);
     if (this.pendingIngest.has(key)) {
-      return Promise.reject(new BackendClientError("duplicate_input", "输入正在等待后端确认。"));
+      throw new BackendClientError("duplicate_input", "输入正在等待后端确认。");
     }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -961,6 +1019,30 @@ export class BackendClient {
       }, INGEST_ACK_TIMEOUT_MS);
       this.pendingIngest.set(key, { resolve, reject, timeout });
     });
+  }
+
+  private async sendWithIngestAck(
+    socket: WebSocket,
+    message: string | Uint8Array,
+    inputId: string,
+    stage: "received" | "committed"
+  ): Promise<void> {
+    const acknowledgement = this.waitForIngest(inputId, stage);
+    try {
+      socket.send(message);
+    } catch (error) {
+      this.unregisterIngest(inputId, stage);
+      throw error;
+    }
+    await acknowledgement;
+  }
+
+  private unregisterIngest(inputId: string, stage: "received" | "committed"): void {
+    const key = ingestKey(inputId, stage);
+    const pending = this.pendingIngest.get(key);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    this.pendingIngest.delete(key);
   }
 
   private resolveIngest(message: RealtimeIngestAck): void {
@@ -987,15 +1069,21 @@ export class BackendClient {
     this.requireSocket().send(JSON.stringify(message));
   }
 
-  private sendBinary(message: Uint8Array): void {
-    this.requireSocket().send(message);
-  }
-
   private requireSocket(): WebSocket {
     if (this.socket?.readyState !== WebSocket.OPEN || this.connection !== "connected") {
       throw new BackendClientError("backend_disconnected", "后端实时连接尚未就绪。");
     }
     return this.socket;
+  }
+
+  private requireRealtimeProtocolVersion(): RealtimeProtocolVersion {
+    if (this.realtimeProtocolVersion === null) {
+      throw new BackendClientError(
+        "backend_disconnected",
+        "后端实时协议尚未协商完成。"
+      );
+    }
+    return this.realtimeProtocolVersion;
   }
 
   private requireRunningSession(): string {
@@ -1103,11 +1191,24 @@ function sameRuntimeProviderCandidate(
 
 type CanonicalRuntimeSpecProvider = CompiledRuntimeSpec["spec"]["provider"];
 
-function validateRealtimeServerMessage(value: unknown): RealtimeServerMessage {
+function validateRealtimeServerMessage(
+  value: unknown,
+  expectedProtocolVersion: RealtimeProtocolVersion | null = null
+): RealtimeServerMessage {
   const message = requireRecord(value, "实时消息必须是 JSON 对象");
-  if (message.protocol_version !== PROTOCOL_VERSION) {
+  if (
+    !SUPPORTED_REALTIME_PROTOCOL_VERSIONS.includes(
+      message.protocol_version as RealtimeProtocolVersion
+    ) ||
+    (expectedProtocolVersion !== null &&
+      message.protocol_version !== expectedProtocolVersion)
+  ) {
     throw new Error(
-      `后端实时协议版本无效：需要 v${PROTOCOL_VERSION}，收到 ${String(message.protocol_version)}。`
+      `后端实时协议版本无效：需要 ${
+        expectedProtocolVersion === null
+          ? SUPPORTED_REALTIME_PROTOCOL_VERSIONS.map((version) => `v${version}`).join(" 或 ")
+          : `v${expectedProtocolVersion}`
+      }，收到 ${String(message.protocol_version)}。`
     );
   }
   if (typeof message.type !== "string") {

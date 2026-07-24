@@ -610,7 +610,16 @@ class SQLiteRoomMemoryRepository:
                 raise RuntimePersistenceInvariantError(
                     "stored memory candidate decision is invalid"
                 ) from error
-            if decision.get("candidate") != candidate_payload:
+            stored_candidate = decision.get("candidate")
+            if not isinstance(stored_candidate, dict):
+                raise RuntimePersistenceInvariantError(
+                    "stored memory candidate payload is invalid"
+                )
+            stored_candidate = dict(stored_candidate)
+            incoming_candidate = dict(candidate_payload)
+            stored_candidate.pop("base_revision", None)
+            incoming_candidate.pop("base_revision", None)
+            if stored_candidate != incoming_candidate:
                 raise RuntimePersistenceConflictError(
                     "memory idempotency key was used with a different candidate"
                 )

@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -101,7 +102,7 @@ def _viewer_request() -> ViewerGenerationRequest:
         visual_input_mode=ViewerVisualInputMode.TEXT_ONLY,
         viewer_private_state=ViewerPrivateState(),
         room_memory_slice=RoomMemorySlice(room_id="room", memory_revision=0),
-        deadline_at_ms=10_000,
+        deadline_at_ms=time.time_ns() // 1_000_000 + 60_000,
     )
 
 
@@ -138,6 +139,17 @@ def _viewer_completion(target: dict[str, object]) -> dict[str, object]:
                         }
                     )
                 },
+            }
+        ]
+    }
+
+
+def _viewer_completion_with_output(output: dict[str, object]) -> dict[str, object]:
+    return {
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {"content": json.dumps(output)},
             }
         ]
     }
@@ -275,6 +287,206 @@ async def test_viewer_target_canonicalizer_does_not_invent_required_event_id() -
         ):
             await provider.generate(_viewer_request())
         await provider.aclose()
+
+
+@pytest.mark.parametrize(
+    "invalid_output",
+    [
+        {
+            "action": "barrage",
+            "intent": "follow_consensus",
+            "target": None,
+            "text": "确实",
+            "reaction_type": "comment",
+            "evidence_refs": [],
+        },
+        {
+            "action": "barrage",
+            "intent": "react_to_scene",
+            "target": "scene",
+            "text": "看到了",
+            "reaction_type": "comment",
+            "evidence_refs": [],
+        },
+        {
+            "action": "barrage",
+            "intent": "react_to_scene",
+            "target": {"viewer_instance_id": None, "event_id": None},
+            "text": "看到了",
+            "reaction_type": "comment",
+            "evidence_refs": [],
+        },
+        {
+            "action": "barrage",
+            "intent": "react_to_scene",
+            "target": {
+                "kind": "scene",
+                "viewer_instance_id": None,
+                "event_id": None,
+                "source": "frame",
+            },
+            "text": "看到了",
+            "reaction_type": "comment",
+            "evidence_refs": [],
+        },
+    ],
+    ids=[
+        "invalid-intent",
+        "string-target",
+        "missing-target-kind",
+        "extra-target-source",
+    ],
+)
+@pytest.mark.asyncio
+async def test_viewer_protocol_violation_repairs_once(
+    invalid_output: dict[str, object],
+) -> None:
+    requests: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json=_viewer_completion_with_output(invalid_output),
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json=_viewer_completion(
+                {
+                    "kind": "scene",
+                    "viewer_instance_id": None,
+                    "event_id": None,
+                }
+            ),
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            _runtime_config(),
+            client=client,
+            rate_gate=_RecordingRateGate(),
+        )
+        result = await provider.generate(_viewer_request())
+        await provider.aclose()
+
+    assert result.text == "看到了"
+    assert len(requests) == 2
+    assert "Validation codes:" in requests[1]["messages"][-1]["content"]
+    assert json.dumps(invalid_output) not in requests[1]["messages"][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_viewer_protocol_violation_rejects_after_one_failed_repair() -> None:
+    calls = 0
+    invalid_output = {
+        "action": "barrage",
+        "intent": "follow_consensus",
+        "target": None,
+        "text": "确实",
+        "reaction_type": "comment",
+        "evidence_refs": [],
+    }
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json=_viewer_completion_with_output(invalid_output),
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            _runtime_config(),
+            client=client,
+            rate_gate=_RecordingRateGate(),
+        )
+        with pytest.raises(ViewerRuntimeProtocolError, match="intent:enum"):
+            await provider.generate(_viewer_request())
+        await provider.aclose()
+
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_viewer_protocol_violation_skips_repair_when_deadline_is_too_short() -> None:
+    calls = 0
+    request = _viewer_request().model_copy(update={"deadline_at_ms": 5_999})
+
+    async def handler(http_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json=_viewer_completion_with_output(
+                {
+                    "action": "barrage",
+                    "intent": "follow_consensus",
+                    "target": None,
+                    "text": "确实",
+                    "reaction_type": "comment",
+                    "evidence_refs": [],
+                }
+            ),
+            request=http_request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            _runtime_config(),
+            client=client,
+            rate_gate=_RecordingRateGate(),
+            clock_ms=lambda: 0,
+        )
+        with pytest.raises(ViewerRuntimeProtocolError, match="intent:enum"):
+            await provider.generate(request)
+        await provider.aclose()
+
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_viewer_transport_retry_and_repair_share_two_call_budget() -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("temporary failure", request=request)
+        return httpx.Response(
+            200,
+            json=_viewer_completion_with_output(
+                {
+                    "action": "barrage",
+                    "intent": "follow_consensus",
+                    "target": None,
+                    "text": "确实",
+                    "reaction_type": "comment",
+                    "evidence_refs": [],
+                }
+            ),
+            request=request,
+        )
+
+    request = _viewer_request()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            _runtime_config(),
+            client=client,
+            rate_gate=_RecordingRateGate(),
+        )
+        with pytest.raises(ViewerRuntimeProviderError):
+            await provider.generate(request)
+        with pytest.raises(ViewerRuntimeProtocolError, match="intent:enum"):
+            await provider.generate(request)
+        await provider.aclose()
+
+    assert calls == 2
 
 
 @pytest.mark.asyncio

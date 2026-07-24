@@ -1034,7 +1034,7 @@ export function registerDesktopIpc(
       }
       if (
         input.systemAudioRequired &&
-        (input.source !== "microphone" || !input.turnId)
+        input.source !== "microphone"
       ) {
         throw new Error("系统声音轮次必须由麦克风发起。");
       }

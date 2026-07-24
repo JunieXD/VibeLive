@@ -43,6 +43,8 @@ class MemoryCommitResult:
 
 
 class RoomMemoryRepository(Protocol):
+    async def head_revision(self, room_id: str) -> int: ...
+
     async def read_slice(
         self,
         *,

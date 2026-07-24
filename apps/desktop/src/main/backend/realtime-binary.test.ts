@@ -1,5 +1,55 @@
 import { describe, expect, it } from 'vitest'
-import { encodeBinaryEnvelope, formatImageMimeType } from './realtime-binary'
+import {
+  encodeAtomicBinaryEnvelope,
+  encodeBinaryEnvelope,
+  formatImageMimeType
+} from './realtime-binary'
+
+describe('ADVX-BIN/3 encoder', () => {
+  it('writes a compact JSON header with atomic audio turn metadata', () => {
+    const encoded = encodeAtomicBinaryEnvelope({
+      mediaType: 'audio',
+      source: 'microphone',
+      sessionId: 'session-1',
+      inputId: 'audio-1',
+      capturedAtMs: 123,
+      format: 'audio/pcm',
+      body: new Uint8Array([1, 2]),
+      turnId: 'turn-1',
+      systemAudioRequired: true
+    })
+    const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength)
+    const headerLength = view.getUint32(5)
+    const header = JSON.parse(new TextDecoder().decode(encoded.slice(9, 9 + headerLength)))
+
+    expect(new TextDecoder().decode(encoded.slice(0, 4))).toBe('ADVX')
+    expect(view.getUint8(4)).toBe(3)
+    expect(header).toEqual({
+      media_type: 'audio',
+      source: 'microphone',
+      session_id: 'session-1',
+      input_id: 'audio-1',
+      captured_at_ms: 123,
+      format: 'audio/pcm',
+      body_length: 2,
+      turn_id: 'turn-1',
+      system_audio_required: true
+    })
+    expect([...encoded.slice(9 + headerLength)]).toEqual([1, 2])
+  })
+
+  it('rejects atomic audio without a turn id', () => {
+    expect(() => encodeAtomicBinaryEnvelope({
+      mediaType: 'audio',
+      source: 'microphone',
+      sessionId: 'session-1',
+      inputId: 'audio-1',
+      capturedAtMs: 123,
+      format: 'audio/pcm',
+      body: new Uint8Array([1])
+    })).toThrow('turnId')
+  })
+})
 
 describe('ADVX-BIN/2 encoder', () => {
   it('writes the fixed header, UTF-8 fields and body in network byte order', () => {

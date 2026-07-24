@@ -435,6 +435,8 @@ class OpenAICompatibleProvider:
         url: str,
         *,
         payload: dict[str, object] | None = None,
+        request_timeout_seconds: float | None = None,
+        allow_json_mode_fallback: bool = True,
     ) -> httpx.Response:
         self._ensure_open()
         headers = {
@@ -444,12 +446,24 @@ class OpenAICompatibleProvider:
         if payload is not None:
             headers["Content-Type"] = "application/json"
 
-        response = await self._request(method, url, headers=headers, payload=payload)
+        response = await self._request(
+            method,
+            url,
+            headers=headers,
+            payload=payload,
+            request_timeout_seconds=request_timeout_seconds,
+        )
 
-        if self._should_fallback_from_json_mode(response, payload):
+        if allow_json_mode_fallback and self._should_fallback_from_json_mode(response, payload):
             fallback_payload = dict(payload)
             fallback_payload.pop("response_format", None)
-            response = await self._request(method, url, headers=headers, payload=fallback_payload)
+            response = await self._request(
+                method,
+                url,
+                headers=headers,
+                payload=fallback_payload,
+                request_timeout_seconds=request_timeout_seconds,
+            )
 
         if not response.is_success:
             raise OpenAICompatibleHttpError(
@@ -466,6 +480,7 @@ class OpenAICompatibleProvider:
         *,
         headers: dict[str, str],
         payload: dict[str, object] | None,
+        request_timeout_seconds: float | None = None,
     ) -> httpx.Response:
         try:
             return await self._client.request(
@@ -473,7 +488,11 @@ class OpenAICompatibleProvider:
                 url,
                 headers=headers,
                 json=payload,
-                timeout=self.config.request_timeout_seconds,
+                timeout=(
+                    self.config.request_timeout_seconds
+                    if request_timeout_seconds is None
+                    else request_timeout_seconds
+                ),
             )
         except (httpx.TimeoutException, TimeoutError):
             raise OpenAICompatibleTimeoutError("OpenAI-compatible request timed out") from None

@@ -1,5 +1,8 @@
 import type { AudioSource } from '../../shared/contracts'
-import { AUDIO_SYSTEM_BUFFER_SECONDS } from './audio'
+import {
+  AUDIO_SYSTEM_BUFFER_SECONDS,
+  AUDIO_SYSTEM_SNAPSHOT_SECONDS
+} from './audio'
 import type { VisualMode } from './visual'
 
 export type BufferedAudioChunk = {
@@ -101,11 +104,14 @@ export function appendSystemAudioBuffer(
 export function pendingSystemAudioSnapshot(
   channel: AudioChannelState,
   endedAtMs: number,
-  maximumDurationMs = AUDIO_SYSTEM_BUFFER_SECONDS * 1_000
+  microphoneStartedAtMs: number,
+  maximumDurationMs = AUDIO_SYSTEM_SNAPSHOT_SECONDS * 1_000
 ): SystemAudioSnapshot | null {
-  const firstAvailableAtMs = Math.max(0, endedAtMs - maximumDurationMs)
+  const firstAvailableAtMs = channel.bufferedChunks[0]?.startedAtMs ?? endedAtMs
   const fromMs = Math.max(
     firstAvailableAtMs,
+    endedAtMs - maximumDurationMs,
+    microphoneStartedAtMs - 10_000,
     channel.lastSystemAudioSubmittedAtMs ?? firstAvailableAtMs
   )
   const selected = channel.bufferedChunks.flatMap((chunk) => cropChunk(chunk, fromMs, endedAtMs))

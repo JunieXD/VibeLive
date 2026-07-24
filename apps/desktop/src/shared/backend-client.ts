@@ -24,6 +24,14 @@ export type CanonicalModeDefinition = ModeDefinition
 type CompiledRuntimeSettings = Defaulted<RuntimeSettings, 'frame_bundle'> & {
   screen_change_threshold: number
   screen_change_cooldown_ms: number
+  public_context_window_ms: number
+  public_context_max_events: number
+  replyable_event_window_ms: number
+  max_replyable_events: number
+  viewer_user_speaker_budget: number
+  viewer_screen_speaker_budget: number
+  viewer_ambient_speaker_budget: number
+  max_direct_frame_age_ms: number
 }
 export type CanonicalRuntimeSpec = Omit<ContractCanonicalRuntimeSpec, 'settings'> & {
   settings: CompiledRuntimeSettings
@@ -160,10 +168,18 @@ export function compileCanonicalRuntimeSpec(
         frame_anchor_interval_ms: 5_000
       },
       viewer_visual_input_mode: visual.viewerVisualInputMode,
-      max_in_flight_viewer_requests: Math.min(12, activeMode.targetConcurrentViewers),
-      viewer_request_ttl_ms: 900_000,
-      viewer_queue_capacity: 8_192,
-      observation_merge_window_ms: 0,
+      max_in_flight_viewer_requests: Math.min(6, activeMode.targetConcurrentViewers),
+      viewer_request_ttl_ms: 30_000,
+      viewer_queue_capacity: 64,
+      observation_merge_window_ms: 1_000,
+      public_context_window_ms: 60_000,
+      public_context_max_events: 48,
+      replyable_event_window_ms: 30_000,
+      max_replyable_events: 8,
+      viewer_user_speaker_budget: 6,
+      viewer_screen_speaker_budget: 4,
+      viewer_ambient_speaker_budget: 2,
+      max_direct_frame_age_ms: 30_000,
       screen_change_threshold: 0.2,
       screen_change_cooldown_ms: 2_000,
       ambient_tick_cooldown_ms: 30_000,

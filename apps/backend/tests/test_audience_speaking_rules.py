@@ -20,6 +20,8 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerAction,
     ViewerGenerationRequest,
     ViewerGenerationResponse,
+    ViewerReactionTarget,
+    ViewerTargetKind,
 )
 from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemorySlice
@@ -165,7 +167,7 @@ class _VoiceScheduler:
 
 
 @pytest.mark.asyncio
-async def test_user_observations_are_processed_in_order_without_replacement() -> None:
+async def test_newer_equal_priority_observation_replaces_pending_work() -> None:
     executor = _Executor()
     scheduler = LatestWinsReactionScheduler(
         executor=executor,
@@ -182,13 +184,13 @@ async def test_user_observations_are_processed_in_order_without_replacement() ->
     first_result = await scheduler.submit(first)
     second_result = await scheduler.submit(second)
 
-    assert await first_result is not None
+    assert await first_result is None
     assert await second_result is not None
-    assert executor.observation_ids == ["first", "second"]
+    assert executor.observation_ids == ["second"]
 
 
 @pytest.mark.asyncio
-async def test_new_input_starts_without_waiting_for_an_earlier_wave() -> None:
+async def test_new_input_supersedes_work_that_has_not_started() -> None:
     executor = _BlockingExecutor()
     scheduler = LatestWinsReactionScheduler(
         executor=executor,
@@ -203,15 +205,14 @@ async def test_new_input_starts_without_waiting_for_an_earlier_wave() -> None:
     )
 
     for _ in range(10):
-        if len(executor.started) == 2:
+        if executor.started:
             break
         await asyncio.sleep(0)
-    assert executor.started == ["first", "second"]
-    assert not first.done()
+    assert executor.started == ["second"]
+    assert await first is None
     assert not second.done()
 
     executor.release.set()
-    assert await first is not None
     assert await second is not None
 
 
@@ -533,3 +534,40 @@ def test_long_viewer_message_is_truncated_instead_of_discarded() -> None:
     assert result.accepted
     assert result.event is not None
     assert result.event.text == "好" * 160
+
+
+def test_viewer_reply_can_cite_the_bounded_reply_context() -> None:
+    reply_event_id = "reply-event"
+    base_request = _request()
+    request = base_request.model_copy(
+        update={
+            "reply_context_event_ids": [reply_event_id],
+            "scene_assessment": base_request.scene_assessment.model_copy(
+                update={"replyable_event_ids": [reply_event_id]}
+            ),
+        }
+    )
+    response = ViewerGenerationResponse(
+        generation_request_id=request.generation_request_id,
+        viewer_instance_id=request.viewer_instance_id,
+        viewer_sequence=request.viewer_sequence,
+        action=ViewerAction.BARRAGE,
+        target=ViewerReactionTarget(
+            kind=ViewerTargetKind.EVENT,
+            event_id=reply_event_id,
+        ),
+        text="我也觉得",
+        reaction_type="reply",
+        evidence_refs=[
+            EvidenceRef(source=EvidenceSource.EVENT, event_id=reply_event_id)
+        ],
+    )
+
+    result = ViewerBarragePipeline(clock=_Clock(), id_generator=_Ids()).validate(
+        request=request,
+        response=response,
+    )
+
+    assert result.accepted
+    assert result.event is not None
+    assert result.event.target == response.target

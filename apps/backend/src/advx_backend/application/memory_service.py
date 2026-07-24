@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from dataclasses import replace
 
 from advx_backend.application.ports.memory import (
     MemoryCommitResult,
@@ -65,8 +66,9 @@ class RoomMemoryService:
         if evidence_error is not None:
             return MemoryCommitResult(accepted=False, reason=evidence_error)
 
+        current_revision = await self._repository.head_revision(candidate.room_id)
         return await self._repository.commit_candidate(
-            candidate,
+            replace(candidate, base_revision=current_revision),
             evidence=evidence,
             now_ms=self._clock.now_ms(),
         )

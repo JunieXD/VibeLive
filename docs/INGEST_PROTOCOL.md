@@ -5,14 +5,15 @@
 > 本文定义 Electron 与本地后端之间的实时输入合同。`IngestService` 与
 > WebSocket Handler 已按此合同接入，`/ws` 同时承载控制消息和实时输入。
 >
-> 本文记录当前已实现的 protocol v3。二进制 ingest envelope 仍有独立的 version
-> 字段，当前为 `1`；它与 WebSocket JSON 协议版本不是同一个版本空间。
+> 本文记录当前已实现的 realtime protocol v4，并保留一个发布周期的 v3 兼容路径。
+> 二进制 ingest envelope 有独立的版本空间；v4 客户端使用 `ADVX-BIN/3`。
 
 ## 1. 范围与兼容性
 
-数据面使用与控制面相同的 `/ws` 连接，并要求已完成 `client.hello` 握手。JSON
-控制消息带 `protocol_version: 3`；二进制包使用独立的 envelope version。连接必须以
-`client.hello` 声明 v3，后续每一条 JSON 客户端消息也必须继续声明 v3：
+数据面使用与控制面相同的 `/ws` 连接，并要求已完成 `client.hello` 握手。新客户端发送
+`protocol_version: 4` 与 `supported_protocol_versions: [4, 3]`，后端选择双方支持的
+最高版本，并在 `backend.ready` 中回显。旧客户端仍可只声明 v3。握手后的每条 JSON
+消息必须继续使用本连接协商出的版本：
 
 - `client.hello` / `backend.ready`
 - `client.ping` / `backend.pong`
@@ -23,17 +24,18 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 `IngestPort`。拒绝一个输入不会关闭已完成握手的连接，除非它同时违反现有 WebSocket
 协议规则。
 
-版本门禁语义是确定的：握手或握手后的 JSON 消息声明非 v3 时，后端先发送
-`protocol.error`（`code: version_mismatch`、`supported_version: 3`），再以 `4406`
-关闭连接。握手 token 无效以 `4401` 关闭；握手超时以 `4408` 关闭；JSON schema
-不合法或消息顺序不合法以 `4400` 关闭。上述协议错误不同于单个 ingest 输入被拒绝。
+版本门禁语义是确定的：双方没有共同版本，或握手后的 JSON 消息偏离已协商版本时，
+后端先发送 `protocol.error`（`code: version_mismatch`、
+`supported_version: 4`），再以 `4406` 关闭连接。握手 token 无效以 `4401` 关闭；
+握手超时以 `4408` 关闭；JSON schema 不合法或消息顺序不合法以 `4400` 关闭。上述
+协议错误不同于单个 ingest 输入被拒绝。
 
 ## 2. JSON 消息
 
 | 方向 | `type` | 必填字段 | 含义 |
 | --- | --- | --- | --- |
 | client -> backend | `client.text.submit` | `session_id`, `input_id`, `created_at_ms`, `text` | 提交一条用户文字输入。 |
-| client -> backend | `client.audio.commit` | `session_id`, `input_id`, `source`, `committed_at_ms` | 提交同一来源、同一 `input_id` 的单个音频 binary envelope，形成一个 ASR 段。 |
+| client -> backend | `client.audio.commit` | `session_id`, `input_id`, `source`, `committed_at_ms` | 仅 v3：提交先前发送的音频 envelope。v4 音频在 binary 消息内原子提交。 |
 | client -> backend | `client.voice.activity` | `session_id`, `source`, `occurred_at_ms` | 对应来源恢复说话，用于延长该来源当前语音轮次。 |
 | backend -> client | `ingest.ack` | `session_id`, `input_id`, `input_kind`, `stage`, `accepted_at_ms` | `stage` 为 `received` 或 `committed`。 |
 | backend -> client | `ingest.rejected` | `code`, `message`，以及可选的 `session_id`、`input_id`、`input_kind` | 输入被拒绝，身份无法可靠解析时关联字段省略。 |
@@ -52,37 +54,45 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 `ingest.rejected`，不会因为单个坏输入直接关闭连接。只有 WebSocket frame/消息本身违反
 协议规则时才进入上一节的 `protocol.error` 关闭语义。
 
-音频顺序为：发送一条带 `microphone` 或 `system_audio` 来源的 `audio` binary
-envelope，收到 `received` ACK 后发送相同来源的 `client.audio.commit`，再收到
-`committed` ACK。一个 binary envelope 对应一个 `input_id` 和一个有界 ASR 段。
-两个来源分别维护 pending、时间顺序和 Provider 缓冲，因此可以并行；同一来源仍必须先
-commit 当前输入再提交下一个。图片没有 commit 消息，接收成功后返回 `frame` 的
-`received` ACK。
+v4 音频顺序为：客户端发送一条带 `microphone` 或 `system_audio` 来源、
+`turn_id` 和协调标记的 `ADVX-BIN/3` envelope；后端完成 push + commit 后只返回一次
+`committed` ACK。客户端不再发送 `client.audio.commit`。v3 兼容路径仍按
+binary -> `received` ACK -> `client.audio.commit` -> `committed` ACK 执行。
+
+同一 `input_id`、时间、格式、正文和提交元数据的精确重试是幂等的；同一 `input_id`
+携带不同内容会被拒绝。图片没有 commit 消息，成功后返回 `frame` 的 `received` ACK；
+客户端在 ACK 超时时最多原样重发一次，并继续处理后续帧。断线会清理该连接尚未提交的
+音频和对应 ASR 缓冲。
+
+麦克风和系统声音使用相同 `turn_id` 协调。麦克风 envelope 可以声明
+`system_audio_required: true`。若麦克风 final 已完成而系统声音在 3 秒内没有完成，
+后端以 `system_audio_degraded: true` 仅用麦克风触发观察；迟到的系统声音仍持久化，
+但不会再次触发同一轮。
 
 ## 3. 二进制 Envelope
 
-每个 WebSocket binary frame 恰好包含一个 envelope。字段使用网络字节序（big-endian），
-可变长字符串使用 UTF-8，不包含 NUL。当前 v2 固定 header 是 25 字节，Python 编解码格式
-为 `>4sBBBHHQHI`。
+每个 WebSocket binary frame 恰好包含一个 envelope。当前 `ADVX-BIN/3` 使用 9 字节
+固定头和一段 UTF-8 JSON header；整数使用网络字节序（big-endian），Python 固定头格式
+为 `>4sBI`。
 
 | 偏移 | 字段 | 编码 | 说明 |
 | --- | --- | --- | --- |
 | 0 | magic | 4 bytes | ASCII `ADVX`。 |
-| 4 | version | `u8` | 当前为 `2`。 |
-| 5 | media type | `u8` | `1` = audio，`2` = image。 |
-| 6 | audio source | `u8` | `0` = none，`1` = microphone，`2` = system_audio。图片必须为 `0`，音频不能为 `0`。 |
-| 7 | session ID length | `u16` | `session_id` 的 UTF-8 字节数。 |
-| 9 | input ID length | `u16` | `input_id` 的 UTF-8 字节数。 |
-| 11 | captured at | `u64` | UTC Unix 毫秒。 |
-| 19 | format length | `u16` | `format` 的 UTF-8 字节数。 |
-| 21 | body length | `u32` | 正文的字节数。 |
-| 25 | variable data | bytes | `session_id`、`input_id`、`format`、正文，按此顺序连接。 |
+| 4 | version | `u8` | 当前为 `3`。 |
+| 5 | JSON header length | `u32` | 后续 JSON header 的 UTF-8 字节数，最大 4096。 |
+| 9 | JSON header | bytes | 紧凑 JSON 对象。 |
+| `9 + header_length` | body | bytes | 音频 PCM 或图片正文。 |
 
-总长度必须严格等于：
+JSON header 必须包含：
 
-```text
-25 + session_id_length + input_id_length + format_length + body_length
-```
+- `media_type`、`session_id`、`input_id`、`captured_at_ms`、`format`、
+  `body_length`；
+- 音频还必须包含 `source` 与 `turn_id`，麦克风可包含
+  `system_audio_required`；
+- 图片不得包含音频来源或协调字段。
+
+总长度必须严格等于 `9 + header_length + body_length`，JSON 中的
+`body_length` 必须与实际正文完全一致。
 
 `format` 是实际 wire format 描述，不绑定 Provider。音频可使用
 `audio/pcm;rate=16000;channels=1;format=s16le`，图片可使用 `image/webp`、
@@ -91,12 +101,14 @@ commit 当前输入再提交下一个。图片没有 commit 消息，接收成�
 | 限制 | 上限 |
 | --- | ---: |
 | `session_id` / `input_id` / `format` | 各 128 UTF-8 bytes |
-| audio body | 1,048,576 bytes |
+| audio body | 2,097,152 bytes |
 | image body | 4,194,304 bytes |
-| 完整 v2 binary envelope | 4,194,713 bytes |
+| JSON header | 4,096 bytes |
+| 完整 v3 binary envelope | 4,198,409 bytes |
 
-后端继续接受 v1 的 24 字节 header（`>4sBBHHQHI`）用于兼容已发布客户端。v1 audio
-统一映射为 `microphone`，v1 image 映射为无来源；新客户端只发送 v2。未知版本仍返回
+v3 兼容连接继续接受旧的 v1 24 字节 header（`>4sBBHHQHI`）和 v2 25 字节 header
+（`>4sBBBHHQHI`）。v1 audio 统一映射为 `microphone`，v1 image 映射为无来源。
+realtime v4 音频必须使用 v3 envelope；未知版本仍返回
 `unsupported_binary_version`。
 
 长度、magic、版本、类型或 UTF-8 不合法时，不得尝试把正文交给 ASR 或 FrameStore。

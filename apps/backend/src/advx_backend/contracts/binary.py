@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from struct import Struct
@@ -12,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from advx_backend.application.ports.asr import AudioSource
 
 BINARY_ENVELOPE_MAGIC: Final = b"ADVX"
-BINARY_ENVELOPE_VERSION: Final = 2
+BINARY_ENVELOPE_VERSION: Final = 3
 MAX_SESSION_ID_BYTES: Final = 128
 MAX_INPUT_ID_BYTES: Final = 128
 MAX_FORMAT_BYTES: Final = 128
@@ -22,12 +23,12 @@ MAX_CAPTURED_AT_MS: Final = (1 << 64) - 1
 
 _V1_FIXED_HEADER = Struct(">4sBBHHQHI")
 _V2_FIXED_HEADER = Struct(">4sBBBHHQHI")
-BINARY_FIXED_HEADER_BYTES: Final = _V2_FIXED_HEADER.size
+_V3_FIXED_HEADER = Struct(">4sBI")
+BINARY_FIXED_HEADER_BYTES: Final = _V3_FIXED_HEADER.size
+MAX_JSON_HEADER_BYTES: Final = 4_096
 MAX_BINARY_ENVELOPE_BYTES: Final = (
     BINARY_FIXED_HEADER_BYTES
-    + MAX_SESSION_ID_BYTES
-    + MAX_INPUT_ID_BYTES
-    + MAX_FORMAT_BYTES
+    + MAX_JSON_HEADER_BYTES
     + MAX_IMAGE_BODY_BYTES
 )
 
@@ -66,7 +67,7 @@ class BinaryEnvelopeHeader(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[1, 2] = BINARY_ENVELOPE_VERSION
+    version: Literal[1, 2, 3] = BINARY_ENVELOPE_VERSION
     media_type: BinaryMediaType
     source: AudioSource | None = None
     session_id: str = Field(min_length=1, max_length=MAX_SESSION_ID_BYTES)
@@ -74,6 +75,8 @@ class BinaryEnvelopeHeader(BaseModel):
     captured_at_ms: int = Field(ge=0, le=MAX_CAPTURED_AT_MS)
     format: str = Field(min_length=1, max_length=MAX_FORMAT_BYTES)
     body_length: int = Field(ge=1)
+    turn_id: str | None = Field(default=None, min_length=1, max_length=MAX_INPUT_ID_BYTES)
+    system_audio_required: bool = False
 
     @model_validator(mode="after")
     def validate_body_length(self) -> BinaryEnvelopeHeader:
@@ -87,6 +90,21 @@ class BinaryEnvelopeHeader(BaseModel):
             raise ValueError("binary envelope v1 only supports microphone audio")
         if self.media_type is BinaryMediaType.IMAGE and self.source is not None:
             raise ValueError("image envelopes cannot have an audio source")
+        if self.version < 3 and (
+            self.turn_id is not None or self.system_audio_required
+        ):
+            raise ValueError("coordinated audio metadata requires binary envelope v3")
+        if self.media_type is BinaryMediaType.IMAGE and (
+            self.turn_id is not None or self.system_audio_required
+        ):
+            raise ValueError("image envelopes cannot have coordinated audio metadata")
+        if self.media_type is BinaryMediaType.AUDIO:
+            if self.version == 3 and self.turn_id is None:
+                raise ValueError("binary envelope v3 audio requires a turn_id")
+            if self.source is not AudioSource.MICROPHONE and self.system_audio_required:
+                raise ValueError("only microphone audio can require system audio")
+            if self.system_audio_required and self.turn_id is None:
+                raise ValueError("system audio requirements need a turn_id")
         limit = max_body_bytes(self.media_type)
         if self.body_length > limit:
             raise ValueError(
@@ -147,6 +165,40 @@ def encode_binary_envelope(envelope: BinaryInputEnvelope) -> bytes:
             f"binary {header.media_type.value} body exceeds the limit of {limit} bytes"
         )
 
+    if header.version == 3:
+        json_header = json.dumps(
+            {
+                "media_type": header.media_type.value,
+                "source": None if header.source is None else header.source.value,
+                "session_id": header.session_id,
+                "input_id": header.input_id,
+                "captured_at_ms": header.captured_at_ms,
+                "format": header.format,
+                "body_length": header.body_length,
+                **({"turn_id": header.turn_id} if header.turn_id is not None else {}),
+                **(
+                    {"system_audio_required": True}
+                    if header.system_audio_required
+                    else {}
+                ),
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(json_header) > MAX_JSON_HEADER_BYTES:
+            raise BinaryEnvelopeError("binary envelope JSON header is too large")
+        return b"".join(
+            (
+                _V3_FIXED_HEADER.pack(
+                    BINARY_ENVELOPE_MAGIC,
+                    header.version,
+                    len(json_header),
+                ),
+                json_header,
+                envelope.body,
+            )
+        )
+
     fixed_header = (
         _V1_FIXED_HEADER.pack(
             BINARY_ENVELOPE_MAGIC,
@@ -196,8 +248,10 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
     version = payload[4]
     if magic != BINARY_ENVELOPE_MAGIC:
         raise BinaryEnvelopeError("binary envelope has an invalid magic value")
-    if version not in {1, BINARY_ENVELOPE_VERSION}:
+    if version not in {1, 2, BINARY_ENVELOPE_VERSION}:
         raise UnsupportedBinaryVersionError("binary envelope version is not supported")
+    if version == 3:
+        return _decode_v3_binary_envelope(payload)
     fixed_header_bytes = (
         _V1_FIXED_HEADER.size if version == 1 else _V2_FIXED_HEADER.size
     )
@@ -285,6 +339,33 @@ def decode_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
         )
     except ValidationError as error:
         raise BinaryEnvelopeError("binary envelope header is invalid") from error
+    return BinaryInputEnvelope(header=header, body=body)
+
+
+def _decode_v3_binary_envelope(payload: bytes) -> BinaryInputEnvelope:
+    if len(payload) < _V3_FIXED_HEADER.size:
+        raise BinaryEnvelopeError("binary envelope is shorter than its fixed header")
+    _, _, header_length = _V3_FIXED_HEADER.unpack_from(payload)
+    if header_length < 2 or header_length > MAX_JSON_HEADER_BYTES:
+        raise BinaryEnvelopeError("binary envelope JSON header length is invalid")
+    body_offset = _V3_FIXED_HEADER.size + header_length
+    if len(payload) < body_offset:
+        raise BinaryEnvelopeError("binary envelope JSON header is truncated")
+    try:
+        raw_header = json.loads(
+            payload[_V3_FIXED_HEADER.size : body_offset].decode("utf-8")
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise BinaryEnvelopeError("binary envelope JSON header is invalid") from error
+    if not isinstance(raw_header, dict):
+        raise BinaryEnvelopeError("binary envelope JSON header must be an object")
+    try:
+        header = BinaryEnvelopeHeader(version=3, **raw_header)
+    except (TypeError, ValidationError) as error:
+        raise BinaryEnvelopeError("binary envelope header is invalid") from error
+    body = payload[body_offset:]
+    if len(body) != header.body_length:
+        raise BinaryEnvelopeError("binary envelope length does not match its header")
     return BinaryInputEnvelope(header=header, body=body)
 
 

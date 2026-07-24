@@ -203,7 +203,7 @@ export type BackendViewerEvent = {
     | 'viewer.muted'
     | 'viewer.unmuted'
     | 'viewer.kicked'
-  protocol_version: 3
+  protocol_version: 3 | 4
   session_id: string
   audience_epoch: number
   population_revision: number

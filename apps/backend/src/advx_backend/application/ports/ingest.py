@@ -72,6 +72,9 @@ class AudioInput:
     format: str
     body: bytes = field(repr=False)
     source: AudioSource = AudioSource.MICROPHONE
+    turn_id: str | None = None
+    system_audio_required: bool = False
+    connection_id: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
@@ -80,6 +83,16 @@ class AudioInput:
         _require_non_empty_string(self.format, "format")
         _require_media_body(self.body, "body")
         object.__setattr__(self, "source", AudioSource(self.source))
+        if self.turn_id is not None:
+            _require_non_empty_string(self.turn_id, "turn_id")
+        if not isinstance(self.system_audio_required, bool):
+            raise ValueError("system_audio_required must be a boolean")
+        if self.source is not AudioSource.MICROPHONE and self.system_audio_required:
+            raise ValueError("only microphone audio can require system audio")
+        if self.system_audio_required and self.turn_id is None:
+            raise ValueError("system audio requirements need a turn_id")
+        if self.connection_id is not None:
+            _require_non_empty_string(self.connection_id, "connection_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +103,7 @@ class AudioCommit:
     source: AudioSource = AudioSource.MICROPHONE
     turn_id: str | None = None
     system_audio_required: bool = False
+    connection_id: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
@@ -104,6 +118,8 @@ class AudioCommit:
             raise ValueError("only microphone audio can require system audio")
         if self.system_audio_required and self.turn_id is None:
             raise ValueError("system audio requirements need a turn_id")
+        if self.connection_id is not None:
+            _require_non_empty_string(self.connection_id, "connection_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,7 +238,11 @@ class IngestPort(Protocol):
 
     async def submit_audio(self, input: AudioInput) -> IngestReceipt: ...
 
+    async def submit_audio_and_commit(self, input: AudioInput) -> IngestReceipt: ...
+
     async def commit_audio(self, commit: AudioCommit) -> IngestReceipt: ...
+
+    async def clear_connection(self, connection_id: str) -> None: ...
 
     async def notify_voice_activity(
         self,

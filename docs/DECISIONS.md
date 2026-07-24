@@ -290,16 +290,43 @@
 
 - 状态：`Accepted`
 - 日期：2026-07-24
-- 决定：音频来源固定为 `microphone` 和 `system_audio`。Windows 系统声音使用 Electron loopback，首次默认开启并标记为推荐；两路音频使用独立缓冲、提交顺序和 StepFun Provider，不混音。partial 只用于控制台状态，final 立即以带来源的 `user_voice` 事件进入 Room，并按每个来源独立的语音轮次策略触发观察。
+- 决定：音频来源固定为 `microphone` 和 `system_audio`。Windows 系统声音使用 Electron loopback，首次默认开启并标记为推荐；两路音频使用独立缓冲、提交顺序和 StepFun Provider，不混音。partial 只用于控制台状态；麦克风 final 以 `user_voice`、系统声音 final 以带 `system_audio_transcript` 标记的 `system_event` 进入 Room，并按协调语音轮次策略触发观察。
 - 影响：主播麦克风使用 `source_id=host`，系统声音使用 `source_id=system-audio`；模型和界面都能区分来源。非 Windows 平台明确显示不支持，系统声音失败只降级该通道，不结束麦克风、画面或 Session。
+
+### D-042：实时生成采用新鲜上下文和 Observation 级 latest-wins
+
+- 状态：`Accepted`
+- 日期：2026-07-25
+- 决定：相近输入使用 1 秒合并窗口；同优先级或更高优先级的新 Observation 取代旧工作，
+  即使新波没有选中 Viewer 也必须推进发布围栏。Viewer TTL 默认 30 秒，并发默认 6，
+  用户/画面/ambient 候选预算分别为 6/4/2，直接点名预算为 1。普通公开上下文只读取最近
+  60 秒，用户、系统声音、画面各最多 16 条；观众弹幕只进入最近 30 秒、最多 8 条的回复
+  上下文，不使用旧历史摘要。
+- 理由：直播中的旧反应比沉默更破坏体验；开播早期话题、积压队列和不可取消 Provider
+  返回都不能覆盖当前画面和用户话语。
+- 影响：旧 Observation、Viewer sequence、TTL、取消或协议非法结果不得显示、写 Room、
+  更新 Viewer 状态或进入记忆。模型结构非法只允许一次有截止时间的修复，单个生成请求
+  总 Provider 调用不超过两次。
+
+### D-043：实时输入升级到 v4 原子音频提交
+
+- 状态：`Accepted`
+- 日期：2026-07-25
+- 决定：WebSocket 握手协商 realtime v4/v3；新客户端使用 `ADVX-BIN/3` JSON header。
+  v4 音频 binary 完成 push + commit 后只返回一次 `committed` ACK，v3 继续使用旧的
+  received/commit 流程一个发布周期。相同输入指纹的重试幂等，不同内容复用 input ID
+  明确拒绝。图片 ACK 超时可原样重试一次。
+- 理由：消除 ACK waiter 泄漏、二阶段音频乱序、超大音频块和断线后的悬挂输入。
+- 影响：麦克风最长 30 秒硬切片；系统声音保留 60 秒环形缓冲、每轮最多取 30 秒。需要
+  系统声音但 3 秒内未完成时以 mic-only 降级触发，迟到系统声音只持久化、不重复触发。
 
 ## 4. 开放问题
 
 ### Q-001：Electron 与 FastAPI 的媒体编码是什么？
 
-- 状态：`Open`
-- 已定边界：第一版 StepFun ASR 输入使用单声道 16 kHz PCM S16LE。
-- 需要回答：画面使用 JPEG、WebP 或其他格式，音频如何分段，以及本地数据面使用 WebSocket 二进制消息还是其他传输。
+- 状态：`Resolved by D-043`
+- 结论：StepFun ASR 输入使用单声道 16 kHz PCM S16LE；画面接受 JPEG、PNG 或 WebP；
+  本地数据面使用 WebSocket JSON 控制消息与 `ADVX-BIN/3` 二进制 envelope。
 
 ### Q-003：MVP 的默认模型体验是什么？
 

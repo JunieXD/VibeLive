@@ -5,10 +5,13 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from advx_backend.application.ports.asr import AudioSource
 from advx_backend.contracts.audience import ViewerPresenceEvent
-from advx_backend.contracts.protocol import PROTOCOL_VERSION
 from advx_backend.contracts.session import SessionSnapshot
 from advx_backend.contracts.viewer_runtime import ViewerBarrageEvent
 from advx_backend.domain.barrage import BarrageEvent
+
+REALTIME_PROTOCOL_VERSION = 4
+SUPPORTED_REALTIME_PROTOCOL_VERSIONS = (3, 4)
+RealtimeProtocolVersion = Literal[3, 4]
 
 
 class RealtimeProtocolErrorCode(StrEnum):
@@ -58,6 +61,26 @@ class RealtimeMessage(BaseModel):
 class ClientHello(RealtimeMessage):
     type: Literal["client.hello"] = "client.hello"
     token: str = Field(min_length=1, max_length=256, repr=False)
+    supported_protocol_versions: list[int] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=8,
+    )
+
+    @model_validator(mode="after")
+    def validate_supported_versions(self) -> "ClientHello":
+        versions = self.supported_protocol_versions
+        if versions is not None:
+            if any(
+                isinstance(version, bool) or version < 1
+                for version in versions
+            ):
+                raise ValueError("supported protocol versions must be positive integers")
+            if len(set(versions)) != len(versions):
+                raise ValueError("supported protocol versions must not contain duplicates")
+            if self.protocol_version not in versions:
+                raise ValueError("protocol_version must be included in supported versions")
+        return self
 
 
 class ClientPing(RealtimeMessage):
@@ -132,19 +155,19 @@ class ClientMessageEnvelope(RootModel[ClientMessage]):
 
 class BackendReady(RealtimeMessage):
     type: Literal["backend.ready"] = "backend.ready"
-    protocol_version: Literal[3] = PROTOCOL_VERSION
+    protocol_version: RealtimeProtocolVersion = REALTIME_PROTOCOL_VERSION
     session: SessionSnapshot
 
 
 class BackendPong(RealtimeMessage):
     type: Literal["backend.pong"] = "backend.pong"
-    protocol_version: Literal[3] = PROTOCOL_VERSION
+    protocol_version: RealtimeProtocolVersion = REALTIME_PROTOCOL_VERSION
     request_id: str
 
 
 class SessionStatusEvent(RealtimeMessage):
     type: Literal["session.status"] = "session.status"
-    protocol_version: Literal[3] = PROTOCOL_VERSION
+    protocol_version: RealtimeProtocolVersion = REALTIME_PROTOCOL_VERSION
     session: SessionSnapshot
 
 
@@ -190,13 +213,13 @@ class BarrageSnapshot(ViewerBarrageEvent):
 
 class BarrageEventMessage(RealtimeMessage):
     type: Literal["barrage.event"] = "barrage.event"
-    protocol_version: Literal[3] = PROTOCOL_VERSION
+    protocol_version: RealtimeProtocolVersion = REALTIME_PROTOCOL_VERSION
     barrage: BarrageSnapshot
 
 
 class RealtimeProtocolError(RealtimeMessage):
     type: Literal["protocol.error"] = "protocol.error"
-    protocol_version: Literal[3] = PROTOCOL_VERSION
+    protocol_version: RealtimeProtocolVersion = REALTIME_PROTOCOL_VERSION
     code: RealtimeProtocolErrorCode
     message: str = Field(min_length=1, max_length=256)
     supported_version: int | None = None
@@ -204,7 +227,7 @@ class RealtimeProtocolError(RealtimeMessage):
 
 class IngestAck(RealtimeMessage):
     type: Literal["ingest.ack"] = "ingest.ack"
-    protocol_version: Literal[3] = PROTOCOL_VERSION
+    protocol_version: RealtimeProtocolVersion = REALTIME_PROTOCOL_VERSION
     session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     input_kind: IngestInputKind
@@ -214,7 +237,7 @@ class IngestAck(RealtimeMessage):
 
 class IngestRejected(RealtimeMessage):
     type: Literal["ingest.rejected"] = "ingest.rejected"
-    protocol_version: Literal[3] = PROTOCOL_VERSION
+    protocol_version: RealtimeProtocolVersion = REALTIME_PROTOCOL_VERSION
     code: IngestRejectionCode
     message: str = Field(min_length=1, max_length=256)
     session_id: str | None = Field(
@@ -232,7 +255,7 @@ class IngestRejected(RealtimeMessage):
 
 class AsrTranscriptEvent(RealtimeMessage):
     type: Literal["asr.transcript"] = "asr.transcript"
-    protocol_version: Literal[3] = PROTOCOL_VERSION
+    protocol_version: RealtimeProtocolVersion = REALTIME_PROTOCOL_VERSION
     source: AudioSource
     text: str = Field(min_length=1, max_length=MAX_TEXT_INPUT_LENGTH)
     final: bool

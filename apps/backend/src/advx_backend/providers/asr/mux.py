@@ -64,6 +64,12 @@ class AsrProviderMux:
     async def commit(self, source: AudioSource = AudioSource.MICROPHONE) -> None:
         await self._provider(source).commit(source)
 
+    async def discard(self, source: AudioSource = AudioSource.MICROPHONE) -> None:
+        provider = self._provider(source)
+        discard = getattr(provider, "discard", None)
+        if discard is not None:
+            await discard(source)
+
     def results(self) -> AsyncIterator[TranscriptSegment]:
         return self._results_iter()
 

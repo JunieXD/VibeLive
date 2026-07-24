@@ -2,14 +2,16 @@ import asyncio
 import base64
 import hashlib
 import json
-from collections.abc import Mapping
+import time
+from collections import OrderedDict
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, is_dataclass
 from dataclasses import fields as dataclass_fields
 from enum import Enum
 from typing import Final, Protocol, cast
 
 import httpx
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from advx_backend.application.ai_call_logging import (
     AiCallLifecycle,
@@ -21,9 +23,13 @@ from advx_backend.application.ai_call_logging import (
 from advx_backend.application.ports.ingest import FrameResolver
 from advx_backend.contracts.debug import AiCallRole
 from advx_backend.contracts.viewer_runtime import (
+    EvidenceRef,
     ProviderRuntimeSpec,
+    ViewerAction,
     ViewerGenerationRequest,
     ViewerGenerationResponse,
+    ViewerReactionIntent,
+    ViewerReactionTarget,
 )
 from advx_backend.domain.observation import FrameRef
 from advx_backend.domain.observation_wave import (
@@ -99,15 +105,13 @@ class OpenAICompatibleViewerRuntimeConfig:
 
 
 _VIEWER_BARRAGE_JSON_EXAMPLE: Final = (
-    '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
-    '"viewer_sequence":1,"action":"barrage","intent":"react_to_host",'
+    '{"action":"barrage","intent":"react_to_host",'
     '"target":null,"text":"这波漂亮","reaction_type":"comment",'
     '"decision_reason":"主播的提问符合当前人设",'
     '"evidence_refs":[{"source":"event","event_id":"event-id"}]}'
 )
 _VIEWER_SILENCE_JSON_EXAMPLE: Final = (
-    '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
-    '"viewer_sequence":1,"action":"silence","intent":"silence",'
+    '{"action":"silence","intent":"silence",'
     '"target":null,"text":null,"reaction_type":"silence",'
     '"decision_reason":"普通问候未触发当前人设","evidence_refs":[]}'
 )
@@ -129,11 +133,18 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "sentence of 40 characters or fewer stating the visible persona or evidence basis for the "
     "barrage or silence decision. Do not include hidden reasoning, probabilities, or chain of "
     "thought. "
+    "Legal intent values are exactly: react_to_host, react_to_scene, reply_to_viewer, "
+    "ask_question, agree, disagree, encourage, joke, continue_thread, room_meta, silence. "
+    "Legal target.kind values are exactly: host, scene, room, viewer, event. target must be "
+    "null or an object; never return a string. Every target object must include kind. "
     "For a host, scene, or room target, viewer_instance_id and event_id must both be null. "
     "For a viewer target, provide viewer_instance_id only; for an event target, provide event_id "
-    "only. Use null, never an empty string, for every absent target ID. Never use an empty "
-    "string for text. Unless a supplied style profile overrides this default, prefer a natural "
-    "Chinese message of 20 characters or fewer. Return "
+    "only. No other target fields are allowed. Use null, never an empty string, for every absent "
+    "target ID. For action=barrage, text must be non-empty. For action=silence, intent must be "
+    "silence, target and text must be null, and reaction_type must be silence. Never use an empty "
+    "string for text. Do not return generation_request_id, viewer_instance_id, or viewer_sequence; "
+    "the server owns those fields. Unless a supplied style profile overrides this default, "
+    "prefer a natural Chinese message of 20 characters or fewer. Return "
     "exactly one JSON object, with no Markdown or prose. "
     f"For a barrage use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE} "
     f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE}"
@@ -150,6 +161,42 @@ _HISTORY_SUMMARY_SYSTEM_PROMPT: Final = (
     f"exactly one JSON object, with no Markdown or prose. Use this shape: {_SUMMARY_JSON_EXAMPLE}"
 )
 _ROLE_OUTPUT_TOKEN_BUDGET: Final = 4_096
+_PRIMARY_TIMEOUT_SECONDS: Final = 12.0
+_REPAIR_TIMEOUT_SECONDS: Final = 6.0
+_MIN_REPAIR_REMAINING_SECONDS: Final = 6.0
+_CALL_STATE_CAPACITY: Final = 4_096
+
+
+class _ViewerModelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: ViewerAction
+    intent: ViewerReactionIntent = ViewerReactionIntent.REACT_TO_SCENE
+    target: ViewerReactionTarget | None = None
+    text: str | None = Field(default=None, min_length=1, max_length=4_000)
+    reaction_type: str = Field(min_length=1, max_length=64)
+    decision_reason: str | None = Field(default=None, min_length=1, max_length=160)
+    evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_action(self) -> "_ViewerModelOutput":
+        if self.action is ViewerAction.BARRAGE and self.text is None:
+            raise ValueError("barrage requires text")
+        if self.action is ViewerAction.SILENCE:
+            if self.intent is not ViewerReactionIntent.SILENCE:
+                raise ValueError("silence action requires silence intent")
+            if self.target is not None or self.text is not None:
+                raise ValueError("silence cannot include target or text")
+            if self.reaction_type != "silence":
+                raise ValueError("silence action requires silence reaction_type")
+        return self
+
+
+@dataclass(slots=True)
+class _ViewerCallState:
+    deadline_at_ms: int
+    invocations: int = 0
+    provider_calls: int = 0
 
 
 class OpenAICompatibleViewerRuntimeProvider:
@@ -163,6 +210,7 @@ class OpenAICompatibleViewerRuntimeProvider:
         frame_resolver: FrameResolver | None = None,
         ai_call_sink: AiCallSink | None = None,
         rate_gate: ProviderRateGate | None = None,
+        clock_ms: Callable[[], int] | None = None,
     ) -> None:
         self.config = config
         self._client = client if client is not None else httpx.AsyncClient()
@@ -170,12 +218,16 @@ class OpenAICompatibleViewerRuntimeProvider:
         self._frame_resolver = frame_resolver
         self._ai_call_sink = ai_call_sink
         self._rate_gate = rate_gate or ProviderRateGate()
+        self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
         self._viewer = self._role_provider(config.provider.viewer_model)
         self._visual_summary = self._role_provider(config.provider.visual_summary_model)
+        self._viewer_call_states: OrderedDict[str, _ViewerCallState] = OrderedDict()
+        self._viewer_call_state_lock = asyncio.Lock()
         self._close_lock = asyncio.Lock()
         self._closed = False
 
     async def generate(self, request: ViewerGenerationRequest) -> ViewerGenerationResponse:
+        invocation = await self._begin_viewer_invocation(request)
         lifecycle = self._call_lifecycle(
             role=AiCallRole.VIEWER,
             correlation_id=request.generation_request_id,
@@ -197,32 +249,50 @@ class OpenAICompatibleViewerRuntimeProvider:
                 system_prompt=_VIEWER_SYSTEM_PROMPT,
                 content=content,
             )
+            await self._reserve_viewer_call(request)
             response = await self._send_rate_limited(
                 self._viewer,
                 payload,
                 lifecycle=lifecycle,
-                capture_model_output=True,
+                viewer_request=request,
+                maximum_timeout_seconds=_PRIMARY_TIMEOUT_SECONDS,
+                allow_json_mode_fallback=False,
             )
-            lifecycle.received(
-                build_http_response_summary(response, include_model_output=True)
-            )
+            lifecycle.received(build_http_response_summary(response))
             output = self._structured_output(response)
-            output.update(
+            try:
+                model_output = self._validate_viewer_output(output)
+            except ValidationError as error:
+                if invocation == 1 and self._can_repair(request):
+                    await self._reserve_viewer_call(request)
+                    repair_payload = self._repair_payload(
+                        payload,
+                        validation_codes=self._validation_codes(error),
+                    )
+                    response = await self._send_rate_limited(
+                        self._viewer,
+                        repair_payload,
+                        lifecycle=lifecycle,
+                        viewer_request=request,
+                        maximum_timeout_seconds=_REPAIR_TIMEOUT_SECONDS,
+                        allow_json_mode_fallback=False,
+                    )
+                    lifecycle.received(build_http_response_summary(response))
+                    output = self._structured_output(response)
+                    try:
+                        model_output = self._validate_viewer_output(output)
+                    except ValidationError as repair_error:
+                        raise self._viewer_validation_error(repair_error) from None
+                else:
+                    raise self._viewer_validation_error(error) from None
+            result = ViewerGenerationResponse.model_validate(
                 {
+                    **model_output.model_dump(mode="json"),
                     "generation_request_id": request.generation_request_id,
                     "viewer_instance_id": request.viewer_instance_id,
                     "viewer_sequence": request.viewer_sequence,
                 }
             )
-            self._canonicalize_target(output)
-            self._canonicalize_evidence_refs(output)
-            try:
-                result = ViewerGenerationResponse.model_validate(output)
-            except ValidationError as error:
-                raise ViewerRuntimeProtocolError(
-                    "Viewer response violated the ViewerGenerationResponse contract: "
-                    f"{self._validation_codes(error)}"
-                ) from None
             lifecycle.succeeded(result.model_dump(mode="json"))
             return result
         except asyncio.CancelledError:
@@ -401,8 +471,21 @@ class OpenAICompatibleViewerRuntimeProvider:
         *,
         lifecycle: AiCallLifecycle,
         capture_model_output: bool = False,
+        request_timeout_seconds: float | None = None,
+        allow_json_mode_fallback: bool = True,
+        viewer_request: ViewerGenerationRequest | None = None,
+        maximum_timeout_seconds: float | None = None,
     ) -> httpx.Response:
         async with self._rate_gate.lease() as rate_limit_generation:
+            if viewer_request is not None:
+                if maximum_timeout_seconds is None:
+                    raise ViewerRuntimeProtocolError(
+                        "Viewer request timeout maximum was missing"
+                    )
+                request_timeout_seconds = self._effective_timeout(
+                    viewer_request,
+                    maximum_seconds=maximum_timeout_seconds,
+                )
             lifecycle.sent(build_openai_request_summary(payload))
             try:
                 response = await self._send(
@@ -410,6 +493,8 @@ class OpenAICompatibleViewerRuntimeProvider:
                     payload,
                     lifecycle=lifecycle,
                     capture_model_output=capture_model_output,
+                    request_timeout_seconds=request_timeout_seconds,
+                    allow_json_mode_fallback=allow_json_mode_fallback,
                 )
             except ViewerRuntimeProviderError as error:
                 if error.status_code == 429:
@@ -428,6 +513,8 @@ class OpenAICompatibleViewerRuntimeProvider:
         *,
         lifecycle: AiCallLifecycle,
         capture_model_output: bool = False,
+        request_timeout_seconds: float | None = None,
+        allow_json_mode_fallback: bool = True,
     ) -> httpx.Response:
         self._ensure_available(provider)
         assert provider is not None
@@ -436,6 +523,8 @@ class OpenAICompatibleViewerRuntimeProvider:
                 "POST",
                 provider._chat_completions_endpoint(),
                 payload=payload,
+                request_timeout_seconds=request_timeout_seconds,
+                allow_json_mode_fallback=allow_json_mode_fallback,
             )
         except asyncio.CancelledError:
             raise
@@ -592,6 +681,109 @@ class OpenAICompatibleViewerRuntimeProvider:
         }
         payload.update(default_reasoning_options(self.config.base_url, model_id))
         return payload
+
+    async def _begin_viewer_invocation(self, request: ViewerGenerationRequest) -> int:
+        async with self._viewer_call_state_lock:
+            now_ms = self._clock_ms()
+            expired = [
+                request_id
+                for request_id, state in self._viewer_call_states.items()
+                if state.deadline_at_ms <= now_ms
+            ]
+            for request_id in expired:
+                self._viewer_call_states.pop(request_id, None)
+            state = self._viewer_call_states.get(request.generation_request_id)
+            if state is None:
+                if len(self._viewer_call_states) >= _CALL_STATE_CAPACITY:
+                    raise ViewerRuntimeProtocolError(
+                        "Viewer provider call-state capacity was exhausted"
+                    )
+                state = _ViewerCallState(deadline_at_ms=request.deadline_at_ms)
+                self._viewer_call_states[request.generation_request_id] = state
+            else:
+                state.deadline_at_ms = max(state.deadline_at_ms, request.deadline_at_ms)
+                self._viewer_call_states.move_to_end(request.generation_request_id)
+            state.invocations += 1
+            return state.invocations
+
+    async def _reserve_viewer_call(self, request: ViewerGenerationRequest) -> None:
+        async with self._viewer_call_state_lock:
+            state = self._viewer_call_states.get(request.generation_request_id)
+            if state is None or state.provider_calls >= 2:
+                raise ViewerRuntimeProtocolError(
+                    "Viewer provider call budget was exhausted"
+                )
+            state.provider_calls += 1
+
+    def _remaining_seconds(self, request: ViewerGenerationRequest) -> float:
+        return max(0.0, (request.deadline_at_ms - self._clock_ms()) / 1_000)
+
+    def _effective_timeout(
+        self,
+        request: ViewerGenerationRequest,
+        *,
+        maximum_seconds: float,
+    ) -> float:
+        remaining_seconds = self._remaining_seconds(request)
+        if remaining_seconds <= 0:
+            raise ViewerRuntimeProtocolError("Viewer request deadline expired")
+        return min(
+            float(self.config.request_timeout_seconds),
+            maximum_seconds,
+            remaining_seconds,
+        )
+
+    def _can_repair(self, request: ViewerGenerationRequest) -> bool:
+        return self._remaining_seconds(request) >= _MIN_REPAIR_REMAINING_SECONDS
+
+    @staticmethod
+    def _repair_payload(
+        payload: dict[str, object],
+        *,
+        validation_codes: str,
+    ) -> dict[str, object]:
+        messages = payload.get("messages")
+        if not isinstance(messages, list):
+            raise ViewerRuntimeProtocolError("Viewer repair payload had no messages")
+        return {
+            **payload,
+            "messages": [
+                *messages,
+                {
+                    "role": "system",
+                    "content": (
+                        "Your prior JSON violated the contract. Return one corrected JSON "
+                        f"object only. Validation codes: {validation_codes}"
+                    ),
+                },
+            ],
+        }
+
+    @classmethod
+    def _validate_viewer_output(
+        cls,
+        output: dict[str, object],
+    ) -> _ViewerModelOutput:
+        normalized = dict(output)
+        for server_owned in (
+            "generation_request_id",
+            "viewer_instance_id",
+            "viewer_sequence",
+        ):
+            normalized.pop(server_owned, None)
+        cls._canonicalize_target(normalized)
+        cls._canonicalize_evidence_refs(normalized)
+        return _ViewerModelOutput.model_validate(normalized)
+
+    @classmethod
+    def _viewer_validation_error(
+        cls,
+        error: ValidationError,
+    ) -> ViewerRuntimeProtocolError:
+        return ViewerRuntimeProtocolError(
+            "Viewer response violated the model output contract: "
+            f"{cls._validation_codes(error)}"
+        )
 
     @staticmethod
     def _structured_output(response: httpx.Response) -> dict[str, object]:

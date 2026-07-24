@@ -199,6 +199,11 @@ class StepFunAsrProvider:
         self._buffer.clear()
         await self._segments.put(segment)
 
+    async def discard(self, source: AudioSource = AudioSource.MICROPHONE) -> None:
+        self._ensure_started()
+        if self._buffer and self._buffer[0].source is source:
+            self._buffer.clear()
+
     async def results(self) -> AsyncIterator[TranscriptSegment]:
         while True:
             item = await self._results.get()

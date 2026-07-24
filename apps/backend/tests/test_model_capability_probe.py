@@ -9,7 +9,6 @@ from advx_backend.contracts.configuration import ProviderConfigurationRequest
 from advx_backend.contracts.viewer_runtime import (
     ProviderRuntimeSpec,
     ViewerAction,
-    ViewerGenerationResponse,
 )
 from advx_backend.providers.model.base import (
     CapabilityProbeCheck,
@@ -28,6 +27,7 @@ from advx_backend.providers.model.viewer_runtime import (
     _VIEWER_SYSTEM_PROMPT,
     OpenAICompatibleViewerRuntimeConfig,
     OpenAICompatibleViewerRuntimeProvider,
+    _ViewerModelOutput,
 )
 
 
@@ -88,8 +88,8 @@ def test_stepfun_flash_defaults_to_low_reasoning_effort() -> None:
 
 
 def test_viewer_json_examples_satisfy_the_runtime_contract() -> None:
-    barrage = ViewerGenerationResponse.model_validate(json.loads(_VIEWER_BARRAGE_JSON_EXAMPLE))
-    silence = ViewerGenerationResponse.model_validate(json.loads(_VIEWER_SILENCE_JSON_EXAMPLE))
+    barrage = _ViewerModelOutput.model_validate(json.loads(_VIEWER_BARRAGE_JSON_EXAMPLE))
+    silence = _ViewerModelOutput.model_validate(json.loads(_VIEWER_SILENCE_JSON_EXAMPLE))
 
     assert barrage.action is ViewerAction.BARRAGE
     assert barrage.target is None

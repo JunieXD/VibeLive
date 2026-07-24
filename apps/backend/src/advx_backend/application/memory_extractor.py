@@ -73,7 +73,7 @@ class _MemoryOutputModel(BaseModel):
 class _MemoryExtractionOutput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    candidates: list[_MemoryOutputModel] = Field(default_factory=list, max_length=32)
+    candidates: list[object] = Field(default_factory=list, max_length=32)
 
 
 _MEMORY_JSON_EXAMPLE: Final = (
@@ -279,11 +279,14 @@ class OpenAICompatibleMemoryExtractor:
 
             allowed_evidence = set(event_ids)
             candidates: list[RoomMemoryCandidate] = []
-            for index, item in enumerate(parsed.candidates):
+            accepted_outputs: list[_MemoryOutputModel] = []
+            for index, raw_item in enumerate(parsed.candidates):
+                try:
+                    item = _MemoryOutputModel.model_validate(raw_item)
+                except ValidationError:
+                    continue
                 if not set(item.evidence_event_ids).issubset(allowed_evidence):
-                    raise ViewerRuntimeProtocolError(
-                        "Memory candidate referenced a non-public event"
-                    )
+                    continue
                 candidates.append(
                     self._candidate(
                         room_id=room_id,
@@ -294,9 +297,10 @@ class OpenAICompatibleMemoryExtractor:
                         output=item,
                     )
                 )
+                accepted_outputs.append(item)
             lifecycle.succeeded(
                 {
-                    "candidate_count": len(parsed.candidates),
+                    "candidate_count": len(candidates),
                     "candidates": [
                         {
                             "memory_type": item.memory_type.value,
@@ -310,7 +314,7 @@ class OpenAICompatibleMemoryExtractor:
                                 ).hexdigest(),
                             },
                         }
-                        for item in parsed.candidates
+                        for item in accepted_outputs
                     ],
                 }
             )

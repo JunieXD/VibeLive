@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
@@ -87,9 +88,14 @@ class IngestCapacityExceededError(IngestServiceError):
 class _TrackedInput:
     kind: IngestInputKind
     timestamp_ms: int
+    format: str
+    body_sha256: str
     source: AudioSource | None = None
     ended_at_ms: int | None = None
+    connection_id: str | None = None
     accepted: bool = False
+    fingerprints: dict[IngestReceiptStage, str] = field(default_factory=dict)
+    receipts: dict[IngestReceiptStage, IngestReceipt] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -141,7 +147,7 @@ class IngestService:
         max_final_transcript_attempts: int = 3,
         final_transcript_retry_backoff_ms: int = 25,
         voice_turn_silence_ms: int = 1_500,
-        coordinated_turn_timeout_ms: int = _COORDINATED_TURN_TIMEOUT_MS,
+        coordinated_turn_timeout_ms: int = 3_000,
         ambient_enabled: Callable[[str], Awaitable[bool]] | None = None,
         ambient_interval_ms: int = 30_000,
         transcript_publisher: TranscriptPublisher | None = None,
@@ -295,12 +301,26 @@ class IngestService:
         if not input.text.strip():
             raise UnsupportedIngestFormatError("text input must not be blank")
         await self._require_running(input.session_id)
-        await self._reserve(
+        fingerprint = self._input_fingerprint(
+            kind=IngestInputKind.TEXT,
+            source=None,
+            timestamp_ms=input.created_at_ms,
+            format_value=self._text_format(input),
+            body=input.text.encode("utf-8"),
+            stage=IngestReceiptStage.RECEIVED,
+        )
+        cached = await self._reserve(
             session_id=input.session_id,
             input_id=input.input_id,
             kind=IngestInputKind.TEXT,
             timestamp_ms=input.created_at_ms,
+            format_value=self._text_format(input),
+            body_sha256=hashlib.sha256(input.text.encode("utf-8")).hexdigest(),
+            fingerprint=fingerprint,
         )
+        if cached is not None:
+            return cached
+        receipt = self._receipt(input.session_id, input.input_id, IngestInputKind.TEXT)
         appended = False
         try:
             payload = {"input_id": input.input_id}
@@ -324,31 +344,53 @@ class IngestService:
             )
             await self._restart_ambient_timer(input.session_id)
         except BaseException:
-            await self._settle(input.input_id, accepted=appended)
+            await self._settle(
+                input.input_id,
+                accepted=appended,
+                receipt=receipt if appended else None,
+            )
             raise
-        await self._settle(input.input_id, accepted=True)
-        return self._receipt(input.session_id, input.input_id, IngestInputKind.TEXT)
+        await self._settle(input.input_id, accepted=True, receipt=receipt)
+        return receipt
 
     async def submit_frame(self, input: FrameInput) -> IngestReceipt:
         if input.mime_type not in {"image/jpeg", "image/png", "image/webp"}:
             raise UnsupportedIngestFormatError(f"unsupported frame format: {input.mime_type}")
         await self._require_running(input.session_id)
-        await self._reserve(
+        fingerprint = self._input_fingerprint(
+            kind=IngestInputKind.FRAME,
+            source=None,
+            timestamp_ms=input.captured_at_ms,
+            format_value=input.mime_type,
+            body=input.body,
+            stage=IngestReceiptStage.RECEIVED,
+        )
+        cached = await self._reserve(
             session_id=input.session_id,
             input_id=input.input_id,
             kind=IngestInputKind.FRAME,
             timestamp_ms=input.captured_at_ms,
+            format_value=input.mime_type,
+            body_sha256=hashlib.sha256(input.body).hexdigest(),
+            fingerprint=fingerprint,
         )
+        if cached is not None:
+            return cached
+        receipt = self._receipt(input.session_id, input.input_id, IngestInputKind.FRAME)
         stored = False
         try:
             frame = await self._frame_store.store(input)
             stored = True
             await self._context_builder.append_frame_ref(input.session_id, frame)
         except BaseException:
-            await self._settle(input.input_id, accepted=stored)
+            await self._settle(
+                input.input_id,
+                accepted=stored,
+                receipt=receipt if stored else None,
+            )
             raise
-        await self._settle(input.input_id, accepted=True)
-        return self._receipt(input.session_id, input.input_id, IngestInputKind.FRAME)
+        await self._settle(input.input_id, accepted=True, receipt=receipt)
+        return receipt
 
     async def submit_audio(self, input: AudioInput) -> IngestReceipt:
         sample_rate, channels, sample_width_bits = self._parse_audio_format(input.format)
@@ -357,10 +399,14 @@ class IngestService:
         frame_count = len(input.body) // (channels * sample_width_bits // 8)
         duration_ms = (frame_count * 1_000) // sample_rate
         await self._require_running(input.session_id)
-        await self._reserve_audio(
+        fingerprint = self._audio_fingerprint(input, IngestReceiptStage.RECEIVED)
+        cached = await self._reserve_audio(
             input,
             ended_at_ms=input.captured_at_ms + duration_ms,
+            fingerprint=fingerprint,
         )
+        if cached is not None:
+            return cached
         pushed = False
         try:
             await self._asr_provider.push_audio(
@@ -380,13 +426,108 @@ class IngestService:
             await self._settle(input.input_id, accepted=pushed)
             if not pushed:
                 await self._release_audio(input.input_id, input.source)
-        return self._receipt(input.session_id, input.input_id, IngestInputKind.AUDIO)
+        receipt = self._receipt(input.session_id, input.input_id, IngestInputKind.AUDIO)
+        await self._settle(input.input_id, accepted=True, receipt=receipt)
+        return receipt
+
+    async def submit_audio_and_commit(self, input: AudioInput) -> IngestReceipt:
+        sample_rate, channels, sample_width_bits = self._parse_audio_format(input.format)
+        if len(input.body) % (channels * sample_width_bits // 8) != 0:
+            raise UnsupportedIngestFormatError("audio body is not aligned to complete PCM samples")
+        frame_count = len(input.body) // (channels * sample_width_bits // 8)
+        duration_ms = (frame_count * 1_000) // sample_rate
+        await self._require_running(input.session_id)
+        committed_fingerprint = self._audio_fingerprint(
+            input,
+            IngestReceiptStage.COMMITTED,
+        )
+        cached = await self._reserve_audio(
+            input,
+            ended_at_ms=input.captured_at_ms + duration_ms,
+            fingerprint=committed_fingerprint,
+            stage=IngestReceiptStage.COMMITTED,
+        )
+        if cached is not None:
+            return cached
+        committed_audio = _CommittedAudio(
+            input_id=input.input_id,
+            source=input.source,
+            started_at_ms=input.captured_at_ms,
+            ended_at_ms=input.captured_at_ms + duration_ms,
+            turn_id=input.turn_id,
+        )
+        registered = False
+        try:
+            await self._asr_provider.push_audio(
+                AudioChunk(
+                    session_id=input.session_id,
+                    source=input.source,
+                    started_at_ms=input.captured_at_ms,
+                    ended_at_ms=input.captured_at_ms + duration_ms,
+                    sample_rate=sample_rate,
+                    channels=channels,
+                    sample_width_bits=sample_width_bits,
+                    pcm=input.body,
+                )
+            )
+            async with self._lock:
+                self._register_committed_audio_locked(
+                    input.session_id,
+                    AudioCommit(
+                        session_id=input.session_id,
+                        input_id=input.input_id,
+                        committed_at_ms=input.captured_at_ms + duration_ms,
+                        source=input.source,
+                        turn_id=input.turn_id,
+                        system_audio_required=input.system_audio_required,
+                        connection_id=input.connection_id,
+                    ),
+                    committed_audio,
+                )
+                registered = True
+            await self._asr_provider.commit(input.source)
+        except BaseException:
+            if registered:
+                await self._discard_committed_audio(input.session_id, committed_audio)
+            await self._release_audio(input.input_id, input.source)
+            await self._settle(input.input_id, accepted=False)
+            await self._discard_provider_audio(input.source)
+            raise
+        await self._release_audio(input.input_id, input.source)
+        receipt = self._receipt(
+            input.session_id,
+            input.input_id,
+            IngestInputKind.AUDIO,
+            stage=IngestReceiptStage.COMMITTED,
+        )
+        await self._settle(input.input_id, accepted=True, receipt=receipt)
+        return receipt
 
     async def commit_audio(self, commit: AudioCommit) -> IngestReceipt:
         await self._require_running(commit.session_id)
         committed_audio: _CommittedAudio | None = None
         async with self._lock:
             self._require_active_locked(commit.session_id)
+            tracked = self._seen_inputs.get(commit.input_id)
+            if tracked is not None:
+                fingerprint = self._fingerprint(
+                    kind=IngestInputKind.AUDIO,
+                    source=commit.source,
+                    timestamp_ms=tracked.timestamp_ms,
+                    format_value=(
+                        f"{tracked.format};turn_id={commit.turn_id or ''};"
+                        f"system_audio_required={str(commit.system_audio_required).lower()}"
+                    ),
+                    body_sha256=tracked.body_sha256,
+                    stage=IngestReceiptStage.COMMITTED,
+                )
+                existing = tracked.fingerprints.get(IngestReceiptStage.COMMITTED)
+                if existing is not None:
+                    if existing != fingerprint:
+                        raise DuplicateIngestInputError(commit.input_id)
+                    receipt = tracked.receipts.get(IngestReceiptStage.COMMITTED)
+                    if receipt is not None:
+                        return receipt
             if self._pending_audio_ids.get(commit.source) != commit.input_id:
                 raise UnknownAudioInputError(commit.input_id)
             if (
@@ -396,9 +537,14 @@ class IngestService:
                 )
             ) is not None and commit.committed_at_ms < last_audio_at_ms:
                 raise IngestInputOutOfOrderError("audio commit precedes its captured input")
-            tracked = self._seen_inputs.get(commit.input_id)
             if tracked is None or tracked.source is not commit.source:
                 raise UnknownAudioInputError(commit.input_id)
+            if (
+                tracked.connection_id is not None
+                and commit.connection_id != tracked.connection_id
+            ):
+                raise UnknownAudioInputError(commit.input_id)
+            tracked.fingerprints[IngestReceiptStage.COMMITTED] = fingerprint
             committed_audio = _CommittedAudio(
                 input_id=commit.input_id,
                 source=commit.source,
@@ -416,14 +562,34 @@ class IngestService:
         except BaseException:
             assert committed_audio is not None
             await self._discard_committed_audio(commit.session_id, committed_audio)
+            await self._release_audio(commit.input_id, commit.source)
+            await self._settle(commit.input_id, accepted=False)
+            await self._discard_provider_audio(commit.source)
             raise
         await self._release_audio(commit.input_id, commit.source)
-        return self._receipt(
+        receipt = self._receipt(
             commit.session_id,
             commit.input_id,
             IngestInputKind.AUDIO,
             stage=IngestReceiptStage.COMMITTED,
         )
+        await self._settle(commit.input_id, accepted=True, receipt=receipt)
+        return receipt
+
+    async def clear_connection(self, connection_id: str) -> None:
+        if not connection_id:
+            return
+        sources: list[AudioSource] = []
+        async with self._lock:
+            for source, input_id in tuple(self._pending_audio_ids.items()):
+                tracked = self._seen_inputs.get(input_id)
+                if tracked is None or tracked.connection_id != connection_id:
+                    continue
+                self._pending_audio_ids.pop(source, None)
+                self._seen_inputs.pop(input_id, None)
+                sources.append(source)
+        for source in sources:
+            await self._discard_provider_audio(source)
 
     async def _consume_asr_results(self, session_id: str) -> None:
         while True:
@@ -478,11 +644,30 @@ class IngestService:
                             "error_type": type(error).__name__,
                         },
                     )
+                    if segment.final:
+                        await self._discard_failed_final(segment)
                     return
                 if self._final_transcript_retry_backoff_ms:
                     await asyncio.sleep(
                         self._final_transcript_retry_backoff_ms / 1_000
                     )
+
+    async def _discard_failed_final(self, segment: TranscriptSegment) -> None:
+        tasks_to_cancel: list[asyncio.Task[None]] = []
+        async with self._lock:
+            committed_audio = self._committed_audio_for_segment_locked(segment)
+            self._consume_committed_audio_locked(segment.source, committed_audio)
+            if committed_audio is not None and committed_audio.turn_id is not None:
+                turn = self._coordinated_turns.pop(committed_audio.turn_id, None)
+                if turn is not None:
+                    tasks_to_cancel.extend(
+                        task
+                        for task in (turn.timeout_task, turn.schedule_task)
+                        if task is not None
+                    )
+        for task in tasks_to_cancel:
+            if task is not asyncio.current_task() and not task.done():
+                task.cancel()
 
     async def _handle_transcript(self, session_id: str, segment: TranscriptSegment) -> None:
         if segment.session_id != session_id:
@@ -673,10 +858,6 @@ class IngestService:
             if turn is None:
                 turn = _CoordinatedVoiceTurn()
                 self._coordinated_turns[commit.turn_id] = turn
-                turn.timeout_task = asyncio.create_task(
-                    self._expire_coordinated_turn(session_id, commit.turn_id, turn),
-                    name=f"ingest-coordinated-turn-timeout:{session_id}:{commit.turn_id}",
-                )
             if commit.source in turn.committed_sources:
                 raise IngestInputOutOfOrderError("audio source was already committed for this turn")
             turn.committed_sources.add(commit.source)
@@ -775,7 +956,18 @@ class IngestService:
         if source is AudioSource.MICROPHONE:
             turn.target_viewer_id = target_viewer_id
             turn.target_persona_id = target_persona_id
-        if not self._coordinated_turn_ready(turn) or turn.schedule_task is not None:
+        if not self._coordinated_turn_ready(turn):
+            if (
+                source is AudioSource.MICROPHONE
+                and turn.system_audio_required
+                and turn.timeout_task is None
+            ):
+                turn.timeout_task = asyncio.create_task(
+                    self._expire_coordinated_turn(session_id, turn_id, turn),
+                    name=f"ingest-coordinated-turn-timeout:{session_id}:{turn_id}",
+                )
+            return []
+        if turn.schedule_task is not None:
             return []
 
         turn.schedule_task = asyncio.create_task(
@@ -823,13 +1015,28 @@ class IngestService:
                     self._active_session_id != session_id
                     or self._coordinated_turns.get(turn_id) is not turn
                     or turn.timeout_task is not asyncio.current_task()
+                    or AudioSource.MICROPHONE not in turn.completed_sources
                 ):
                     return
                 self._coordinated_turns.pop(turn_id, None)
+                event_ids = tuple(turn.event_ids)
+                target_viewer_id = turn.target_viewer_id
+                target_persona_id = turn.target_persona_id
             logger.warning(
-                "coordinated ASR turn expired before all required results arrived",
+                "coordinated ASR turn degraded after required system audio timed out",
                 extra={"session_id": session_id, "turn_id": turn_id},
             )
+            await self._schedule_observation(
+                session_id,
+                trigger_event_ids=event_ids,
+                target_viewer_id=target_viewer_id,
+                target_persona_id=target_persona_id,
+                user_context={
+                    "turn_id": turn_id,
+                    "system_audio_degraded": "true",
+                },
+            )
+            await self._restart_ambient_timer(session_id)
         except asyncio.CancelledError:
             raise
 
@@ -1052,19 +1259,45 @@ class IngestService:
         input_id: str,
         kind: IngestInputKind,
         timestamp_ms: int,
-    ) -> None:
+        format_value: str,
+        body_sha256: str,
+        fingerprint: str,
+    ) -> IngestReceipt | None:
         async with self._lock:
             self._require_active_locked(session_id)
-            self._require_unique_locked(input_id)
+            cached = self._cached_receipt_locked(
+                input_id,
+                IngestReceiptStage.RECEIVED,
+                fingerprint,
+            )
+            if cached is not None:
+                return cached
             last_timestamp = self._timestamp_for(kind)
             if last_timestamp is not None and timestamp_ms < last_timestamp:
                 raise IngestInputOutOfOrderError(f"{kind.value} input is out of order")
-            self._remember_locked(input_id, kind, timestamp_ms)
+            self._remember_locked(
+                input_id,
+                kind,
+                timestamp_ms,
+                format_value=format_value,
+                body_sha256=body_sha256,
+                fingerprint=fingerprint,
+            )
+            return None
 
-    async def _reserve_audio(self, input: AudioInput, *, ended_at_ms: int) -> None:
+    async def _reserve_audio(
+        self,
+        input: AudioInput,
+        *,
+        ended_at_ms: int,
+        fingerprint: str,
+        stage: IngestReceiptStage = IngestReceiptStage.RECEIVED,
+    ) -> IngestReceipt | None:
         async with self._lock:
             self._require_active_locked(input.session_id)
-            self._require_unique_locked(input.input_id)
+            cached = self._cached_receipt_locked(input.input_id, stage, fingerprint)
+            if cached is not None:
+                return cached
             if input.source in self._pending_audio_ids:
                 raise IngestInputOutOfOrderError("the previous audio input is not committed")
             last_audio_at_ms = self._timestamp_for(IngestInputKind.AUDIO, input.source)
@@ -1074,23 +1307,37 @@ class IngestService:
                 input.input_id,
                 IngestInputKind.AUDIO,
                 input.captured_at_ms,
+                format_value=input.format,
+                body_sha256=hashlib.sha256(input.body).hexdigest(),
                 source=input.source,
                 ended_at_ms=ended_at_ms,
+                connection_id=input.connection_id,
+                fingerprint=fingerprint,
+                stage=stage,
             )
             self._pending_audio_ids[input.source] = input.input_id
+            return None
 
     async def _release_audio(self, input_id: str, source: AudioSource) -> None:
         async with self._lock:
             if self._pending_audio_ids.get(source) == input_id:
                 self._pending_audio_ids.pop(source, None)
 
-    async def _settle(self, input_id: str, *, accepted: bool) -> None:
+    async def _settle(
+        self,
+        input_id: str,
+        *,
+        accepted: bool,
+        receipt: IngestReceipt | None = None,
+    ) -> None:
         async with self._lock:
             tracked = self._seen_inputs.get(input_id)
             if tracked is None:
                 return
             if accepted:
                 tracked.accepted = True
+                if receipt is not None:
+                    tracked.receipts[receipt.stage] = receipt
             else:
                 self._seen_inputs.pop(input_id, None)
 
@@ -1108,23 +1355,29 @@ class IngestService:
         if self._active_session_id != session_id:
             raise IngestSessionNotActiveError(session_id, self._active_session_id)
 
-    def _require_unique_locked(self, input_id: str) -> None:
-        if input_id in self._seen_inputs:
-            raise DuplicateIngestInputError(input_id)
-
     def _remember_locked(
         self,
         input_id: str,
         kind: IngestInputKind,
         timestamp_ms: int,
+        *,
+        format_value: str,
+        body_sha256: str,
         source: AudioSource | None = None,
         ended_at_ms: int | None = None,
+        connection_id: str | None = None,
+        fingerprint: str,
+        stage: IngestReceiptStage = IngestReceiptStage.RECEIVED,
     ) -> None:
         self._seen_inputs[input_id] = _TrackedInput(
             kind=kind,
             timestamp_ms=timestamp_ms,
+            format=format_value,
+            body_sha256=body_sha256,
             source=source,
             ended_at_ms=ended_at_ms,
+            connection_id=connection_id,
+            fingerprints={stage: fingerprint},
         )
         while len(self._seen_inputs) > self._max_tracked_input_ids:
             evicted = next(
@@ -1145,6 +1398,23 @@ class IngestService:
             current_floor = self._timestamp_floors.get(floor_key)
             if current_floor is None or tracked.timestamp_ms > current_floor:
                 self._timestamp_floors[floor_key] = tracked.timestamp_ms
+
+    def _cached_receipt_locked(
+        self,
+        input_id: str,
+        stage: IngestReceiptStage,
+        fingerprint: str,
+    ) -> IngestReceipt | None:
+        tracked = self._seen_inputs.get(input_id)
+        if tracked is None:
+            return None
+        if tracked.fingerprints.get(stage) != fingerprint:
+            raise DuplicateIngestInputError(input_id)
+        receipt = tracked.receipts.get(stage)
+        if receipt is None:
+            raise IngestInputOutOfOrderError("the ingest input is still in progress")
+        self._seen_inputs.move_to_end(input_id)
+        return receipt
 
     def _timestamp_for(
         self,
@@ -1176,6 +1446,91 @@ class IngestService:
             stage=stage,
             accepted_at_ms=self._clock.now_ms(),
         )
+
+    @staticmethod
+    def _fingerprint(
+        *,
+        kind: IngestInputKind,
+        source: AudioSource | None,
+        timestamp_ms: int,
+        format_value: str,
+        body_sha256: str,
+        stage: IngestReceiptStage,
+    ) -> str:
+        value = "\0".join(
+            (
+                kind.value,
+                "" if source is None else source.value,
+                str(timestamp_ms),
+                format_value,
+                body_sha256,
+                stage.value,
+            )
+        )
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _input_fingerprint(
+        cls,
+        *,
+        kind: IngestInputKind,
+        source: AudioSource | None,
+        timestamp_ms: int,
+        format_value: str,
+        body: bytes,
+        stage: IngestReceiptStage,
+    ) -> str:
+        return cls._fingerprint(
+            kind=kind,
+            source=source,
+            timestamp_ms=timestamp_ms,
+            format_value=format_value,
+            body_sha256=hashlib.sha256(body).hexdigest(),
+            stage=stage,
+        )
+
+    @classmethod
+    def _audio_fingerprint(
+        cls,
+        input: AudioInput,
+        stage: IngestReceiptStage,
+    ) -> str:
+        format_value = input.format
+        if stage is IngestReceiptStage.COMMITTED:
+            format_value = (
+                f"{format_value};turn_id={input.turn_id or ''};"
+                f"system_audio_required={str(input.system_audio_required).lower()}"
+            )
+        return cls._input_fingerprint(
+            kind=IngestInputKind.AUDIO,
+            source=input.source,
+            timestamp_ms=input.captured_at_ms,
+            format_value=format_value,
+            body=input.body,
+            stage=stage,
+        )
+
+    @staticmethod
+    def _text_format(input: TextInput) -> str:
+        return (
+            "text/plain;"
+            f"viewer={input.target_viewer_id or ''};persona={input.target_persona_id or ''}"
+        )
+
+    async def _discard_provider_audio(self, source: AudioSource) -> None:
+        discard = getattr(self._asr_provider, "discard", None)
+        if discard is None:
+            return
+        try:
+            await discard(source)
+        except Exception as error:
+            logger.warning(
+                "failed to discard pending ASR audio",
+                extra={
+                    "audio_source": source.value,
+                    "error_type": type(error).__name__,
+                },
+            )
 
     @staticmethod
     def _parse_audio_format(value: str) -> tuple[int, int, int]:

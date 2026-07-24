@@ -120,7 +120,11 @@ AI 虚拟直播间让用户在没有真实观众的情况下获得类似直播�
 
 ## 5. MVP 范围
 
-当前仓库已将 Electron/React 桌面端、FastAPI/SQLite、StepFun ASR、OpenAI-compatible Provider 与 Viewer runtime 统一到 protocol v3、Audience contract v2 和 workspace v3。PersonaTemplate 作为可复用行为模板，ViewerInstance 作为仅属于单次直播的独立观众身份；实现状态以自动化合同、确定性 replay 和本节验收项共同判定。
+当前仓库的 HTTP/API 合同保持 protocol v3，Electron 与 FastAPI 的实时 WebSocket 数据面
+使用 realtime protocol v4，并保留一个发布周期的 v3 兼容路径；二进制输入使用独立的
+`ADVX-BIN/3`。Audience contract v2 和 workspace v3 保持不变。PersonaTemplate 作为
+可复用行为模板，ViewerInstance 作为仅属于单次直播的独立观众身份；实现状态以自动化
+合同、确定性 replay 和本节验收项共同判定。
 
 ### 5.1 必须具备
 

@@ -37,6 +37,9 @@ class IngestGateway:
     async def submit_audio(self, input: AudioInput) -> IngestReceipt:
         return await self._require_port().submit_audio(input)
 
+    async def submit_audio_and_commit(self, input: AudioInput) -> IngestReceipt:
+        return await self._require_port().submit_audio_and_commit(input)
+
     async def commit_audio(self, commit: AudioCommit) -> IngestReceipt:
         return await self._require_port().commit_audio(commit)
 
@@ -50,6 +53,9 @@ class IngestGateway:
 
     async def submit_frame(self, input: FrameInput) -> IngestReceipt:
         return await self._require_port().submit_frame(input)
+
+    async def clear_connection(self, connection_id: str) -> None:
+        await self._require_port().clear_connection(connection_id)
 
     def _require_port(self) -> IngestPort:
         if self._port is None:

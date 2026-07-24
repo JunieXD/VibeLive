@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 from pathlib import Path
 
 import httpx
@@ -288,5 +289,5 @@ def _request() -> ViewerGenerationRequest:
         visual_input_mode=ViewerVisualInputMode.TEXT_ONLY,
         viewer_private_state=ViewerPrivateState(),
         room_memory_slice=RoomMemorySlice(room_id="room", memory_revision=0),
-        deadline_at_ms=10_000,
+        deadline_at_ms=time.time_ns() // 1_000_000 + 60_000,
     )

@@ -112,11 +112,12 @@ describe('audio channel state', () => {
       appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, end)
     }
 
-    const snapshot = pendingSystemAudioSnapshot(systemAudio, 70_000)
+    const snapshot = pendingSystemAudioSnapshot(systemAudio, 70_000, 0)
 
-    expect(snapshot?.capturedAtMs).toBe(10_000)
+    expect(systemAudio.bufferedChunks[0]?.startedAtMs).toBe(10_000)
+    expect(snapshot?.capturedAtMs).toBe(40_000)
     expect(snapshot?.endedAtMs).toBe(70_000)
-    expect(snapshot?.chunks.reduce((total, chunk) => total + chunk.length, 0)).toBe(60_000)
+    expect(snapshot?.chunks.reduce((total, chunk) => total + chunk.length, 0)).toBe(30_000)
   })
 
   it('submits only system audio that was not part of the previous microphone turn', () => {
@@ -124,16 +125,30 @@ describe('audio channel state', () => {
     appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, 10_000)
     appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, 20_000)
 
-    const first = pendingSystemAudioSnapshot(systemAudio, 20_000)
+    const first = pendingSystemAudioSnapshot(systemAudio, 20_000, 10_000)
     markSystemAudioSubmitted(systemAudio, first?.endedAtMs ?? 0)
     appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, 30_000)
-    const second = pendingSystemAudioSnapshot(systemAudio, 30_000)
+    const second = pendingSystemAudioSnapshot(systemAudio, 30_000, 25_000)
 
     expect(first?.capturedAtMs).toBe(0)
     expect(second?.capturedAtMs).toBe(20_000)
     expect(second?.chunks.reduce((total, chunk) => total + chunk.length, 0)).toBe(10_000)
 
     clearSystemAudioBuffer(systemAudio)
-    expect(pendingSystemAudioSnapshot(systemAudio, 30_000)).toBeNull()
+    expect(pendingSystemAudioSnapshot(systemAudio, 30_000, 25_000)).toBeNull()
+  })
+
+  it('bounds a turn snapshot by the last submission, microphone pre-roll and 30 seconds', () => {
+    const systemAudio = createAudioChannelState('system_audio')
+    for (let end = 10_000; end <= 100_000; end += 10_000) {
+      appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, end)
+    }
+    markSystemAudioSubmitted(systemAudio, 65_000)
+
+    const snapshot = pendingSystemAudioSnapshot(systemAudio, 100_000, 82_000)
+
+    expect(snapshot?.capturedAtMs).toBe(72_000)
+    expect(snapshot?.endedAtMs).toBe(100_000)
+    expect(snapshot?.chunks.reduce((total, chunk) => total + chunk.length, 0)).toBe(28_000)
   })
 })

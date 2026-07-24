@@ -47,10 +47,18 @@ class ProviderRuntimeSpec(RuntimeContractModel):
 class RuntimeSettings(RuntimeContractModel):
     frame_bundle: FrameBundleSettings = Field(default_factory=FrameBundleSettings)
     viewer_visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES
-    max_in_flight_viewer_requests: int = Field(default=12, ge=1, le=32)
-    viewer_request_ttl_ms: int = Field(default=900_000, ge=1)
-    viewer_queue_capacity: int = Field(default=8_192, ge=1, le=65_536)
-    observation_merge_window_ms: int = Field(default=0, ge=0)
+    max_in_flight_viewer_requests: int = Field(default=6, ge=1, le=32)
+    viewer_request_ttl_ms: int = Field(default=30_000, ge=1)
+    viewer_queue_capacity: int = Field(default=64, ge=1, le=65_536)
+    observation_merge_window_ms: int = Field(default=1_000, ge=0)
+    public_context_window_ms: int = Field(default=60_000, ge=1)
+    public_context_max_events: int = Field(default=48, ge=1, le=128)
+    replyable_event_window_ms: int = Field(default=30_000, ge=1)
+    max_replyable_events: int = Field(default=8, ge=0, le=32)
+    viewer_user_speaker_budget: int = Field(default=6, ge=0, le=32)
+    viewer_screen_speaker_budget: int = Field(default=4, ge=0, le=32)
+    viewer_ambient_speaker_budget: int = Field(default=2, ge=0, le=32)
+    max_direct_frame_age_ms: int = Field(default=30_000, ge=1)
     screen_change_threshold: float = Field(default=0.2, ge=0, le=1)
     screen_change_cooldown_ms: int = Field(default=2_000, ge=0)
     ambient_tick_cooldown_ms: int = Field(default=30_000, ge=1)
@@ -310,6 +318,8 @@ class ViewerGenerationRequest(RuntimeContractModel):
     input_event_ids: list[str] = Field(default_factory=list, max_length=128)
     public_context_event_ids: list[str] = Field(default_factory=list, max_length=4_096)
     public_context: list[ViewerPublicEvent] = Field(default_factory=list, max_length=4_096)
+    reply_context_event_ids: list[str] = Field(default_factory=list, max_length=32)
+    reply_context: list[ViewerPublicEvent] = Field(default_factory=list, max_length=32)
     conversation_history_summary: str | None = Field(default=None, max_length=6_000)
     viewer_private_state: ViewerPrivateState
     room_memory_slice: RoomMemorySlice

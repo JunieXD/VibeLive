@@ -98,7 +98,11 @@ class ViewerBarragePipeline:
         request: ViewerGenerationRequest,
         evidence_refs: list[EvidenceRef],
     ) -> bool:
-        event_ids = set(request.input_event_ids) | set(request.public_context_event_ids)
+        event_ids = (
+            set(request.input_event_ids)
+            | set(request.public_context_event_ids)
+            | set(request.reply_context_event_ids)
+        )
         frame_count = len(request.frame_bundle.frames) if request.frame_bundle is not None else 0
         for evidence in evidence_refs:
             if evidence.source is EvidenceSource.EVENT:

@@ -6,6 +6,7 @@ import {
   cameraPreviewTransform,
   createWaitingVisualBatchSink,
   deliverAndReleaseVisualBatch,
+  deliverVisualFrames,
   encodeJpegWithinTarget,
   grayscaleMeanAbsoluteDifference,
   grayscaleSignature,
@@ -212,6 +213,43 @@ describe('visual batching and settings', () => {
 
     await expect(delivery).rejects.toMatchObject({ name: 'AbortError' })
     expect(slowFrames[0].blob).toBeNull()
+  })
+
+  it('continues later frames but surfaces a per-frame failure and releases every Blob', async () => {
+    const frames = [createFrame(100), createFrame(200)]
+    const rejected = new Error('frame rejected')
+    const submit = vi.fn()
+      .mockRejectedValueOnce(rejected)
+      .mockResolvedValueOnce(undefined)
+
+    await expect(deliverAndReleaseVisualBatch(
+      {
+        consume: (batch, signal) => deliverVisualFrames(batch.frames, signal, submit)
+      },
+      { batchId: 'batch-continue', createdAt: 300, frames },
+      new AbortController().signal
+    )).rejects.toBe(rejected)
+
+    expect(submit).toHaveBeenCalledTimes(2)
+    expect(frames.every((frame) => frame.blob === null)).toBe(true)
+  })
+
+  it('stops the remainder on disconnect and still releases every Blob', async () => {
+    const frames = [createFrame(100), createFrame(200)]
+    const disconnected = Object.assign(new Error('connection closed'), {
+      code: 'connection_closed'
+    })
+    const submit = vi.fn().mockRejectedValue(disconnected)
+
+    await expect(deliverAndReleaseVisualBatch(
+      {
+        consume: (batch, signal) => deliverVisualFrames(batch.frames, signal, submit)
+      },
+      { batchId: 'batch-disconnected', createdAt: 300, frames },
+      new AbortController().signal
+    )).rejects.toBe(disconnected)
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(frames.every((frame) => frame.blob === null)).toBe(true)
   })
 
   it('restores only versioned valid settings and safely falls back', () => {

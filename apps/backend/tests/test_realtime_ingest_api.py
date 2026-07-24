@@ -28,11 +28,16 @@ from advx_backend.main import create_app
 LOCAL_TOKEN = "test-local-token"
 
 
-def hello() -> dict[str, object]:
+def hello(protocol_version: int = 3) -> dict[str, object]:
     return {
         "type": "client.hello",
-        "protocol_version": 3,
+        "protocol_version": protocol_version,
         "token": LOCAL_TOKEN,
+        **(
+            {"supported_protocol_versions": [4, 3]}
+            if protocol_version == 4
+            else {}
+        ),
     }
 
 
@@ -44,6 +49,8 @@ def envelope(
     body: bytes,
     source: AudioSource | None = None,
     version: int = 2,
+    turn_id: str | None = None,
+    system_audio_required: bool = False,
 ) -> bytes:
     return encode_binary_envelope(
         BinaryInputEnvelope(
@@ -56,6 +63,8 @@ def envelope(
                 captured_at_ms=100,
                 format=format_value,
                 body_length=len(body),
+                turn_id=turn_id,
+                system_audio_required=system_audio_required,
             ),
             body=body,
         )
@@ -66,12 +75,20 @@ class RecordingIngestPort:
     def __init__(self, *, reject_inactive: bool = False) -> None:
         self.reject_inactive = reject_inactive
         self.inputs: list[TextInput | AudioInput | AudioCommit | FrameInput] = []
+        self.cleared_connection_ids: list[str] = []
 
     async def submit_text(self, input: TextInput) -> IngestReceipt:
         return self._record(input, IngestInputKind.TEXT)
 
     async def submit_audio(self, input: AudioInput) -> IngestReceipt:
         return self._record(input, IngestInputKind.AUDIO)
+
+    async def submit_audio_and_commit(self, input: AudioInput) -> IngestReceipt:
+        return self._record(
+            input,
+            IngestInputKind.AUDIO,
+            stage=IngestReceiptStage.COMMITTED,
+        )
 
     async def commit_audio(self, commit: AudioCommit) -> IngestReceipt:
         return self._record(
@@ -82,6 +99,17 @@ class RecordingIngestPort:
 
     async def submit_frame(self, input: FrameInput) -> IngestReceipt:
         return self._record(input, IngestInputKind.FRAME)
+
+    async def clear_connection(self, connection_id: str) -> None:
+        self.cleared_connection_ids.append(connection_id)
+
+    async def notify_voice_activity(
+        self,
+        session_id: str,
+        occurred_at_ms: int,
+        source: AudioSource = AudioSource.MICROPHONE,
+    ) -> None:
+        del session_id, occurred_at_ms, source
 
     def _record(
         self,
@@ -154,6 +182,58 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
     assert ingest.inputs[2].body == frame_body
     assert ingest.inputs[2].mime_type == "image/webp"
     assert ingest.inputs[2].change_score == 0.375
+    assert len(ingest.cleared_connection_ids) == 1
+
+
+def test_realtime_v4_negotiates_and_atomically_commits_audio(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
+    ingest = RecordingIngestPort()
+    runtime.ingest_gateway.configure(ingest)
+    app = create_app(runtime=runtime)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.send_json(hello(4))
+            ready = websocket.receive_json()
+            websocket.send_bytes(
+                envelope(
+                    media_type=BinaryMediaType.AUDIO,
+                    input_id="audio-v4",
+                    format_value="audio/pcm;rate=16000;channels=1;format=s16le",
+                    body=b"\x00\x00",
+                    source=AudioSource.MICROPHONE,
+                    version=3,
+                    turn_id="turn-v4",
+                    system_audio_required=True,
+                )
+            )
+            ack = websocket.receive_json()
+
+    assert ready["protocol_version"] == 4
+    assert ack["protocol_version"] == 4
+    assert ack["stage"] == "committed"
+    assert len(ingest.inputs) == 1
+    assert isinstance(ingest.inputs[0], AudioInput)
+    assert ingest.inputs[0].turn_id == "turn-v4"
+    assert ingest.inputs[0].system_audio_required
+
+
+def test_binary_v3_uses_json_metadata_and_round_trips_coordinated_audio() -> None:
+    payload = envelope(
+        media_type=BinaryMediaType.AUDIO,
+        input_id="audio-v4",
+        format_value="audio/pcm;rate=16000;channels=1;format=s16le",
+        body=b"\x00\x00",
+        source=AudioSource.MICROPHONE,
+        version=3,
+        turn_id="turn-v4",
+        system_audio_required=True,
+    )
+    decoded = decode_binary_envelope(payload)
+
+    assert payload[:5] == b"ADVX\x03"
+    assert decoded.header.turn_id == "turn-v4"
+    assert decoded.header.system_audio_required
 
 
 def test_binary_v2_source_and_v1_compatibility() -> None:

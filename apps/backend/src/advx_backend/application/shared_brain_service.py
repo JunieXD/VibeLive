@@ -1,7 +1,10 @@
+import asyncio
 import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from threading import Lock
 from typing import Protocol
+from weakref import WeakKeyDictionary
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -59,6 +62,59 @@ class LegacyMemeImportResult:
     created: bool
 
 
+class _RoomLockRegistry:
+    """A fixed set of locks that serializes every room without unbounded growth."""
+
+    def __init__(self, size: int = 64) -> None:
+        self._locks = tuple(asyncio.Lock() for _ in range(size))
+
+    def lock_for(self, room_id: str) -> asyncio.Lock:
+        digest = hashlib.sha256(room_id.encode("utf-8")).digest()
+        return self._locks[int.from_bytes(digest[:8], "big") % len(self._locks)]
+
+
+class _LoopOwnedRoomLockRegistry:
+    """Own room locks on one active event loop and replace them after shutdown."""
+
+    def __init__(self) -> None:
+        self._guard = Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._locks: _RoomLockRegistry | None = None
+
+    def for_running_loop(self) -> _RoomLockRegistry:
+        loop = asyncio.get_running_loop()
+        with self._guard:
+            if self._loop is not None and self._loop is not loop:
+                if not self._loop.is_closed():
+                    raise RuntimeError(
+                        "a memory session factory cannot be shared across active "
+                        "event loops"
+                    )
+                self._loop = None
+                self._locks = None
+            if self._locks is None:
+                self._loop = loop
+                self._locks = _RoomLockRegistry()
+            return self._locks
+
+
+_MEMORY_COMMIT_LOCKS_BY_FACTORY: WeakKeyDictionary[
+    object, _LoopOwnedRoomLockRegistry
+] = (
+    WeakKeyDictionary()
+)
+_MEMORY_COMMIT_LOCKS_GUARD = Lock()
+
+
+def _memory_commit_locks_for(session_factory: object) -> _LoopOwnedRoomLockRegistry:
+    with _MEMORY_COMMIT_LOCKS_GUARD:
+        registry = _MEMORY_COMMIT_LOCKS_BY_FACTORY.get(session_factory)
+        if registry is None:
+            registry = _LoopOwnedRoomLockRegistry()
+            _MEMORY_COMMIT_LOCKS_BY_FACTORY[session_factory] = registry
+        return registry
+
+
 class SharedBrainService:
     def __init__(
         self,
@@ -76,6 +132,7 @@ class SharedBrainService:
         self._room_service = room_service
         self._room_event_store = room_event_store
         self._observation_provenance = observation_provenance
+        self._memory_commit_lock_owner = _memory_commit_locks_for(session_factory)
 
     async def list_memories(self, room_id: str) -> tuple[RoomLongTermMemory, ...]:
         async with self._session_factory() as session:
@@ -192,17 +249,31 @@ class SharedBrainService:
         candidate: RoomMemoryCandidate,
     ) -> MemoryCommitResult:
         async def commit() -> MemoryCommitResult:
-            async with self._session_factory() as session:
-                service = RoomMemoryService(
-                    repository=SQLiteRoomMemoryServiceRepository(session),
-                    event_reader=SQLiteRoomEventReader(session),
-                    session_fence=_AcceptedFence(),
-                    clock=self._clock,
-                )
-                result = await service.commit_candidate(candidate)
-                if result.accepted:
-                    await session.commit()
-                return result
+            locks = self._memory_commit_lock_owner.for_running_loop()
+            async with locks.lock_for(candidate.room_id):
+                for attempt in range(2):
+                    async with self._session_factory() as session:
+                        service = RoomMemoryService(
+                            repository=SQLiteRoomMemoryServiceRepository(session),
+                            event_reader=SQLiteRoomEventReader(session),
+                            session_fence=_AcceptedFence(),
+                            clock=self._clock,
+                        )
+                        try:
+                            result = await service.commit_candidate(candidate)
+                            if result.accepted:
+                                await session.commit()
+                            return result
+                        except RuntimePersistenceConflictError as error:
+                            await session.rollback()
+                            if str(error) != "room memory head is stale":
+                                raise
+                            if attempt == 1:
+                                return MemoryCommitResult(
+                                    accepted=False,
+                                    reason="stale_head",
+                                )
+                raise AssertionError("memory commit retry loop did not return")
 
         accepted, result = await self._execute_if_accepting(candidate, commit)
         if not accepted:

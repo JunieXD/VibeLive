@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
@@ -20,6 +20,7 @@ from advx_backend.application.viewer_runtime import (
 from advx_backend.contracts.debug import ObservationWaveStatus
 from advx_backend.contracts.viewer_runtime import (
     CanonicalRuntimeSpec,
+    RuntimeSettings,
     ViewerRuntimeTelemetry,
 )
 from advx_backend.domain.crowd_decision import CrowdDecision, DecisionSource
@@ -130,6 +131,8 @@ class FrozenWaveRuntime:
     canonical_runtime_spec: CanonicalRuntimeSpec
     public_context: tuple[RoomEvent, ...]
     public_context_event_ids: tuple[str, ...]
+    reply_context: tuple[RoomEvent, ...]
+    reply_context_event_ids: tuple[str, ...]
     user_context: tuple[tuple[str, str], ...]
     working_memory: RoomWorkingMemory
     room_memory_slice: RoomMemorySlice
@@ -260,21 +263,25 @@ class ViewerRuntimeCoordinator:
                 )
                 return ViewerCoordinatorResult(wave=core_wave)
 
+            public_context, reply_context = self._select_contexts(
+                observation,
+                committed.spec.settings,
+            )
+            context_event_ids = list(
+                dict.fromkeys(event.event_id for event in public_context)
+            )
+            core_wave = core_wave.model_copy(update={"event_ids": context_event_ids})
             memory_slice = await self._read_memory_slice(core_wave)
             if memory_slice is None:
                 raise ReactionPreparationError(
                     "room memory could not be read before model dispatch"
                 )
-            public_context, history_summary = await self._compact_history(
-                observation,
-                committed,
-            )
             runtime = self._freeze_runtime(
                 committed.spec,
                 observation,
                 memory_slice,
                 public_context=public_context,
-                history_summary=history_summary,
+                reply_context=reply_context,
             )
             wave = await self._prepare_visual_wave(core_wave, runtime)
             if wave is None:
@@ -375,7 +382,7 @@ class ViewerRuntimeCoordinator:
         committed: CommittedRuntime,
         proposed_policy: _WavePolicyState | None,
     ) -> ViewerCoordinatorResult:
-        assessment = self._independent_assessment(wave, committed)
+        assessment = self._independent_assessment(wave, committed, runtime)
         decision = self._decide_speakers(
             wave=wave,
             committed=committed,
@@ -478,22 +485,48 @@ class ViewerRuntimeCoordinator:
         committed: CommittedRuntime,
     ) -> CrowdDecision:
         eligible = [
-            viewer.viewer_instance_id
+            viewer
             for viewer in committed.pool.viewers
             if viewer.is_active() and not viewer.is_muted(wave.created_at_ms)
         ]
-        if ObservationTrigger.AMBIENT_TICK in wave.triggers:
-            by_id = {viewer.viewer_instance_id: viewer for viewer in committed.pool.viewers}
-            selected = sorted(
-                eligible,
-                key=lambda viewer_id: (
-                    by_id[viewer_id].private_state.last_spoke_at_ms is not None,
-                    by_id[viewer_id].private_state.last_spoke_at_ms or 0,
-                    viewer_id,
-                ),
-            )[:2]
+        by_id = {viewer.viewer_instance_id: viewer for viewer in eligible}
+
+        def least_recent(viewer) -> tuple[bool, int, str]:
+            return (
+                viewer.private_state.last_spoke_at_ms is not None,
+                viewer.private_state.last_spoke_at_ms or 0,
+                viewer.viewer_instance_id,
+            )
+        if wave.target_viewer_id is not None:
+            target = by_id.get(wave.target_viewer_id)
+            selected = [] if target is None else [target.viewer_instance_id]
+        elif wave.target_persona_id is not None:
+            persona_viewers = [
+                viewer for viewer in eligible if viewer.persona_id == wave.target_persona_id
+            ]
+            selected = [
+                viewer.viewer_instance_id
+                for viewer in sorted(persona_viewers, key=least_recent)[:1]
+            ]
         else:
-            selected = eligible
+            settings = getattr(
+                getattr(committed, "spec", None),
+                "settings",
+                None,
+            ) or RuntimeSettings()
+            if any(
+                trigger in {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
+                for trigger in wave.triggers
+            ):
+                budget = settings.viewer_user_speaker_budget
+            elif ObservationTrigger.AMBIENT_TICK in wave.triggers:
+                budget = settings.viewer_ambient_speaker_budget
+            else:
+                budget = settings.viewer_screen_speaker_budget
+            selected = [
+                viewer.viewer_instance_id
+                for viewer in sorted(eligible, key=least_recent)[:budget]
+            ]
         return CrowdDecision(
             decision_id=f"autonomous-{wave.observation_id}",
             room_id=wave.room_id,
@@ -511,11 +544,17 @@ class ViewerRuntimeCoordinator:
             expires_at_ms=wave.deadline_at_ms,
         )
 
-    @staticmethod
     def _independent_assessment(
+        self,
         wave: ObservationWave,
         committed: CommittedRuntime,
+        runtime: FrozenWaveRuntime | None = None,
     ) -> SceneAssessment:
+        replyable_event_ids = (
+            list(runtime.reply_context_event_ids)
+            if runtime is not None
+            else list(wave.event_ids)[-8:]
+        )
         return SceneAssessment(
             assessment_id=f"autonomous-{wave.observation_id}",
             room_id=wave.room_id,
@@ -527,7 +566,7 @@ class ViewerRuntimeCoordinator:
             emotional_intensity=0.0,
             topics=[],
             emotional_tone=[],
-            replyable_event_ids=list(wave.event_ids),
+            replyable_event_ids=replyable_event_ids,
             evidence_event_ids=list(wave.trigger_event_ids),
             evidence_frame_indexes=list(
                 range(0 if wave.frame_bundle is None else len(wave.frame_bundle.frames))
@@ -610,11 +649,35 @@ class ViewerRuntimeCoordinator:
             session_id=observation.session_id,
             frames=observation.frames,
         )
+        trigger_frame_ids = list(self._trigger_frame_ids(observation))
         selected = select_frame_bundle(
             frames=frames,
             settings=settings.frame_bundle,
             now_ms=observation.created_at_ms,
         )
+        selected_by_id = {item.frame_id: item for item in selected}
+        trigger_frames = [
+            item
+            for item in frames
+            if item.frame_id in trigger_frame_ids and item.frame_id not in selected_by_id
+        ]
+        if trigger_frames:
+            combined = sorted(
+                [*selected, *trigger_frames],
+                key=lambda item: (item.captured_at_ms, item.frame_id),
+            )
+            trigger_ids = set(trigger_frame_ids)
+            forced = [item for item in combined if item.frame_id in trigger_ids]
+            remaining = settings.frame_bundle.frame_bundle_size - len(forced)
+            ordinary = [
+                item for item in combined if item.frame_id not in trigger_ids
+            ][-max(0, remaining) :]
+            selected = tuple(
+                sorted(
+                    [*forced[: settings.frame_bundle.frame_bundle_size], *ordinary],
+                    key=lambda item: (item.captured_at_ms, item.frame_id),
+                )
+            )
         selected = tuple(
             item.model_copy(update={"frame_index": index}) for index, item in enumerate(selected)
         )
@@ -629,7 +692,6 @@ class ViewerRuntimeCoordinator:
         )
         event_ids = list(dict.fromkeys(event.event_id for event in observation.room_events))
         trigger_event_ids = list(observation.trigger_event_ids)
-        trigger_frame_ids = list(self._trigger_frame_ids(observation))
         delta_events = self._delta_events(observation)
         (
             event_target_viewer_id,
@@ -694,7 +756,12 @@ class ViewerRuntimeCoordinator:
         )
 
         has_real_input = any(
-            trigger in {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
+            trigger
+            in {
+                ObservationTrigger.USER_TEXT,
+                ObservationTrigger.FINAL_VOICE,
+                ObservationTrigger.SCREEN_CHANGE,
+            }
             for trigger in wave.triggers
         )
         if has_real_input:
@@ -933,7 +1000,23 @@ class ViewerRuntimeCoordinator:
             # Text and final ASR input must remain speakable while capture is
             # still warming up or a frame cannot be decoded.
             if wave.frame_bundle is not None:
-                return wave
+                cutoff = wave.created_at_ms - runtime.settings.max_direct_frame_age_ms
+                retained = [
+                    frame
+                    for frame in wave.frame_bundle.frames
+                    if frame.captured_at_ms >= cutoff
+                    or frame.frame_id in wave.trigger_frame_ids
+                ]
+                if retained:
+                    bundle = wave.frame_bundle.model_copy(
+                        update={
+                            "frames": [
+                                frame.model_copy(update={"frame_index": index})
+                                for index, frame in enumerate(retained)
+                            ]
+                        }
+                    )
+                    return wave.model_copy(update={"frame_bundle": bundle})
             return wave.model_copy(
                 update={
                     "visual_input_mode": ViewerVisualInputMode.TEXT_ONLY,
@@ -983,13 +1066,16 @@ class ViewerRuntimeCoordinator:
         memory_slice: RoomMemorySlice,
         *,
         public_context: tuple[RoomEvent, ...],
-        history_summary: str | None,
+        reply_context: tuple[RoomEvent, ...],
     ) -> FrozenWaveRuntime:
         event_ids = tuple(dict.fromkeys(event.event_id for event in public_context))
+        reply_event_ids = tuple(dict.fromkeys(event.event_id for event in reply_context))
         return FrozenWaveRuntime(
             canonical_runtime_spec=spec,
             public_context=public_context,
             public_context_event_ids=event_ids,
+            reply_context=reply_context,
+            reply_context_event_ids=reply_event_ids,
             user_context=tuple(sorted(observation.user_context.items())),
             working_memory=RoomWorkingMemory(
                 room_id=spec.room.room_id,
@@ -1002,8 +1088,133 @@ class ViewerRuntimeCoordinator:
                 updated_at_ms=observation.created_at_ms,
             ),
             room_memory_slice=memory_slice,
-            conversation_history_summary=history_summary,
+            conversation_history_summary=None,
         )
+
+    @staticmethod
+    def _select_contexts(
+        observation: Observation,
+        settings: object,
+    ) -> tuple[tuple[RoomEvent, ...], tuple[RoomEvent, ...]]:
+        trigger_ids = set(observation.trigger_event_ids)
+        cutoff = observation.created_at_ms - settings.public_context_window_ms
+
+        def category(event: RoomEvent) -> str | None:
+            if event.source_type in {RoomEventSource.USER_TEXT, RoomEventSource.USER_VOICE}:
+                return "user"
+            if event.source_type is RoomEventSource.SCREEN_OBSERVATION:
+                return "screen"
+            if (
+                event.source_type is RoomEventSource.SYSTEM_EVENT
+                and event.payload.get("event") == "system_audio_transcript"
+            ):
+                return "system_audio"
+            return None
+
+        forced = [
+            event
+            for event in observation.room_events
+            if event.event_id in trigger_ids
+            and event.source_type is not RoomEventSource.AUDIENCE_BARRAGE
+        ]
+        forced_ids = {event.event_id for event in forced}
+        selected_by_category: dict[str, list[RoomEvent]] = {
+            "user": [],
+            "system_audio": [],
+            "screen": [],
+        }
+        forced_counts = {key: 0 for key in selected_by_category}
+        for event in forced:
+            event_category = category(event)
+            if event_category is not None:
+                forced_counts[event_category] += 1
+
+        for event in reversed(observation.room_events):
+            event_category = category(event)
+            if (
+                event.event_id in forced_ids
+                or event.created_at_ms < cutoff
+                or event_category is None
+                or len(selected_by_category[event_category])
+                >= max(0, 16 - forced_counts[event_category])
+            ):
+                continue
+            selected_by_category[event_category].append(event)
+
+        ordinary = [
+            *forced,
+            *(event for events in selected_by_category.values() for event in events),
+        ]
+        ordinary.sort(key=lambda event: (event.sequence, event.event_id))
+        if len(ordinary) > settings.public_context_max_events:
+            forced_ordered = [
+                event for event in ordinary if event.event_id in forced_ids
+            ][: settings.public_context_max_events]
+            remaining = settings.public_context_max_events - len(forced_ordered)
+            non_forced = [
+                event for event in ordinary if event.event_id not in forced_ids
+            ][-remaining:] if remaining else []
+            ordinary = sorted(
+                [*forced_ordered, *non_forced],
+                key=lambda event: (event.sequence, event.event_id),
+            )
+
+        reply_cutoff = observation.created_at_ms - settings.replyable_event_window_ms
+        forced_reply = [
+            event
+            for event in observation.room_events
+            if event.event_id in trigger_ids
+            and event.source_type is RoomEventSource.AUDIENCE_BARRAGE
+        ]
+        forced_reply_ids = {event.event_id for event in forced_reply}
+        reply_candidates = [
+            event
+            for event in observation.room_events
+            if event.source_type is RoomEventSource.AUDIENCE_BARRAGE
+            and event.created_at_ms >= reply_cutoff
+            and event.event_id not in forced_reply_ids
+        ]
+        reply_limit = settings.max_replyable_events
+        reply_context = forced_reply[:reply_limit]
+        remaining_reply_slots = reply_limit - len(reply_context)
+        if remaining_reply_slots:
+            reply_context.extend(reply_candidates[-remaining_reply_slots:])
+        if reply_context and reply_limit > 1:
+            newest = reply_context[-1]
+            parent_id = None
+            target = newest.payload.get("target")
+            if (
+                isinstance(target, Mapping)
+                and target.get("kind") == "event"
+                and isinstance(target.get("event_id"), str)
+            ):
+                parent_id = target.get("event_id")
+            evidence_refs = newest.payload.get("evidence_refs")
+            if parent_id is None and isinstance(evidence_refs, tuple):
+                for reference in evidence_refs:
+                    if (
+                        isinstance(reference, Mapping)
+                        and reference.get("source") == "event"
+                        and isinstance(reference.get("event_id"), str)
+                    ):
+                        parent_id = reference.get("event_id")
+                        break
+            parent = next(
+                (
+                    event
+                    for event in reversed(observation.room_events)
+                    if event.event_id == parent_id
+                    and event.source_type is RoomEventSource.AUDIENCE_BARRAGE
+                    and event.created_at_ms >= reply_cutoff
+                ),
+                None,
+            )
+            if parent is not None and all(
+                event.event_id != parent.event_id for event in reply_context
+            ):
+                reply_context = [parent, *reply_context[-(reply_limit - 1) :]]
+        reply_context.sort(key=lambda event: (event.sequence, event.event_id))
+        return tuple(ordinary), tuple(reply_context)
 
     async def _compact_history(
         self,
@@ -1310,6 +1521,8 @@ class ViewerRuntimeCoordinator:
             triggers.append(ObservationTrigger.USER_TEXT)
         if RoomEventSource.USER_VOICE in sources:
             triggers.append(ObservationTrigger.FINAL_VOICE)
+        if RoomEventSource.SCREEN_OBSERVATION in sources:
+            triggers.append(ObservationTrigger.SCREEN_CHANGE)
         if observation.user_context.get("ambient") == "true":
             triggers.append(ObservationTrigger.AMBIENT_TICK)
         return triggers

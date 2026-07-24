@@ -1,6 +1,8 @@
 import asyncio
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass
+from uuid import uuid4
 
 from anyio import CancelScope
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -42,8 +44,9 @@ from advx_backend.contracts.binary import (
     UnsupportedBinaryVersionError,
     decode_binary_envelope,
 )
-from advx_backend.contracts.protocol import PROTOCOL_VERSION
 from advx_backend.contracts.realtime import (
+    REALTIME_PROTOCOL_VERSION,
+    SUPPORTED_REALTIME_PROTOCOL_VERSIONS,
     AsrTranscriptEvent,
     BackendPong,
     BackendReady,
@@ -73,6 +76,10 @@ from advx_backend.infrastructure.security.local_token import local_token_matches
 HANDSHAKE_TIMEOUT_SECONDS = 5.0
 MAX_MESSAGE_BYTES = 16_384
 logger = logging.getLogger(__name__)
+_connection_protocol_version: ContextVar[int] = ContextVar(
+    "realtime_protocol_version",
+    default=REALTIME_PROTOCOL_VERSION,
+)
 
 
 @dataclass(frozen=True)
@@ -108,11 +115,15 @@ def create_realtime_router(
         barrage_sender: asyncio.Task[None] | None = None
         viewer_sender: asyncio.Task[None] | None = None
         transcript_sender: asyncio.Task[None] | None = None
+        connection_id = uuid4().hex
+        protocol_token = None
         send_lock = asyncio.Lock()
         try:
             hello = await _receive_hello(websocket, local_token=local_token)
             if hello is None:
                 return
+            negotiated_version = _negotiate_protocol_version(hello)
+            protocol_token = _connection_protocol_version.set(negotiated_version)
 
             subscription = await broker.subscribe()
             barrage_subscription = await broker.subscribe_barrages()
@@ -121,7 +132,10 @@ def create_realtime_router(
             current = await session_service.status()
             await _send_message(
                 websocket,
-                BackendReady(session=SessionSnapshot.from_domain(current)),
+                BackendReady(
+                    protocol_version=negotiated_version,
+                    session=SessionSnapshot.from_domain(current),
+                ),
                 send_lock=send_lock,
             )
             status_sender = asyncio.create_task(
@@ -180,9 +194,11 @@ def create_realtime_router(
                             message,
                             ingest_gateway=ingest_gateway,
                             send_lock=send_lock,
+                            protocol_version=negotiated_version,
+                            connection_id=connection_id,
                         )
                         continue
-                    if message.protocol_version != PROTOCOL_VERSION:
+                    if message.protocol_version != negotiated_version:
                         violation = ProtocolViolation(
                             code=RealtimeProtocolErrorCode.VERSION_MISMATCH,
                             message="The requested protocol version is not supported.",
@@ -217,6 +233,8 @@ def create_realtime_router(
                             message,
                             ingest_gateway=ingest_gateway,
                             send_lock=send_lock,
+                            protocol_version=negotiated_version,
+                            connection_id=connection_id,
                         )
                     else:
                         violation = ProtocolViolation(
@@ -230,6 +248,10 @@ def create_realtime_router(
             return
         finally:
             with CancelScope(shield=True):
+                try:
+                    await ingest_gateway.clear_connection(connection_id)
+                except IngestPipelineUnavailableError:
+                    pass
                 senders = tuple(
                     sender
                     for sender in (
@@ -252,6 +274,8 @@ def create_realtime_router(
                     await broker.unsubscribe_viewers(viewer_subscription)
                 if transcript_subscription is not None:
                     await broker.unsubscribe_transcripts(transcript_subscription)
+                if protocol_token is not None:
+                    _connection_protocol_version.reset(protocol_token)
 
     return router
 
@@ -310,7 +334,9 @@ async def _receive_hello(
         await _send_error(websocket, violation)
         await websocket.close(code=violation.close_code)
         return None
-    if message.protocol_version != PROTOCOL_VERSION:
+    if not set(
+        message.supported_protocol_versions or [message.protocol_version]
+    ).intersection(SUPPORTED_REALTIME_PROTOCOL_VERSIONS):
         violation = ProtocolViolation(
             code=RealtimeProtocolErrorCode.VERSION_MISMATCH,
             message="The requested protocol version is not supported.",
@@ -329,6 +355,11 @@ async def _receive_hello(
         await websocket.close(code=violation.close_code)
         return None
     return message
+
+
+def _negotiate_protocol_version(hello: ClientHello) -> int:
+    offered = hello.supported_protocol_versions or [hello.protocol_version]
+    return max(set(offered).intersection(SUPPORTED_REALTIME_PROTOCOL_VERSIONS))
 
 
 async def _receive_input(
@@ -397,10 +428,17 @@ async def _handle_ingest(
     *,
     ingest_gateway: IngestGateway,
     send_lock: asyncio.Lock,
+    protocol_version: int,
+    connection_id: str,
 ) -> None:
     session_id, input_id, input_kind = _ingest_metadata(message)
     try:
-        receipt = await _dispatch_ingest(message, ingest_gateway=ingest_gateway)
+        receipt = await _dispatch_ingest(
+            message,
+            ingest_gateway=ingest_gateway,
+            protocol_version=protocol_version,
+            connection_id=connection_id,
+        )
     except Exception as error:
         violation = _map_ingest_error(error)
         if violation.code is IngestRejectionCode.PIPELINE_UNAVAILABLE and not isinstance(
@@ -437,6 +475,8 @@ async def _dispatch_ingest(
     message: ClientTextSubmit | ClientAudioCommit | BinaryInputEnvelope,
     *,
     ingest_gateway: IngestGateway,
+    protocol_version: int,
+    connection_id: str,
 ) -> IngestReceipt:
     if isinstance(message, ClientTextSubmit):
         return await ingest_gateway.submit_text(
@@ -450,6 +490,8 @@ async def _dispatch_ingest(
             )
         )
     if isinstance(message, ClientAudioCommit):
+        if protocol_version >= 4:
+            raise ValueError("protocol v4 audio envelopes commit atomically")
         return await ingest_gateway.commit_audio(
             AudioCommit(
                 session_id=message.session_id,
@@ -458,22 +500,31 @@ async def _dispatch_ingest(
                 source=message.source,
                 turn_id=message.turn_id,
                 system_audio_required=message.system_audio_required,
+                connection_id=connection_id,
             )
         )
 
     header = message.header
     if header.media_type is BinaryMediaType.AUDIO:
         assert header.source is not None
-        return await ingest_gateway.submit_audio(
-            AudioInput(
-                session_id=header.session_id,
-                input_id=header.input_id,
-                captured_at_ms=header.captured_at_ms,
-                format=header.format,
-                body=message.body,
-                source=header.source,
-            )
+        audio_input = AudioInput(
+            session_id=header.session_id,
+            input_id=header.input_id,
+            captured_at_ms=header.captured_at_ms,
+            format=header.format,
+            body=message.body,
+            source=header.source,
+            turn_id=header.turn_id,
+            system_audio_required=header.system_audio_required,
+            connection_id=connection_id,
         )
+        if protocol_version >= 4:
+            if header.version != 3:
+                raise ValueError("protocol v4 audio requires binary envelope v3")
+            return await ingest_gateway.submit_audio_and_commit(audio_input)
+        if header.version == 3:
+            raise ValueError("binary envelope v3 requires realtime protocol v4")
+        return await ingest_gateway.submit_audio(audio_input)
     return await ingest_gateway.submit_frame(
         FrameInput(
             session_id=header.session_id,
@@ -596,7 +647,7 @@ async def _send_error(
             code=violation.code,
             message=violation.message,
             supported_version=(
-                PROTOCOL_VERSION
+                REALTIME_PROTOCOL_VERSION
                 if violation.code is RealtimeProtocolErrorCode.VERSION_MISMATCH
                 else None
             ),
@@ -655,6 +706,9 @@ async def _send_message(
     *,
     send_lock: asyncio.Lock | None = None,
 ) -> None:
+    protocol_version = _connection_protocol_version.get()
+    if hasattr(message, "protocol_version"):
+        message = message.model_copy(update={"protocol_version": protocol_version})
     if send_lock is None:
         await websocket.send_json(message.model_dump(mode="json"))
         return

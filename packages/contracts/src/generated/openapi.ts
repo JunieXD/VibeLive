@@ -2066,24 +2066,64 @@ export interface components {
             viewer_visual_input_mode: components["schemas"]["ViewerVisualInputMode"];
             /**
              * Max In Flight Viewer Requests
-             * @default 12
+             * @default 6
              */
             max_in_flight_viewer_requests: number;
             /**
              * Viewer Request Ttl Ms
-             * @default 900000
+             * @default 30000
              */
             viewer_request_ttl_ms: number;
             /**
              * Viewer Queue Capacity
-             * @default 8192
+             * @default 64
              */
             viewer_queue_capacity: number;
             /**
              * Observation Merge Window Ms
-             * @default 0
+             * @default 1000
              */
             observation_merge_window_ms: number;
+            /**
+             * Public Context Window Ms
+             * @default 60000
+             */
+            public_context_window_ms: number;
+            /**
+             * Public Context Max Events
+             * @default 48
+             */
+            public_context_max_events: number;
+            /**
+             * Replyable Event Window Ms
+             * @default 30000
+             */
+            replyable_event_window_ms: number;
+            /**
+             * Max Replyable Events
+             * @default 8
+             */
+            max_replyable_events: number;
+            /**
+             * Viewer User Speaker Budget
+             * @default 6
+             */
+            viewer_user_speaker_budget: number;
+            /**
+             * Viewer Screen Speaker Budget
+             * @default 4
+             */
+            viewer_screen_speaker_budget: number;
+            /**
+             * Viewer Ambient Speaker Budget
+             * @default 2
+             */
+            viewer_ambient_speaker_budget: number;
+            /**
+             * Max Direct Frame Age Ms
+             * @default 30000
+             */
+            max_direct_frame_age_ms: number;
             /**
              * Screen Change Threshold
              * @default 0.2
@@ -2632,6 +2672,11 @@ export interface components {
             type: "client.hello";
             /** Token */
             token: string;
+            /**
+             * Supported Protocol Versions
+             * @default null
+             */
+            supported_protocol_versions: number[] | null;
         };
         /** ClientPing */
         ClientPing: {
@@ -2698,10 +2743,10 @@ export interface components {
         AsrTranscriptEvent: {
             /**
              * Protocol Version
-             * @default 3
-             * @constant
+             * @default 4
+             * @enum {integer}
              */
-            protocol_version: 3;
+            protocol_version: 3 | 4;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2728,10 +2773,10 @@ export interface components {
         BackendPong: {
             /**
              * Protocol Version
-             * @default 3
-             * @constant
+             * @default 4
+             * @enum {integer}
              */
-            protocol_version: 3;
+            protocol_version: 3 | 4;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2744,10 +2789,10 @@ export interface components {
         BackendReady: {
             /**
              * Protocol Version
-             * @default 3
-             * @constant
+             * @default 4
+             * @enum {integer}
              */
-            protocol_version: 3;
+            protocol_version: 3 | 4;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2759,10 +2804,10 @@ export interface components {
         BarrageEventMessage: {
             /**
              * Protocol Version
-             * @default 3
-             * @constant
+             * @default 4
+             * @enum {integer}
              */
-            protocol_version: 3;
+            protocol_version: 3 | 4;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2829,10 +2874,10 @@ export interface components {
         IngestAck: {
             /**
              * Protocol Version
-             * @default 3
-             * @constant
+             * @default 4
+             * @enum {integer}
              */
-            protocol_version: 3;
+            protocol_version: 3 | 4;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2861,10 +2906,10 @@ export interface components {
         IngestRejected: {
             /**
              * Protocol Version
-             * @default 3
-             * @constant
+             * @default 4
+             * @enum {integer}
              */
-            protocol_version: 3;
+            protocol_version: 3 | 4;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2895,10 +2940,10 @@ export interface components {
         RealtimeProtocolError: {
             /**
              * Protocol Version
-             * @default 3
-             * @constant
+             * @default 4
+             * @enum {integer}
              */
-            protocol_version: 3;
+            protocol_version: 3 | 4;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2922,10 +2967,10 @@ export interface components {
         SessionStatusEvent: {
             /**
              * Protocol Version
-             * @default 3
-             * @constant
+             * @default 4
+             * @enum {integer}
              */
-            protocol_version: 3;
+            protocol_version: 3 | 4;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2994,10 +3039,10 @@ export interface components {
         BinaryEnvelopeHeader: {
             /**
              * Version
-             * @default 2
+             * @default 3
              * @enum {integer}
              */
-            version: 1 | 2;
+            version: 1 | 2 | 3;
             media_type: components["schemas"]["BinaryMediaType"];
             /** @default null */
             source: components["schemas"]["AudioSource"] | null;
@@ -3011,6 +3056,16 @@ export interface components {
             format: string;
             /** Body Length */
             body_length: number;
+            /**
+             * Turn Id
+             * @default null
+             */
+            turn_id: string | null;
+            /**
+             * System Audio Required
+             * @default false
+             */
+            system_audio_required: boolean;
         };
         /** RuntimeApplyResponse */
         RuntimeApplyResponse: {
@@ -3217,6 +3272,10 @@ export interface components {
             public_context_event_ids?: string[];
             /** Public Context */
             public_context?: components["schemas"]["ViewerPublicEvent"][];
+            /** Reply Context Event Ids */
+            reply_context_event_ids?: string[];
+            /** Reply Context */
+            reply_context?: components["schemas"]["ViewerPublicEvent"][];
             /**
              * Conversation History Summary
              * @default null

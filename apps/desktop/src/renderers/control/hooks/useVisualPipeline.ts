@@ -5,6 +5,7 @@ import {
   COMPRESSION_PROFILES,
   compressCompositeCanvas,
   deliverAndReleaseVisualBatch,
+  deliverVisualFrames,
   drawCompositeFrame,
   grayscaleMeanAbsoluteDifference,
   releaseVisualFrames,
@@ -64,26 +65,10 @@ export function useVisualPipeline({
   const batchBusyRef = useRef<number | null>(null)
   const frameSequenceRef = useRef(0)
   const defaultBatchSinkRef = useRef<VisualBatchSink>({
-    consume: async (batch, signal) => {
-      for (const frame of batch.frames) {
-        if (signal.aborted) {
-          throw new DOMException('Visual delivery aborted.', 'AbortError')
-        }
-        if (!frame.blob) continue
-        const body = new Uint8Array(await frame.blob.arrayBuffer())
-        if (signal.aborted) {
-          throw new DOMException('Visual delivery aborted.', 'AbortError')
-        }
-        await window.advx.submitVisualFrame({
-          inputId: frame.frameId,
-          capturedAtMs: frame.capturedAt,
-          mimeType: frame.blob.type || 'image/jpeg',
-          changeScore: frame.changeScore,
-          body
-        })
-      }
-      return 'accepted'
-    }
+    consume: (batch, signal) =>
+      deliverVisualFrames(batch.frames, signal, (input) =>
+        window.advx.submitVisualFrame(input)
+      )
   })
   const batchSinkRef = useRef<VisualBatchSink>(batchSink ?? defaultBatchSinkRef.current)
   batchSinkRef.current = batchSink ?? defaultBatchSinkRef.current

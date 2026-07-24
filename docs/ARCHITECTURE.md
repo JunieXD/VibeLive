@@ -255,7 +255,8 @@ class RoomLongTermMemory(TypedDict):
 Context Builder 维护有界的近期上下文：
 
 - 带时间信息和内容 hash 的历史画面帧。
-- 用户文字、最终语音转写和近期已显示弹幕组成的房间事件。
+- 最近 60 秒的用户输入、系统声音与画面事件，三类各最多 16 条，总计最多 48 条。
+- 最近 30 秒、最多 8 条的观众回复上下文；`audience_barrage` 不进入普通公开上下文。
 - Room 共享记忆的相关切片。
 - 用户明确配置的主题、模式和风格信息。
 
@@ -275,11 +276,19 @@ class ObservationWave(TypedDict):
     room_memory_revision: int
 ```
 
-同一波的 Director 和全部 Viewer 使用同一份 public context snapshot；同波先返回的弹幕不会改变慢 Viewer 的输入，只能从下一波起进入共享上下文。
+同一波的全部 Viewer 使用同一份 public context snapshot；同波先返回的弹幕不会改变慢
+Viewer 的输入。已公开观众弹幕只在后续波的独立 reply context 中短时可见，不会通过整场
+历史或旧摘要持续污染普通上下文。
 
-`FrameBundle` 默认采用 `change_peaks + 3`，并允许热更新历史张数、时间窗、`latest_n` / `evenly_spaced` / `change_peaks` 策略、最大尺寸和质量。默认 `direct_frames` 让每个选中 Viewer 独立看到同一画面包；`shared_summary` 只复用视觉摘要，不合并 Viewer 请求。两种模式由用户手动切换，首版不自动降级。
+`FrameBundle` 默认采用 `change_peaks`、最多 15 张，并允许热更新时间窗、
+`latest_n` / `evenly_spaced` / `change_peaks` 策略、最大尺寸和质量。默认
+`direct_frames` 让每个选中 Viewer 独立看到同一画面包；发送前删除超过 30 秒的普通帧，
+当前触发帧例外。`shared_summary` 只复用视觉摘要，不合并 Viewer 请求。
 
-正式触发源包括用户文字、最终语音、超过阈值且满足冷却的画面变化，以及连续模式下的有界 ambient tick。相近输入合并成一波；ASR 部分结果只用于 UI 和调试，最终转写以稳定 utterance ID 幂等入房间事件。AI 弹幕不能直接递归触发新波；长时间没有真实输入时必须强制安静。
+正式触发源包括用户文字、最终语音、超过阈值且满足冷却的画面变化，以及连续模式下的
+有界 ambient tick。相近输入在 1 秒窗口内合并成一波；新同优先级或更高优先级波取代旧波，
+低优先级画面或 ambient 不打断正在处理的用户输入。ASR 部分结果只用于 UI 和调试，最终
+转写以稳定 utterance ID 幂等入房间事件。AI 弹幕不能直接递归触发新波。
 
 ### 4.6 Audience Engine
 
@@ -297,9 +306,14 @@ Audience Engine 先由本地预算器根据事件类型、模式响应范围和 
 
 - 不把多个 Viewer 合并为一个 prompt，也不使用多 Viewer batching。
 - 每个 Viewer 每波只返回 `action=barrage|silence`；`barrage` 最多一条，沉默是合法结果。
-- 初始 Viewer 请求并发上限为 12，可配置范围为 1 到 32；超出部分进入有界队列。
-- TTL 从波创建时开始；每个 Viewer 使用 latest-wins，旧 epoch、旧 sequence、过期、取消和非法结果零副作用。
+- 默认 Viewer 请求并发上限为 6、队列容量为 64；用户、画面和 ambient 波的候选预算分别
+  为 6、4、2，直接点名只选择目标 Viewer 或对应 Persona 中的一位。
+- TTL 默认 30 秒并从波创建时开始；Observation 与每个 Viewer 都使用 latest-wins。即使
+  更新波没有选择任何 Viewer，也必须让旧 observation、旧 epoch、旧 sequence、过期、
+  取消和非法结果零副作用。
 - 瞬时网络错误、429 或 5xx 仅在 TTL 允许时重试同一 Viewer 一次，不换人补位。
+- 模型结构错误只在剩余截止时间不少于 6 秒时修复一次；调度重试与协议修复共享最多两次
+  Provider 请求预算。
 - 合法结果按完成顺序独立发布，语义近似重复时保留最早通过者。
 - 限时禁言、离开和踢出会取消该 Viewer 的 mailbox；最终围栏要求 Viewer 仍 active、未禁言且三个 revision 全部匹配。
 

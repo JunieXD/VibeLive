@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 
 import httpx
 import pytest
@@ -259,12 +260,12 @@ def _viewer_request() -> ViewerGenerationRequest:
         input_event_ids=["event-1"],
         viewer_private_state=ViewerPrivateState(),
         room_memory_slice=RoomMemorySlice(room_id="room-1", memory_revision=0),
-        deadline_at_ms=10_000,
+        deadline_at_ms=time.time_ns() // 1_000_000 + 60_000,
     )
 
 
 @pytest.mark.asyncio
-async def test_viewer_failure_records_unparsed_model_output() -> None:
+async def test_viewer_failure_does_not_record_unparsed_model_output() -> None:
     invalid_output = json.dumps(
         {
             "action": "barrage",
@@ -319,7 +320,7 @@ async def test_viewer_failure_records_unparsed_model_output() -> None:
     final = sink.traces[-1]
     assert final.status is AiCallStatus.FAILED
     assert final.response is not None
-    assert final.response.model_output == invalid_output
+    assert final.response.model_output is None
     assert final.response.parsed_output is None
     assert_redacted_artifact(final)
 

@@ -63,6 +63,14 @@ export interface VisualBatchSink {
   consume(batch: VisualBatch, signal: AbortSignal): Promise<VisualBatchSinkResult>
 }
 
+export type VisualFrameSubmitter = (input: {
+  inputId: string
+  capturedAtMs: number
+  mimeType: string
+  changeScore: number
+  body: Uint8Array
+}) => Promise<void>
+
 type StorageReader = Pick<Storage, 'getItem'>
 type StorageWriter = Pick<Storage, 'setItem'>
 type VideoFrameSource = Pick<HTMLVideoElement, 'videoWidth' | 'videoHeight'> & CanvasImageSource
@@ -552,6 +560,57 @@ export async function deliverAndReleaseVisualBatch(
   } finally {
     releaseVisualFrames(batch.frames)
   }
+}
+
+export async function deliverVisualFrames(
+  frames: readonly VisualFrame[],
+  signal: AbortSignal,
+  submit: VisualFrameSubmitter
+): Promise<VisualBatchSinkResult> {
+  let accepted = false
+  let failed = false
+  let firstFailure: unknown
+  for (const frame of frames) {
+    if (signal.aborted) {
+      throw new DOMException('Visual delivery aborted.', 'AbortError')
+    }
+    if (!frame.blob) continue
+    const body = new Uint8Array(await frame.blob.arrayBuffer())
+    if (signal.aborted) {
+      throw new DOMException('Visual delivery aborted.', 'AbortError')
+    }
+    try {
+      await submit({
+        inputId: frame.frameId,
+        capturedAtMs: frame.capturedAt,
+        mimeType: frame.blob.type || 'image/jpeg',
+        changeScore: frame.changeScore,
+        body
+      })
+      accepted = true
+    } catch (error) {
+      if (isRealtimeDisconnectedError(error)) throw error
+      if (!failed) firstFailure = error
+      failed = true
+    }
+  }
+  if (failed) throw firstFailure
+  return accepted ? 'accepted' : 'waiting-backend'
+}
+
+export function isRealtimeDisconnectedError(error: unknown): boolean {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String(error.code)
+      : ''
+  if (code === 'backend_disconnected' || code === 'connection_closed') return true
+  const message = error instanceof Error ? error.message.toLowerCase() : ''
+  return (
+    message.includes('backend_disconnected') ||
+    message.includes('connection_closed') ||
+    message.includes('实时连接尚未就绪') ||
+    message.includes('连接已断开')
+  )
 }
 
 export function createWaitingVisualBatchSink(): VisualBatchSink {
