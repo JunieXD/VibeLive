@@ -1,16 +1,16 @@
-import { app, BrowserWindow, Rectangle, screen, shell } from "electron";
+import { BrowserWindow, Rectangle, screen, shell } from "electron";
 import { join } from "node:path";
 import type { BarrageEvent, OverlaySettings } from "../../shared/contracts";
 import { overlayIpcEnvelope } from "../../shared/overlay-protocol";
+import { restoreMacApplicationActivation } from "../mac-application-activation";
 import { getOverlaySettings } from "../overlay-settings";
 import { loadRenderer } from "./load-renderer";
 
 let overlayWindow: BrowserWindow | null = null;
 
-function restoreMacApplicationActivation(): void {
-  if (process.platform !== "darwin") return;
-  app.setActivationPolicy("regular");
-  app.dock.show();
+function setScreenSaverOverlayLevel(window: BrowserWindow): void {
+  window.setAlwaysOnTop(true, "screen-saver");
+  restoreMacApplicationActivation();
 }
 
 export function createOverlayWindow(bounds: Rectangle): BrowserWindow {
@@ -34,10 +34,10 @@ export function createOverlayWindow(bounds: Rectangle): BrowserWindow {
     }
   });
 
-  window.setAlwaysOnTop(true, "screen-saver");
   window.setBounds(bounds);
   window.setIgnoreMouseEvents(true, { forward: true });
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  setScreenSaverOverlayLevel(window);
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url);
     return { action: "deny" };
@@ -110,8 +110,8 @@ export function pushBarrage(event: BarrageEvent): void {
 export function applyOverlaySettings(settings: OverlaySettings): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
-  overlayWindow.setAlwaysOnTop(true, "screen-saver");
   overlayWindow.setBounds(getTargetBounds(settings));
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  setScreenSaverOverlayLevel(overlayWindow);
   sendWhenReady(overlayWindow, "overlay:settings-changed", settings);
 }

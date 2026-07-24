@@ -31,6 +31,7 @@ import {
   initializeLogging,
   logger
 } from "./logging";
+import { restoreMacApplicationActivation } from "./mac-application-activation";
 import { createControlWindow } from "./windows/control";
 import { hideOverlay } from "./windows/overlay";
 
@@ -59,12 +60,6 @@ const backendClient = new BackendClient({
 function requestApplicationQuitFromSignal(signal: NodeJS.Signals): void {
   logger.info("app.shutdown.signal-requested", { signal });
   app.quit();
-}
-
-function restoreMacApplicationActivation(): void {
-  if (process.platform !== "darwin") return;
-  app.setActivationPolicy("regular");
-  app.dock.show();
 }
 
 process.on("SIGINT", () => requestApplicationQuitFromSignal("SIGINT"));
