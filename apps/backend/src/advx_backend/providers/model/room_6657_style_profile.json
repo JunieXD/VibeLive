@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "source": {
+    "record_count": 21714,
+    "canonical_sha256": "78318e2e6f04065fd024850891cf5a9a6c74d3c96e0339182e02c34e83158457",
+    "source_url": "https://hguofichp.cn:10086/machine/Page",
+    "fetched_at_utc": "2026-07-24T12:06:37.805505Z",
+    "reported_total": 22024,
+    "fetched_count": 22024,
+    "page_count": 45,
+    "termination_reason": "last_page",
+    "request_header_policy": {
+      "sent": [
+        "Accept",
+        "User-Agent"
+      ],
+      "forbidden": [
+        "dpahjdoiaw",
+        "siteToken"
+      ],
+      "site_attribution_headers_sent": false
+    }
+  },
+  "length_characters": {
+    "minimum": 1,
+    "maximum": 255,
+    "mean": 41.537,
+    "quantiles": {
+      "p10": 21,
+      "p25": 28,
+      "p50": 36,
+      "p75": 44,
+      "p90": 58,
+      "p95": 86,
+      "p99": 219
+    }
+  },
+  "copy_count": {
+    "minimum": 0,
+    "maximum": 9166,
+    "mean": 107.192,
+    "quantiles": {
+      "p10": 19,
+      "p25": 32,
+      "p50": 60,
+      "p75": 113,
+      "p90": 208,
+      "p95": 310.35,
+      "p99": 808.61
+    }
+  },
+  "rates": {
+    "short_le_5": 0.001612,
+    "short_le_10": 0.008382,
+    "short_le_20": 0.098508,
+    "question_mark": 0.125265,
+    "exclamation_mark": 0.132864,
+    "repetition": 0.404532,
+    "mention": 0.123146,
+    "newline": 0.034954,
+    "contains_ascii": 0.664732,
+    "ascii_only": 0.001382,
+    "ascii_character": 0.143954
+  },
+  "tag_distribution": {
+    "00": {
+      "count": 6758,
+      "ratio": 0.311228
+    },
+    "06": {
+      "count": 6516,
+      "ratio": 0.300083
+    },
+    "01": {
+      "count": 4470,
+      "ratio": 0.205858
+    },
+    "05": {
+      "count": 3454,
+      "ratio": 0.159068
+    },
+    "02": {
+      "count": 3115,
+      "ratio": 0.143456
+    },
+    "07": {
+      "count": 1822,
+      "ratio": 0.083909
+    },
+    "09": {
+      "count": 1613,
+      "ratio": 0.074284
+    },
+    "15": {
+      "count": 1031,
+      "ratio": 0.047481
+    },
+    "20": {
+      "count": 992,
+      "ratio": 0.045685
+    },
+    "17": {
+      "count": 887,
+      "ratio": 0.040849
+    },
+    "22": {
+      "count": 863,
+      "ratio": 0.039744
+    },
+    "14": {
+      "count": 858,
+      "ratio": 0.039514
+    },
+    "13": {
+      "count": 741,
+      "ratio": 0.034125
+    },
+    "16": {
+      "count": 603,
+      "ratio": 0.02777
+    },
+    "12": {
+      "count": 489,
+      "ratio": 0.02252
+    },
+    "10": {
+      "count": 478,
+      "ratio": 0.022013
+    },
+    "03": {
+      "count": 303,
+      "ratio": 0.013954
+    },
+    "18": {
+      "count": 291,
+      "ratio": 0.013401
+    },
+    "24": {
+      "count": 254,
+      "ratio": 0.011698
+    },
+    "08": {
+      "count": 175,
+      "ratio": 0.008059
+    },
+    "19": {
+      "count": 172,
+      "ratio": 0.007921
+    },
+    "11": {
+      "count": 153,
+      "ratio": 0.007046
+    },
+    "25": {
+      "count": 144,
+      "ratio": 0.006632
+    },
+    "21": {
+      "count": 142,
+      "ratio": 0.00654
+    },
+    "27": {
+      "count": 134,
+      "ratio": 0.006171
+    },
+    "23": {
+      "count": 105,
+      "ratio": 0.004836
+    },
+    "28": {
+      "count": 75,
+      "ratio": 0.003454
+    },
+    "26": {
+      "count": 26,
+      "ratio": 0.001197
+    }
+  },
+  "rhetorical_signals": {
+    "rhetorical_question": 0.045777,
+    "ellipsis": 0.0245,
+    "repeated_punctuation": 0.024086,
+    "bracketed_aside": 0.096758,
+    "laughter_signal": 0.01004,
+    "imperative_signal": 0.104403
+  },
+  "popular_slice": {
+    "record_count": 5460,
+    "min_copy_count": 113,
+    "length_quantiles": {
+      "p10": 24,
+      "p25": 31,
+      "p50": 39,
+      "p75": 48,
+      "p90": 83.1,
+      "p95": 149,
+      "p99": 241.41
+    },
+    "rates": {
+      "short_le_5": 0.000549,
+      "short_le_10": 0.003663,
+      "short_le_20": 0.047619,
+      "question_mark": 0.128022,
+      "exclamation_mark": 0.14652,
+      "repetition": 0.403663,
+      "mention": 0.077656,
+      "newline": 0.037363,
+      "contains_ascii": 0.603297,
+      "ascii_only": 0.000366,
+      "ascii_character": 0.12145
+    },
+    "rhetorical_signals": {
+      "rhetorical_question": 0.050549,
+      "ellipsis": 0.023443,
+      "repeated_punctuation": 0.023993,
+      "bracketed_aside": 0.091758,
+      "laughter_signal": 0.012271,
+      "imperative_signal": 0.115934
+    }
+  },
+  "generation_instructions": [
+    "默认保持短促，目标字符长度以中位数 36 为中心，并参考长度分位数。",
+    "使用弹幕口吻直接回应当前画面或事件，避免解释背景、总结过程或写成完整文章。",
+    "按统计概率混合问句、感叹、复读、@、换行与 ASCII 片段，不要每条都堆叠信号。",
+    "标签仅用于采样分层；生成内容不得原样复述语料，也不得输出来源记录或标识符。",
+    "一次生成多个候选时保持句式和情绪多样，过滤与输入语料完全相同的文本。"
+  ]
+}

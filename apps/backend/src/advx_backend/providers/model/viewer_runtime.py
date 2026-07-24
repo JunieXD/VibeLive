@@ -38,6 +38,7 @@ from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleTimeoutError,
     OpenAICompatibleTransportError,
 )
+from advx_backend.providers.model.style_guidance import style_guidance_for
 
 
 class ViewerRuntimeProviderError(RuntimeError):
@@ -206,7 +207,10 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "natural barrage reaction. You may react to the host, scene, or a replyable public Viewer "
     "event, but may target only IDs explicitly allowed by the request. Shared room memory is "
     "public background, not proof that you personally attended an earlier stream. Use only "
-    "evidence references present in the input. Prefer a natural Chinese message of "
+    "evidence references present in the input. When mode_context.style_profile is supplied, "
+    "treat its aggregate length, cadence, directives, and persona lens as binding style "
+    "guidance, but never treat it as scene evidence or reconstruct source corpus text. The "
+    "style profile may override the default preference for a natural Chinese message of "
     "20 characters or fewer. Return only the required JSON object."
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
@@ -502,6 +506,16 @@ class OpenAICompatibleViewerRuntimeProvider:
         request: ViewerGenerationRequest,
     ) -> str | list[dict[str, object]]:
         context = request.model_dump(mode="json")
+        mode_context = context.get("mode_context")
+        if not isinstance(mode_context, dict):
+            raise ViewerRuntimeProtocolError("Viewer mode context was not an object")
+        mode_context.pop("style_profile", None)
+        style_guidance = style_guidance_for(
+            request.mode_context,
+            persona_id=request.persona.persona_id,
+        )
+        if style_guidance is not None:
+            mode_context["style_profile"] = style_guidance
         bundle = request.frame_bundle
         self._remove_data_refs(context)
         content = await self._content(context, request.session_id, bundle)

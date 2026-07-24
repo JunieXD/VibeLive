@@ -77,6 +77,7 @@
 | [VIEWER_RUNTIME_INTEGRATION_PLAN.md](./VIEWER_RUNTIME_INTEGRATION_PLAN.md) | AI 观众实例、Director、独立请求、记忆与成长梗的前后端联动执行计划 |
 | [VIEWER_RUNTIME_REQUIREMENTS_LOG.md](./VIEWER_RUNTIME_REQUIREMENTS_LOG.md) | 需求访谈中锁定的产品语义、纠偏结论和首版边界 |
 | [AUDIENCE_SPEAKING_PRODUCT_SPEC.md](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) | AI 观众发言的已确认产品规则、固定参数与验收场景；其发言机制规则优先于旧设计文档 |
+| [SB6657_STYLE_TUNING.md](./SB6657_STYLE_TUNING.md) | 6657 外部语料抓取边界、聚合画像、模式专属生成约束和刷新验证流程 |
 
 ## 文档原则
 

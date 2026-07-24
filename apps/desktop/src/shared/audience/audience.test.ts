@@ -32,6 +32,7 @@ describe('audience presets and modes', () => {
     const mode6657 = BUILT_IN_MODES.find((mode) => mode.id === 'room-6657')
     expect(mode6657).toMatchObject({
       ambience: 'continuous',
+      revision: 2,
       targetConcurrentViewers: 28,
       normalResponseRange: [6, 10],
       highlightResponseRange: [20, 28],
@@ -39,6 +40,11 @@ describe('audience presets and modes', () => {
       burstLimit: [20, 28]
     })
     expect(mode6657?.personaWeights.reaction_qmark).toBe(3)
+    expect(mode6657?.personaOverrides.reaction_qmark?.speechStyle).toContain('1-8 字')
+    expect(mode6657?.personaOverrides.meme_archivist?.avoidPatterns).toContain(
+      '逐字复刻外部语料'
+    )
+    expect(Object.keys(mode6657?.personaOverrides ?? {})).toHaveLength(13)
   })
 
   it('activates exactly one mode and can copy/reset without mutating built-ins', () => {
@@ -246,6 +252,33 @@ describe('workspace persistence', () => {
       frameBundleSize: 60,
       frameWindowMs: 120_000
     })
+  })
+
+  it('upgrades untouched built-in modes while preserving edited revisions', () => {
+    const workspace = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    const stored6657 = workspace.modeState.modes.find(
+      (mode: { id: string }) => mode.id === 'room-6657'
+    )
+    stored6657.revision = 1
+    stored6657.personaOverrides = {}
+
+    const upgraded = parseAudienceWorkspaceState(workspace)
+    expect(upgraded.ok).toBe(true)
+    if (!upgraded.ok) return
+    const upgraded6657 = upgraded.workspace.modeState.modes.find(
+      (mode) => mode.id === 'room-6657'
+    )
+    expect(upgraded6657?.revision).toBe(2)
+    expect(Object.keys(upgraded6657?.personaOverrides ?? {})).toHaveLength(13)
+
+    stored6657.revision = 2
+    stored6657.description = '用户修改过的模式'
+    const preserved = parseAudienceWorkspaceState(workspace)
+    expect(preserved.ok).toBe(true)
+    if (!preserved.ok) return
+    expect(preserved.workspace.modeState.modes.find(
+      (mode) => mode.id === 'room-6657'
+    )?.description).toBe('用户修改过的模式')
   })
 
   it('strictly hydrates a JSON round trip and rejects damaged references', () => {

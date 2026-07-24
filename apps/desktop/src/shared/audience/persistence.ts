@@ -11,6 +11,9 @@ import type {
 
 const STABLE_ID_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/
 const MODE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const BUILT_IN_MODE_MIGRATIONS = new Map([
+  ['room-6657', { fromRevision: 1, toRevision: 2 }]
+])
 
 export type AudienceWorkspaceParseResult =
   | {
@@ -49,11 +52,13 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
   }
   const modeStateValue = value.modeState
   const modes = isRecord(modeStateValue)
-    ? parseArray(
-        modeStateValue.modes,
-        'modeState.modes',
-        (item, path, nestedIssues) => parseMode(item, path, sourceVersion, nestedIssues),
-        issues
+    ? upgradeBuiltInModes(
+        parseArray(
+          modeStateValue.modes,
+          'modeState.modes',
+          (item, path, nestedIssues) => parseMode(item, path, sourceVersion, nestedIssues),
+          issues
+        )
       )
     : (issues.push('modeState must be an object'), [])
   const activeModeId = isRecord(modeStateValue) && typeof modeStateValue.activeModeId === 'string'
@@ -239,6 +244,24 @@ function parseMode(
     baseActivity: normalResponseRange,
     burstLimit: highlightResponseRange
   }
+}
+
+function upgradeBuiltInModes(modes: readonly AudienceMode[]): AudienceMode[] {
+  const currentBuiltIns = new Map(BUILT_IN_MODES.map((mode) => [mode.id, mode]))
+  return modes.map((mode) => {
+    const current = currentBuiltIns.get(mode.id)
+    const migration = BUILT_IN_MODE_MIGRATIONS.get(mode.id)
+    if (
+      !mode.builtIn ||
+      !current ||
+      !migration ||
+      mode.revision !== migration.fromRevision ||
+      current.revision !== migration.toRevision
+    ) {
+      return mode
+    }
+    return cloneAudienceMode(current)
+  })
 }
 
 function isLegacyVisualDefault(settings: AudienceVisualSettings): boolean {
@@ -435,6 +458,25 @@ function clonePersonaOverride(override: Record<string, unknown>): PersonaOverrid
     if (Array.isArray(clone[field])) clone[field] = [...clone[field]]
   }
   return clone as PersonaOverride
+}
+
+function cloneAudienceMode(mode: AudienceMode): AudienceMode {
+  return {
+    ...mode,
+    personaIds: [...mode.personaIds],
+    personaWeights: { ...mode.personaWeights },
+    personaOverrides: Object.fromEntries(
+      Object.entries(mode.personaOverrides).map(([personaId, override]) => [
+        personaId,
+        clonePersonaOverride(override as Record<string, unknown>)
+      ])
+    ),
+    normalResponseRange: [...mode.normalResponseRange],
+    highlightResponseRange: [...mode.highlightResponseRange],
+    visualSettings: { ...mode.visualSettings },
+    baseActivity: [...mode.baseActivity],
+    burstLimit: [...mode.burstLimit]
+  }
 }
 
 function parseArray<T>(

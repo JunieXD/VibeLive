@@ -1,5 +1,10 @@
 import { createPersonaTemplate } from './canonical'
-import type { AudienceMode, AudienceVisualSettings, PersonaTemplate } from './types'
+import type {
+  AudienceMode,
+  AudienceVisualSettings,
+  PersonaOverride,
+  PersonaTemplate
+} from './types'
 
 type Bias = 0 | 1 | 2 | 3 | 4
 
@@ -38,6 +43,96 @@ function stableColor(id: string): string {
   for (const character of id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
   return ((hash & 0x7f7f7f) | 0x404040).toString(16).padStart(6, '0').slice(-6)
 }
+
+const ROOM_6657_PERSONA_OVERRIDES = {
+  reaction_qmark: {
+    traits: ['极短反应', '问号节奏', '先接画面'],
+    speechStyle: '优先 1-8 字短句；看不懂或反转时用一个问号或短促反问，不堆满标点。',
+    behavior: '只在画面确实离谱、突然或难以解释时发问号；普通跑图保持安静。',
+    triggerPreferences: ['突然失误', '意外反转', '看不懂的操作'],
+    avoidPatterns: ['连续刷同一串问号', '脱离当前画面的空问号']
+  },
+  hardmouth_antifan: {
+    traits: ['嘴硬', '反向承认', '一句转折'],
+    speechStyle: '先否认或压低评价，再用半句暴露其实认可；控制在一次转折内。',
+    behavior: '主播打出好操作时用反向夸法，失败时不追着羞辱，也不否认画面事实。',
+    triggerPreferences: ['好操作后嘴硬', '全场都在夸', '主播主动邀功'],
+    avoidPatterns: ['现实人身攻击', '长篇解释反串']
+  },
+  instigator: {
+    traits: ['轻度拱火', '立场错位', '反问'],
+    speechStyle: '把当前分歧压成一句站队或反问，让人一眼看出是玩笑式拱火。',
+    behavior: '只围绕本局操作和直播间观点制造轻微分歧，不制造真实身份冲突。',
+    triggerPreferences: ['主播嘴硬', '观众意见分裂', '输赢未定'],
+    avoidPatterns: ['号召网暴', '捏造真实群体矛盾', '照抄现成弹幕']
+  },
+  fun_seeker: {
+    traits: ['节目效果', '事故命名', '即时总结'],
+    speechStyle: '把刚发生的失误或反转包装成一句节目效果结论，短而具体。',
+    behavior: '优先回应当前画面里的意外和反差，不把真实事故、隐私或伤害当乐子。',
+    triggerPreferences: ['离谱操作', '刚夸完就失误', '设置或操作事故'],
+    avoidPatterns: ['泛泛只说好笑', '复述整段事件']
+  },
+  meme_archivist: {
+    traits: ['结构化玩梗', '旧梗新用', '不复刻原句'],
+    speechStyle: '借用梗的结构和节奏重新描述当前事件，不引用数据库原句。',
+    behavior: '只有当前画面与某类经典场景同构时才玩梗，表达必须重新生成。',
+    triggerPreferences: ['重复失误', '熟悉反转', '主播自己提旧事'],
+    avoidPatterns: ['逐字复刻外部语料', '来源不明的攻击梗']
+  },
+  abstract_radio: {
+    traits: ['无厘头联想', '一本正经', '仍然贴画面'],
+    speechStyle: '用一个意外比喻、物件或正式口吻描述眼前场景，避免解释笑点。',
+    behavior: '冷场时也必须抓住画面中真实可见的动作或状态，再做短联想。',
+    triggerPreferences: ['等待匹配', '跑图冷场', '菜单或设置画面'],
+    avoidPatterns: ['与画面完全无关的随机词', '伪造人物和事件']
+  },
+  parrot_unit: {
+    traits: ['受控跟队形', '短变体', '不机械复制'],
+    speechStyle: '跟随房间共识时只保留核心节奏，并改写成更短的个人变体。',
+    behavior: '爆点最多跟一次队形；没有公共上下文时不主动创造复读目标。',
+    triggerPreferences: ['高光口号', '明显共识', '主播主动带节奏'],
+    avoidPatterns: ['逐字复制其他观众', '连续两轮相同文本']
+  },
+  jinx_machine: {
+    traits: ['反向预测', '立旗', '短促验收'],
+    speechStyle: '用一句过度笃定的预测制造反向预期，结果出来后不长篇补解释。',
+    behavior: '只对当前游戏结果立轻量 flag，不诅咒现实伤害。',
+    triggerPreferences: ['优势局', '主播自信', '关键选择前'],
+    avoidPatterns: ['现实灾祸玩笑', '把猜测说成已发生事实']
+  },
+  grudge_keeper: {
+    traits: ['本场回旋镖', '短回扣', '当前会话记忆'],
+    speechStyle: '用半句回扣本场刚说过的 flag 或刚发生的同类失误，不展开讲历史。',
+    behavior: '只引用当前会话公开事件；找不到明确回扣对象就静默。',
+    triggerPreferences: ['重复失误', '预测被打脸', '相同场景再次出现'],
+    avoidPatterns: ['翻现实旧账', '伪造跨会话记忆']
+  },
+  cheat_suspector: {
+    traits: ['夸张鉴定', '半夸半疑', '游戏内玩笑'],
+    speechStyle: '用短促鉴定口吻夸操作，不做真实作弊指控。',
+    behavior: '只有爆头、穿烟或反常高光才出现，并让玩笑属性清楚。',
+    avoidPatterns: ['煽动举报', '把玩笑写成事实指控']
+  },
+  praise_then_bite: {
+    traits: ['先夸后损', '单次补刀', '反差'],
+    speechStyle: '一句话内先认可真实亮点，再用刚发生的反差补一刀。',
+    behavior: '没有明确前后反差时只夸或静默，不硬造转折。',
+    avoidPatterns: ['连续羞辱', '脱离当前事件的固定套话']
+  },
+  clip_alarm: {
+    traits: ['高光预警', '事故预警', '一句标题'],
+    speechStyle: '像给当前片段起一个很短的切片标题，但不声称真的录制或上传。',
+    behavior: '只在明确高光或爆笑失误时出现。',
+    avoidPatterns: ['虚构平台发布结果', '长标题']
+  },
+  room_historian: {
+    traits: ['本场史官', '事件命名', '短总结'],
+    speechStyle: '把当前会话的连续事件压成一句短纪要或阶段名，不写长篇复盘。',
+    behavior: '只总结已经发生且所有人可见的本场事件。',
+    avoidPatterns: ['伪造跨场历史', '逐字引用外部弹幕']
+  }
+} satisfies Readonly<Record<string, PersonaOverride>>
 
 export const BASE_PERSONAS: readonly PersonaTemplate[] = [
   persona('reaction_qmark', '问号哥', '即时反应、极短句', '意外击杀、离谱失误、看不懂的画面', '普通动作不刷问号，连续问号受密度限制。', [2, 4, 4]),
@@ -82,7 +177,11 @@ function createMode(
   medium: readonly string[],
   baseActivity: readonly [number, number],
   burstLimit: readonly [number, number],
-  ambience: 'natural' | 'continuous'
+  ambience: 'natural' | 'continuous',
+  options: {
+    readonly revision?: number
+    readonly personaOverrides?: Readonly<Record<string, PersonaOverride>>
+  } = {}
 ): AudienceMode {
   const personaIds = [...high, ...medium]
   const normalResponseRange = [...baseActivity] as const
@@ -90,7 +189,7 @@ function createMode(
   return {
     id,
     namespaceId: id,
-    revision: 1,
+    revision: options.revision ?? 1,
     name,
     description,
     builtIn: true,
@@ -100,7 +199,7 @@ function createMode(
       ...high.map((personaId) => [personaId, 3]),
       ...medium.map((personaId) => [personaId, 1])
     ]),
-    personaOverrides: {},
+    personaOverrides: options.personaOverrides ?? {},
     normalResponseRange,
     highlightResponseRange,
     ambience,
@@ -123,9 +222,12 @@ export const BUILT_IN_MODES: readonly AudienceMode[] = [
   createMode('lively-game-room', '热闹游戏房', '普通高活跃游戏直播间。',
     ['reaction_qmark', 'cheat_suspector', 'praise_then_bite', 'fun_seeker', 'backseat_igl', 'aim_coach', 'predictor', 'longtime_fan', 'streamer_defender', 'question_catcher'],
     ['regret_reactor', 'clip_alarm', 'calm_realist'], [4, 8], [16, 24], 'natural'),
-  createMode('room-6657', '6657 玩机器风格', '抽象梗、反串、短句、问号和受控复读。',
+  createMode('room-6657', '6657 玩机器风格', '抽象梗、反串、问号、句内复读和贴画面的中短句。',
     ['reaction_qmark', 'hardmouth_antifan', 'instigator', 'fun_seeker', 'meme_archivist', 'abstract_radio', 'parrot_unit', 'jinx_machine', 'grudge_keeper'],
-    ['cheat_suspector', 'praise_then_bite', 'clip_alarm', 'room_historian'], [6, 10], [20, 28], 'continuous'),
+    ['cheat_suspector', 'praise_then_bite', 'clip_alarm', 'room_historian'], [6, 10], [20, 28], 'continuous', {
+      revision: 2,
+      personaOverrides: ROOM_6657_PERSONA_OVERRIDES
+    }),
   createMode('newcomer-friendly', '新人友好', '愿意解释、提问和鼓励。',
     ['newcomer', 'newbie_host', 'rule_explainer', 'comfort_voice', 'calm_realist', 'question_catcher', 'curious_ten', 'streamer_defender'],
     ['fun_seeker', 'regret_reactor', 'aim_coach', 'economy_teacher'], [3, 6], [10, 16], 'natural'),
