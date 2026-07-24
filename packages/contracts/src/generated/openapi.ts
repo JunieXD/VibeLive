@@ -2631,6 +2631,16 @@ export interface components {
             created_at_ms: number;
             /** Text */
             text: string;
+            /**
+             * Target Viewer Id
+             * @default null
+             */
+            target_viewer_id: string | null;
+            /**
+             * Target Persona Id
+             * @default null
+             */
+            target_persona_id: string | null;
         };
         /**
          * ClientVoiceActivity

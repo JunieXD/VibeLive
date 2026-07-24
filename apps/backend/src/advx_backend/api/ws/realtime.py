@@ -414,6 +414,8 @@ async def _dispatch_ingest(
                 input_id=message.input_id,
                 created_at_ms=message.created_at_ms,
                 text=message.text,
+                target_viewer_id=message.target_viewer_id,
+                target_persona_id=message.target_persona_id,
             )
         )
     if isinstance(message, ClientAudioCommit):
