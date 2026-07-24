@@ -43,7 +43,7 @@ export function useMediaController({
   onSystemActivity,
   onSessionStarted,
   backendConnected = true,
-  providersConfigured = true,
+  providerProfileAvailable = true,
   onBackendSessionSnapshot,
   audienceWorkspace
 }: UseMediaControllerOptions): MediaController {
@@ -79,7 +79,7 @@ export function useMediaController({
     onSessionStarted,
     onBackendSessionSnapshot,
     audienceWorkspace,
-    audienceAvailable: backendConnected && providersConfigured,
+    audienceAvailable: backendConnected && providerProfileAvailable,
     onAudienceSessionActiveChange: setAudienceSessionActive
   })
 

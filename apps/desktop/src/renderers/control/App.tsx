@@ -44,6 +44,13 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
   const dispatchSession = useControlStore(selectDispatchSession)
   const { colorTheme, toggleColorTheme } = useColorTheme(initialColorTheme)
   const backend = useBackendRuntime()
+  const modelConfig = useModelConfig({
+    backendConnection: backend.connection,
+    onBackendStatus: backend.applyStatus
+  })
+  const providerProfileAvailable =
+    modelConfig.status?.modelApiKeyStored === true &&
+    modelConfig.status?.asrApiKeyStored === true
   const activityFeed = useActivityFeed()
   const audience = useAudienceWorkspacePersistence({
     onSystemActivity: activityFeed.appendSystemActivity
@@ -64,7 +71,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     onSystemActivity: activityFeed.appendSystemActivity,
     onSessionStarted: () => undefined,
     backendConnected: backend.connection === 'connected',
-    providersConfigured: backend.status?.providersConfigured ?? false,
+    providerProfileAvailable,
     onBackendSessionSnapshot: backend.applySessionSnapshot,
     audienceWorkspace: audience.workspace
   })
@@ -120,10 +127,6 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     backend.status?.session.startedAtMs ?? null
   )
   const overlay = useOverlaySettings()
-  const modelConfig = useModelConfig({
-    backendConnection: backend.connection,
-    onBackendStatus: backend.applyStatus
-  })
 
   useEffect(() => {
     const status = backend.status

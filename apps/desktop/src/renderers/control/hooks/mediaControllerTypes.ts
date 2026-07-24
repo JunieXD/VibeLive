@@ -18,7 +18,7 @@ export type UseMediaControllerOptions = {
   onSystemActivity: (text: string) => void
   onSessionStarted: () => void
   backendConnected?: boolean
-  providersConfigured?: boolean
+  providerProfileAvailable?: boolean
   onBackendSessionSnapshot?: (snapshot: BackendSessionSnapshot) => void
   audienceWorkspace: AudienceWorkspaceState
 }
