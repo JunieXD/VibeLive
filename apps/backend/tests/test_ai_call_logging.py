@@ -256,6 +256,9 @@ async def test_role_provider_records_blocked_visual_summary_call() -> None:
 async def test_memory_extractor_records_request_and_parsed_candidates() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/chat/completions")
+        payload = json.loads(request.content)
+        assert "response_format" not in payload
+        assert "Use this shape: {\"candidates\"" in payload["messages"][0]["content"]
         return httpx.Response(
             200,
             headers={"x-request-id": "memory-provider-1"},

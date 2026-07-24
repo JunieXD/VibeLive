@@ -134,7 +134,7 @@ def test_provider_role_models_and_redacted_capability_endpoints(
                 discovered_model_ids=("viewer-v1",),
                 checks=(
                     CapabilityProbeCheck(
-                        capability="viewer_structured_output",
+                        capability="viewer_json_output",
                         status=CapabilityProbeStatus.PASSED,
                         model_id="viewer-v1",
                     ),

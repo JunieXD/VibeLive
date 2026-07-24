@@ -25,7 +25,7 @@ def test_file_logging_records_redacted_capability_probe_diagnostics(tmp_path: Pa
         status=CapabilityProbeStatus.BLOCKED,
         checks=(
             CapabilityProbeCheck(
-                capability="memory_structured_output",
+                capability="memory_json_output",
                 status=CapabilityProbeStatus.BLOCKED,
                 model_id="sk-memory-secret-key",
                 error_code="upstream_http_error",
@@ -54,7 +54,7 @@ def test_file_logging_records_redacted_capability_probe_diagnostics(tmp_path: Pa
     assert entries[0] == {
         "capability_checks": [
             {
-                "capability": "memory_structured_output",
+                "capability": "memory_json_output",
                 "error_code": "upstream_http_error",
                 "http_status": 429,
                 "model_id": "[REDACTED_SECRET]",

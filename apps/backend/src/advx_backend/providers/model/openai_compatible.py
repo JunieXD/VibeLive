@@ -111,33 +111,9 @@ class OpenAICompatibleConfig:
 _SYSTEM_PROMPT: Final = (
     "Generate concise audience barrage candidates for a live room. "
     "Use only audience_id values supplied in the input. "
-    "Return only the JSON object required by the response schema."
+    "Return exactly one JSON object, with no Markdown or prose. "
+    'Use this shape: {"candidates":[{"audience_id":"audience-id","text":"弹幕内容"}]}.'
 )
-_CANDIDATE_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["candidates"],
-    "properties": {
-        "candidates": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["audience_id", "text"],
-                "properties": {
-                    "audience_id": {"type": "string", "minLength": 1},
-                    "text": {"type": "string", "minLength": 1, "maxLength": 200},
-                },
-            },
-        },
-    },
-}
-_PROBE_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["ok"],
-    "properties": {"ok": {"type": "boolean", "const": True}},
-}
 _PROBE_IMAGE: Final = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAaklEQVR4nO3PAQ2AMADAsMtB"
@@ -147,6 +123,19 @@ _PROBE_IMAGE: Final = (
 )
 _BLOCKING_HTTP_STATUSES: Final = frozenset({401, 402, 403, 408, 429})
 _PROBE_OUTPUT_TOKEN_BUDGET: Final = 4_096
+_STEPFUN_API_HOST: Final = "api.stepfun.com"
+_STEPFUN_REASONING_MODEL: Final = "step-3.7-flash"
+
+
+def default_reasoning_options(base_url: str, model_id: str) -> dict[str, str]:
+    """Return supported low-latency defaults for known reasoning endpoints."""
+
+    if (
+        urlsplit(base_url).hostname == _STEPFUN_API_HOST
+        and model_id.strip() == _STEPFUN_REASONING_MODEL
+    ):
+        return {"reasoning_effort": "low"}
+    return {}
 
 
 class OpenAICompatibleProvider:
@@ -222,7 +211,7 @@ class OpenAICompatibleProvider:
         structured_checks = await asyncio.gather(
             *(
                 self._probe_chat(
-                    capability=f"{role}_structured_output",
+                    capability=f"{role}_json_output",
                     model_id=role_models[role],
                 )
                 for role in structured_roles
@@ -378,7 +367,7 @@ class OpenAICompatibleProvider:
         if image_parts:
             content = [{"type": "text", "text": context_text}, *image_parts]
 
-        return {
+        payload: dict[str, object] = {
             "model": self.config.model,
             "messages": [
                 {"role": "system", "content": _SYSTEM_PROMPT},
@@ -386,15 +375,9 @@ class OpenAICompatibleProvider:
             ],
             "stream": False,
             "n": 1,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "barrage_candidates",
-                    "strict": True,
-                    "schema": _CANDIDATE_SCHEMA,
-                },
-            },
         }
+        payload.update(default_reasoning_options(self.config.base_url, self.config.model))
+        return payload
 
     async def _image_parts(
         self,
@@ -492,10 +475,17 @@ class OpenAICompatibleProvider:
         model_id: str,
         include_image: bool = False,
     ) -> CapabilityProbeCheck:
-        content: str | list[dict[str, object]] = 'Return {"ok":true}.'
+        content: str | list[dict[str, object]] = (
+            'Return exactly this JSON object and no Markdown or prose: {"ok":true}.'
+        )
         if include_image:
             content = [
-                {"type": "text", "text": 'Return {"ok":true}.'},
+                {
+                    "type": "text",
+                    "text": (
+                        'Return exactly this JSON object and no Markdown or prose: {"ok":true}.'
+                    ),
+                },
                 {"type": "image_url", "image_url": {"url": _PROBE_IMAGE}},
             ]
         payload = {
@@ -506,15 +496,8 @@ class OpenAICompatibleProvider:
             # Match the production role budget so reasoning-capable multimodal
             # models can finish before emitting the tiny structured response.
             "max_tokens": _PROBE_OUTPUT_TOKEN_BUDGET,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "capability_probe",
-                    "strict": True,
-                    "schema": _PROBE_SCHEMA,
-                },
-            },
         }
+        payload.update(default_reasoning_options(self.config.base_url, model_id))
         try:
             response = await self._send(
                 "POST",

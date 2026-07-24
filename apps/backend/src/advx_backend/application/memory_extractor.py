@@ -24,6 +24,7 @@ from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleProviderError,
     OpenAICompatibleTimeoutError,
     OpenAICompatibleTransportError,
+    default_reasoning_options,
 )
 from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeConfig,
@@ -73,59 +74,17 @@ class _MemoryExtractionOutput(BaseModel):
     candidates: list[_MemoryOutputModel] = Field(default_factory=list, max_length=32)
 
 
-_MEMORY_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["candidates"],
-    "properties": {
-        "candidates": {
-            "type": "array",
-            "maxItems": 32,
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": [
-                    "memory_type",
-                    "content",
-                    "evidence_event_ids",
-                    "tags",
-                    "importance",
-                    "confidence",
-                ],
-                "properties": {
-                    "memory_type": {
-                        "type": "string",
-                        "enum": [
-                            "user_preference",
-                            "real_world_fact",
-                            "room_lore",
-                            "shared_experience",
-                        ],
-                    },
-                    "content": {"type": "string", "minLength": 1, "maxLength": 4_000},
-                    "evidence_event_ids": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 128,
-                        "items": {"type": "string", "minLength": 1, "maxLength": 128},
-                    },
-                    "tags": {
-                        "type": "array",
-                        "maxItems": 32,
-                        "items": {"type": "string", "minLength": 1, "maxLength": 128},
-                    },
-                    "importance": {"type": "number", "minimum": 0, "maximum": 1},
-                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                },
-            },
-        }
-    },
-}
+_MEMORY_JSON_EXAMPLE: Final = (
+    '{"candidates":[{"memory_type":"room_lore","content":"观众喜欢逆风翻盘",'
+    '"evidence_event_ids":["event-id"],"tags":["游戏"],'
+    '"importance":0.7,"confidence":0.8}]}'
+)
 _MEMORY_SYSTEM_PROMPT: Final = (
     "Extract zero or more durable room memory candidates from public events only. "
     "Evidence IDs must come from the supplied events. Do not infer missing evidence. "
     "User preferences and real-world facts still require downstream non-AI evidence validation. "
-    "Return only the required JSON object."
+    "Return exactly one JSON object, with no Markdown or prose. "
+    f"Use this shape: {_MEMORY_JSON_EXAMPLE}"
 )
 
 
@@ -211,15 +170,13 @@ class OpenAICompatibleMemoryExtractor:
             "stream": False,
             "n": 1,
             "max_tokens": 4_096,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "room_memory_candidates",
-                    "strict": True,
-                    "schema": _MEMORY_SCHEMA,
-                },
-            },
         }
+        payload.update(
+            default_reasoning_options(
+                self.config.base_url,
+                self.config.provider.memory_model,
+            )
+        )
         correlation_source = json.dumps(
             {
                 "session_id": session_id,

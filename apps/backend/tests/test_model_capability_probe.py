@@ -3,9 +3,15 @@ import json
 import httpx
 import pytest
 
+from advx_backend.contracts.viewer_runtime import ProviderRuntimeSpec
 from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleConfig,
     OpenAICompatibleProvider,
+    default_reasoning_options,
+)
+from advx_backend.providers.model.viewer_runtime import (
+    OpenAICompatibleViewerRuntimeConfig,
+    OpenAICompatibleViewerRuntimeProvider,
 )
 
 
@@ -21,11 +27,64 @@ def provider_with(client: httpx.AsyncClient) -> OpenAICompatibleProvider:
 
 
 @pytest.mark.asyncio
+async def test_role_payload_uses_json_examples_and_stepfun_low_reasoning() -> None:
+    async with httpx.AsyncClient() as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            OpenAICompatibleViewerRuntimeConfig(
+                base_url="https://api.stepfun.com/step_plan/v1",
+                provider=ProviderRuntimeSpec(
+                    provider_profile_id="default",
+                    viewer_model="step-3.7-flash",
+                    memory_model="step-3.7-flash",
+                    visual_summary_model="step-3.7-flash",
+                ),
+                api_key="test-key",
+            ),
+            client=client,
+        )
+        payload = provider._json_payload(
+            model_id="step-3.7-flash",
+            system_prompt='Return exactly one JSON object. Use this shape: {"summary":"text"}',
+            content="{}",
+        )
+        await provider.aclose()
+
+    assert "response_format" not in payload
+    assert payload["reasoning_effort"] == "low"
+    assert payload["messages"] == [
+        {
+            "role": "system",
+            "content": 'Return exactly one JSON object. Use this shape: {"summary":"text"}',
+        },
+        {"role": "user", "content": "{}"},
+    ]
+
+
+def test_stepfun_flash_defaults_to_low_reasoning_effort() -> None:
+    assert default_reasoning_options(
+        "https://api.stepfun.com/step_plan/v1",
+        "step-3.7-flash",
+    ) == {"reasoning_effort": "low"}
+    assert default_reasoning_options(
+        "https://api.stepfun.com/step_plan/v1",
+        "step-router-v1",
+    ) == {}
+    assert default_reasoning_options(
+        "https://models.example/v1",
+        "step-3.7-flash",
+    ) == {}
+
+
+@pytest.mark.asyncio
 async def test_image_probe_allows_the_production_output_budget() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         assert payload["max_tokens"] == 4_096
         assert isinstance(payload["messages"][0]["content"], list)
+        assert "response_format" not in payload
+        assert payload["messages"][0]["content"][0]["text"] == (
+            'Return exactly this JSON object and no Markdown or prose: {"ok":true}.'
+        )
         return httpx.Response(
             200,
             json={
@@ -122,7 +181,7 @@ async def test_capability_probe_only_checks_active_model_roles() -> None:
     )
 
     assert result.status.value == "passed"
-    assert "director_structured_output" not in {
+    assert "director_json_output" not in {
         check.capability for check in result.checks
     }
     assert requested_models.count("viewer-model") == 3
