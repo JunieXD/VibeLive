@@ -630,6 +630,14 @@ class OpenAICompatibleProvider:
         choice = choices[0]
         if not isinstance(choice, dict):
             raise OpenAICompatibleProtocolError("response choice must be an object")
+        finish_reason = choice.get("finish_reason")
+        if finish_reason == "length":
+            raise OpenAICompatibleProtocolError(
+                "response exhausted its output token budget",
+                error_code="output_token_limit",
+            )
+        if finish_reason not in {None, "stop"}:
+            raise OpenAICompatibleProtocolError("response did not finish normally")
         message = choice.get("message")
         if not isinstance(message, dict):
             raise OpenAICompatibleProtocolError("response choice must contain a message object")

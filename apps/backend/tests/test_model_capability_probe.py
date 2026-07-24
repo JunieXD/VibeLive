@@ -10,6 +10,7 @@ from advx_backend.contracts.viewer_runtime import (
 )
 from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleConfig,
+    OpenAICompatibleProtocolError,
     OpenAICompatibleProvider,
     default_reasoning_options,
 )
@@ -195,6 +196,31 @@ async def test_probe_reports_output_token_exhaustion_without_reading_reasoning()
 
     assert check.status.value == "failed"
     assert check.error_code == "output_token_limit"
+    await provider.aclose()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_candidate_parser_rejects_a_truncated_json_mode_response() -> None:
+    client = httpx.AsyncClient()
+    provider = provider_with(client)
+    response = httpx.Response(
+        200,
+        json={
+            "choices": [
+                {
+                    "message": {"content": '{"candidates":['},
+                    "finish_reason": "length",
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(OpenAICompatibleProtocolError, match="output token budget") as raised:
+        provider._parse_candidates(response)
+
+    assert raised.value.error_code == "output_token_limit"
+
     await provider.aclose()
     await client.aclose()
 
