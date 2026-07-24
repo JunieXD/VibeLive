@@ -1847,7 +1847,7 @@ export interface components {
             frame_bundle?: components["schemas"]["FrameBundleSettings"];
             /** @default direct_frames */
             viewer_visual_input_mode: components["schemas"]["ViewerVisualInputMode"];
-            /** @default strict */
+            /** @default resilient */
             director_failure_mode: components["schemas"]["DirectorFailureMode"];
             /**
              * Max In Flight Viewer Requests
@@ -1856,7 +1856,7 @@ export interface components {
             max_in_flight_viewer_requests: number;
             /**
              * Viewer Request Ttl Ms
-             * @default 15000
+             * @default 90000
              */
             viewer_request_ttl_ms: number;
             /**
@@ -2192,7 +2192,7 @@ export interface components {
          * ViewerVisualInputMode
          * @enum {string}
          */
-        ViewerVisualInputMode: "direct_frames" | "shared_summary";
+        ViewerVisualInputMode: "direct_frames" | "shared_summary" | "text_only";
         /** ClientAudioCommit */
         ClientAudioCommit: {
             /** Protocol Version */

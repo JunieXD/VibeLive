@@ -279,6 +279,10 @@ class ViewerRuntimeCoordinator:
                 runtime=runtime,
             )
         except Exception:
+            logger.exception(
+                "Director failed for observation %s",
+                wave.observation_id,
+            )
             self._record_observation_trace(
                 wave=wave,
                 runtime=runtime,
@@ -778,6 +782,14 @@ class ViewerRuntimeCoordinator:
         mode = runtime.settings.viewer_visual_input_mode
         if mode is ViewerVisualInputMode.DIRECT_FRAMES:
             return wave
+        if mode is ViewerVisualInputMode.TEXT_ONLY:
+            return wave.model_copy(
+                update={
+                    "visual_input_mode": ViewerVisualInputMode.TEXT_ONLY,
+                    "frame_bundle": None,
+                    "shared_visual_summary": None,
+                }
+            )
         if wave.frame_bundle is None or self._visual_summarizer is None:
             return None
         try:

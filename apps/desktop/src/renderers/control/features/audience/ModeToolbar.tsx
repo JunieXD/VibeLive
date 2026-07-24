@@ -208,6 +208,7 @@ export function ModeToolbar({
               })
             }
           >
+            <option value="text_only">纯文本</option>
             <option value="direct_frames">独立帧</option>
             <option value="shared_summary">共享摘要</option>
           </select>

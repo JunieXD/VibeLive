@@ -284,7 +284,8 @@ function parseVisualSettings(
     return { ...DEFAULT_VISUAL_SETTINGS }
   }
   if (value.viewerVisualInputMode !== 'direct_frames' &&
-    value.viewerVisualInputMode !== 'shared_summary') {
+    value.viewerVisualInputMode !== 'shared_summary' &&
+    value.viewerVisualInputMode !== 'text_only') {
     issues.push(`${path}.viewerVisualInputMode is invalid`)
   }
   if (!['latest_n', 'evenly_spaced', 'change_peaks'].includes(

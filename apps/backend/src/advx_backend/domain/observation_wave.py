@@ -16,6 +16,7 @@ class FrameSelectionStrategy(StrEnum):
 class ViewerVisualInputMode(StrEnum):
     DIRECT_FRAMES = "direct_frames"
     SHARED_SUMMARY = "shared_summary"
+    TEXT_ONLY = "text_only"
 
 
 class ObservationTrigger(StrEnum):
@@ -117,4 +118,8 @@ class ObservationWave(ObservationDomainModel):
             and self.shared_visual_summary is not None
         ):
             raise ValueError("direct_frames mode cannot include shared_visual_summary")
+        if self.visual_input_mode is ViewerVisualInputMode.TEXT_ONLY and (
+            self.frame_bundle is not None or self.shared_visual_summary is not None
+        ):
+            raise ValueError("text_only mode cannot include visual input")
         return self

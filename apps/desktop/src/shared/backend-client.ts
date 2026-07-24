@@ -147,9 +147,9 @@ export function compileCanonicalRuntimeSpec(
         frame_quality: Math.max(1, Math.min(100, Math.round(visual.frameQuality * 100)))
       },
       viewer_visual_input_mode: visual.viewerVisualInputMode,
-      director_failure_mode: 'strict',
+      director_failure_mode: 'resilient',
       max_in_flight_viewer_requests: Math.min(12, activeMode.viewerCount),
-      viewer_request_ttl_ms: 15_000,
+      viewer_request_ttl_ms: 90_000,
       viewer_queue_capacity: 64,
       observation_merge_window_ms: 250,
       screen_change_threshold: 0.2,

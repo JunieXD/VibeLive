@@ -547,6 +547,10 @@ class ViewerRuntime:
             )
             return "expired"
         except Exception:
+            logger.exception(
+                "Viewer provider failed for request %s",
+                request.generation_request_id,
+            )
             item.completed_at_ms = self._clock.now_ms()
             self._record_trace(
                 item,

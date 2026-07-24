@@ -52,9 +52,9 @@ class ProviderRuntimeSpec(RuntimeContractModel):
 class RuntimeSettings(RuntimeContractModel):
     frame_bundle: FrameBundleSettings = Field(default_factory=FrameBundleSettings)
     viewer_visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES
-    director_failure_mode: DirectorFailureMode = DirectorFailureMode.STRICT
+    director_failure_mode: DirectorFailureMode = DirectorFailureMode.RESILIENT
     max_in_flight_viewer_requests: int = Field(default=12, ge=1, le=32)
-    viewer_request_ttl_ms: int = Field(default=15_000, ge=1)
+    viewer_request_ttl_ms: int = Field(default=90_000, ge=1)
     viewer_queue_capacity: int = Field(default=64, ge=1, le=1024)
     observation_merge_window_ms: int = Field(default=250, ge=0)
     screen_change_threshold: float = Field(default=0.2, ge=0, le=1)
@@ -304,8 +304,14 @@ class ViewerGenerationRequest(RuntimeContractModel):
         if self.visual_input_mode is ViewerVisualInputMode.DIRECT_FRAMES:
             if self.frame_bundle is None or self.shared_visual_summary is not None:
                 raise ValueError("direct_frames requires only frame_bundle")
-        elif self.shared_visual_summary is None or self.frame_bundle is not None:
+        elif self.visual_input_mode is ViewerVisualInputMode.SHARED_SUMMARY and (
+            self.shared_visual_summary is None or self.frame_bundle is not None
+        ):
             raise ValueError("shared_summary requires only shared_visual_summary")
+        elif self.visual_input_mode is ViewerVisualInputMode.TEXT_ONLY and (
+            self.frame_bundle is not None or self.shared_visual_summary is not None
+        ):
+            raise ValueError("text_only cannot include visual input")
         return self
 
 

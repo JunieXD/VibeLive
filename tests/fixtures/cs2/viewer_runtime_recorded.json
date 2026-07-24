@@ -1419,9 +1419,9 @@
           "frame_quality": 82
         },
         "viewer_visual_input_mode": "direct_frames",
-        "director_failure_mode": "strict",
+        "director_failure_mode": "resilient",
         "max_in_flight_viewer_requests": 12,
-        "viewer_request_ttl_ms": 15000,
+        "viewer_request_ttl_ms": 90000,
         "viewer_queue_capacity": 64,
         "observation_merge_window_ms": 250,
         "screen_change_threshold": 0.2,
@@ -1430,7 +1430,7 @@
         "max_consecutive_ambient_waves": 2
       }
     },
-    "config_hash": "7553099c9332d6cc1174e784bc349d5808bed423981b225f2cad88424cfbbd73",
+    "config_hash": "7090b241bd28ea544580b533efa045e365fa052b53965d9b719ba3af6dd18819",
     "created_at_ms": 2000,
     "events": [
       {
@@ -3064,9 +3064,9 @@
         "frame_quality": 82
       },
       "viewer_visual_input_mode": "direct_frames",
-      "director_failure_mode": "strict",
+      "director_failure_mode": "resilient",
       "max_in_flight_viewer_requests": 12,
-      "viewer_request_ttl_ms": 15000,
+      "viewer_request_ttl_ms": 90000,
       "viewer_queue_capacity": 64,
       "observation_merge_window_ms": 250,
       "screen_change_threshold": 0.2,

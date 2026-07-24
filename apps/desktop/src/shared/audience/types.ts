@@ -55,7 +55,7 @@ export type PersonaOverride = Partial<
 >
 
 export type AudienceAmbience = 'natural' | 'continuous'
-export type ViewerVisualInputMode = 'direct_frames' | 'shared_summary'
+export type ViewerVisualInputMode = 'direct_frames' | 'shared_summary' | 'text_only'
 export type FrameSelectionStrategy = 'latest_n' | 'evenly_spaced' | 'change_peaks'
 
 export type AudienceVisualSettings = {
