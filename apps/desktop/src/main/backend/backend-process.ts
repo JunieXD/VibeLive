@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_HEALTH_INTERVAL_MS = 100;
 const STOP_TIMEOUT_MS = 3_000;
+const BACKEND_PROTOCOL_VERSION = 2;
 
 export type BackendProcessExit = {
   code: number | null;
@@ -48,7 +49,12 @@ export async function waitForBackendHealth(options: BackendHealthOptions): Promi
           status?: unknown;
           protocol_version?: unknown;
         };
-        if (payload.status === "ok" && payload.protocol_version === 1) return;
+        if (
+          payload.status === "ok" &&
+          payload.protocol_version === BACKEND_PROTOCOL_VERSION
+        ) {
+          return;
+        }
         lastError = new Error("本地后端返回了不兼容的健康状态。");
       } else {
         lastError = new Error(`本地后端健康检查返回 HTTP ${response.status}。`);
@@ -147,10 +153,10 @@ export class SpawnedBackendProcess implements BackendProcessController {
     }
 
     const exited = onceTermination(child);
-    child.kill("SIGTERM");
+    await terminateChildProcess(child, false);
     await Promise.race([exited, delay(STOP_TIMEOUT_MS)]);
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
+      await terminateChildProcess(child, true);
       await Promise.race([exited, delay(500)]);
     }
     this.stopping = false;
@@ -216,6 +222,29 @@ function onceTermination(child: ChildProcessWithoutNullStreams): Promise<void> {
   return new Promise((resolve) => {
     child.once("exit", () => resolve());
     child.once("close", () => resolve());
+  });
+}
+
+async function terminateChildProcess(
+  child: ChildProcessWithoutNullStreams,
+  force: boolean
+): Promise<void> {
+  if (process.platform !== "win32" || child.pid === undefined) {
+    child.kill(force ? "SIGKILL" : "SIGTERM");
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const taskkill = spawn(
+      "taskkill.exe",
+      ["/pid", String(child.pid), "/t", ...(force ? ["/f"] : [])],
+      { stdio: "ignore", windowsHide: true }
+    );
+    taskkill.once("error", () => {
+      child.kill(force ? "SIGKILL" : "SIGTERM");
+      resolve();
+    });
+    taskkill.once("exit", () => resolve());
   });
 }
 

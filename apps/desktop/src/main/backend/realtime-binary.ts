@@ -16,6 +16,17 @@ const MAX_TEXT_BYTES = 128;
 const MAX_AUDIO_BYTES = 1_048_576;
 const MAX_IMAGE_BYTES = 4_194_304;
 
+export function formatImageMimeType(mimeType: string, changeScore: number): string {
+  const normalized = mimeType.trim().toLowerCase();
+  if (!["image/jpeg", "image/png", "image/webp"].includes(normalized)) {
+    throw new Error("Image MIME type is not supported.");
+  }
+  if (!Number.isFinite(changeScore) || changeScore < 0 || changeScore > 1) {
+    throw new Error("changeScore must be a finite number between zero and one.");
+  }
+  return `${normalized};advx-change-score=${changeScore.toFixed(6)}`;
+}
+
 export function encodeBinaryEnvelope(input: BinaryEnvelopeInput): Uint8Array {
   const sessionId = encodeText(input.sessionId, "sessionId");
   const inputId = encodeText(input.inputId, "inputId");

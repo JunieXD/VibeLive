@@ -1,4 +1,21 @@
+import type { components } from "@advx/contracts";
 import type { AudienceWorkspaceState } from "./audience";
+import type {
+  DebugTraceQueryResult,
+  AutoIngestResponse,
+  CandidateCommitResponse,
+  MemeCandidate,
+  MemoryResetResponse,
+  ModeMeme,
+  ModeMemeEdit,
+  ProviderProbeResult,
+  RoomLongTermMemory,
+  RoomMemoryEdit,
+  RoomMemoryHead,
+  RuntimeApplySnapshot,
+  RuntimeQuerySnapshot,
+  TextSubmitTarget
+} from "./backend-client";
 
 export type DesktopSource = {
   id: string
@@ -20,27 +37,59 @@ export type BarrageEvent = {
   color?: string
   createdAt: number
   mode?: BarrageMode
+  roomId?: string
+  sessionId?: string
+  audienceEpoch?: number
+  observationId?: string
+  generationRequestId?: string
+  viewerInstanceId?: string
+  personaId?: string
+  viewerSequence?: number
+  reactionType?: string
+  evidenceRefs?: readonly BarrageEvidenceRef[]
+  expiresAt?: number
+}
+
+export type BarrageEvidenceRef = {
+  source: 'event' | 'frame'
+  eventId: string | null
+  frameIndex: number | null
 }
 
 export type ModelConfig = {
   baseUrl: string
+  providerProfileId: string
   model: string
+  directorModel: string
+  viewerModel: string
+  memoryModel: string
+  visualSummaryModel: string
   apiKey: string
   asrApiKey: string
 }
 
 export type ModelConfigStatus = {
   baseUrl: string | null
+  providerProfileId: string | null
   model: string | null
+  directorModel: string | null
+  viewerModel: string | null
+  memoryModel: string | null
+  visualSummaryModel: string | null
   modelApiKeyStored: boolean
   asrApiKeyStored: boolean
 }
 
+export type RuntimeModelProviderCandidate =
+  components["schemas"]["RuntimeModelProviderCandidate"]
+
 export type SaveModelConfigResult = {
   ok: boolean
+  providerProfileId: string
   securelyStored: boolean
   backendConfigured: boolean
   restartRequired: boolean
+  runtimeApplyRequired: boolean
 }
 
 export type BackendConnectionState =
@@ -62,14 +111,33 @@ export type BackendRuntimeStatus = {
   connection: BackendConnectionState
   providersConfigured: boolean
   startupError: string | null
+  recoverableRuntimeSessionId: string | null
   session: BackendSessionSnapshot
+}
+
+export type RuntimeRoomIdentity = {
+  roomId: string
+  displayName: string
+  revision: number
 }
 
 export type BackendBarrageEvent = {
   barrageId: string
   audienceId: string
+  audienceName: string
   text: string
   createdAt: number
+  roomId: string
+  sessionId: string
+  audienceEpoch: number
+  observationId: string
+  generationRequestId: string
+  viewerInstanceId: string
+  personaId: string
+  viewerSequence: number
+  reactionType: string
+  evidenceRefs: readonly BarrageEvidenceRef[]
+  expiresAt: number
 }
 
 export type RealtimeMediaInput = {
@@ -80,6 +148,7 @@ export type RealtimeMediaInput = {
 
 export type RealtimeFrameInput = RealtimeMediaInput & {
   mimeType: string
+  changeScore: number
 }
 
 export type SaveAudienceWorkspaceResult = {
@@ -154,13 +223,83 @@ export type ControlApi = {
   getModelConfigStatus: () => Promise<ModelConfigStatus>
   getBackendStatus: () => Promise<BackendRuntimeStatus>
   restartBackend: () => Promise<BackendRuntimeStatus>
-  startBackendSession: () => Promise<BackendSessionSnapshot>
+  startBackendSession: (
+    workspace: AudienceWorkspaceState,
+    clientRequestId: string
+  ) => Promise<BackendSessionSnapshot>
   pauseBackendSession: () => Promise<BackendSessionSnapshot>
   resumeBackendSession: () => Promise<BackendSessionSnapshot>
   stopBackendSession: () => Promise<BackendSessionSnapshot>
-  submitUserText: (text: string) => Promise<void>
+  queryAudienceRuntime: (sessionId: string) => Promise<RuntimeQuerySnapshot>
+  applyAudienceRuntime: (
+    sessionId: string,
+    workspace: AudienceWorkspaceState,
+    baseRevision: number
+  ) => Promise<RuntimeApplySnapshot>
+  rollbackAudienceRuntime: (
+    sessionId: string,
+    baseRevision: number,
+    targetRevision: number
+  ) => Promise<RuntimeApplySnapshot>
+  recoverAudienceRuntime: (sessionId: string) => Promise<RuntimeQuerySnapshot>
+  getAudienceRuntimeConfigHash: (
+    workspace: AudienceWorkspaceState,
+    configRevision: number,
+    room: RuntimeRoomIdentity
+  ) => Promise<string>
+  probeAudienceProvider: () => Promise<ProviderProbeResult>
+  queryDebugTraces: (
+    sessionId: string,
+    cursor?: string
+  ) => Promise<DebugTraceQueryResult>
+  submitUserText: (text: string, target?: TextSubmitTarget) => Promise<void>
   submitAudioSegment: (input: RealtimeMediaInput) => Promise<void>
   submitVisualFrame: (input: RealtimeFrameInput) => Promise<void>
+  listRoomMemories: (roomId: string) => Promise<RoomLongTermMemory[]>
+  getRoomMemoryHead: (roomId: string) => Promise<RoomMemoryHead>
+  editRoomMemory: (
+    roomId: string,
+    memoryId: string,
+    edit: RoomMemoryEdit
+  ) => Promise<RoomLongTermMemory>
+  revokeRoomMemory: (
+    roomId: string,
+    memoryId: string,
+    expectedRevision: number
+  ) => Promise<RoomLongTermMemory>
+  deleteRoomMemory: (
+    roomId: string,
+    memoryId: string,
+    expectedRevision: number
+  ) => Promise<void>
+  resetRoomMemories: (roomId: string, expectedRevision: number) => Promise<MemoryResetResponse>
+  listModeMemes: (namespaceId: string) => Promise<ModeMeme[]>
+  listPendingMemeCandidates: (namespaceId: string) => Promise<MemeCandidate[]>
+  getModeMemeAutoIngest: (namespaceId: string) => Promise<AutoIngestResponse>
+  setModeMemeAutoIngest: (
+    namespaceId: string,
+    enabled: boolean,
+    expectedRevision: number
+  ) => Promise<AutoIngestResponse>
+  approveMemeCandidate: (
+    namespaceId: string,
+    candidateId: string
+  ) => Promise<CandidateCommitResponse>
+  rejectMemeCandidate: (
+    namespaceId: string,
+    candidateId: string
+  ) => Promise<MemeCandidate>
+  mutateModeMeme: (
+    namespaceId: string,
+    memeId: string,
+    action: 'undo' | 'revoke' | 'disable' | 'restore' | 'pin' | 'unpin' | 'archive' | 'restart',
+    expectedRevision: number
+  ) => Promise<ModeMeme>
+  editModeMeme: (
+    namespaceId: string,
+    memeId: string,
+    edit: ModeMemeEdit
+  ) => Promise<ModeMeme>
   loadAudienceWorkspace: () => Promise<AudienceWorkspaceState | null>
   saveAudienceWorkspace: (
     workspace: AudienceWorkspaceState

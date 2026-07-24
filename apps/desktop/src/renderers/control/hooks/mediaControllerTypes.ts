@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/contracts'
 import type { SessionAction, SessionStatus } from '../../../shared/session'
 import type { VisualMode, VisualSettings } from '../visual'
+import type { AudienceWorkspaceState } from '../../../shared/audience'
 
 export type UseMediaControllerOptions = {
   sessionStatus: SessionStatus
@@ -20,6 +21,7 @@ export type UseMediaControllerOptions = {
   providersConfigured?: boolean
   backendSessionId?: string | null
   onBackendSessionSnapshot?: (snapshot: BackendSessionSnapshot) => void
+  audienceWorkspace: AudienceWorkspaceState
 }
 
 export type FatalMediaKind = 'display' | 'camera' | 'microphone'

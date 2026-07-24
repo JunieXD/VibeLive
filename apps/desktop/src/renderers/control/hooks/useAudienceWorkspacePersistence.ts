@@ -7,7 +7,6 @@ import {
   type SetStateAction
 } from 'react'
 import {
-  archiveStaleMemes,
   createInitialAudienceWorkspace,
   type AudienceWorkspaceState
 } from '../../../shared/audience'
@@ -25,6 +24,7 @@ type AudienceWorkspacePersistence = {
   reset: () => void
   retry: () => Promise<void>
   documentsNeedSync: boolean
+  savedFingerprint: string | null
 }
 
 export function useAudienceWorkspacePersistence({
@@ -36,6 +36,7 @@ export function useAudienceWorkspacePersistence({
   const [ready, setReady] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [documentsNeedSync, setDocumentsNeedSync] = useState(false)
+  const [savedFingerprint, setSavedFingerprint] = useState<string | null>(null)
 
   const persistenceErrorRef = useRef(false)
   const documentSyncErrorRef = useRef(false)
@@ -48,8 +49,12 @@ export function useAudienceWorkspacePersistence({
   readyRef.current = ready
   onSystemActivityRef.current = onSystemActivity
 
-  const handleSaveResult = useCallback((result: SaveAudienceWorkspaceResult): void => {
+  const handleSaveResult = useCallback((
+    result: SaveAudienceWorkspaceResult,
+    savedWorkspace?: AudienceWorkspaceState
+  ): void => {
     persistenceErrorRef.current = false
+    if (savedWorkspace) setSavedFingerprint(JSON.stringify(savedWorkspace))
     if (result.personaDocumentsSynced) {
       documentSyncErrorRef.current = false
       setDocumentsNeedSync(false)
@@ -81,12 +86,9 @@ export function useAudienceWorkspacePersistence({
       const storedWorkspace = await window.advx.loadAudienceWorkspace()
       if (loadRequestRef.current !== requestId) return
       const loadedWorkspace = storedWorkspace ?? createInitialAudienceWorkspace()
-      const hydratedWorkspace = {
-        ...loadedWorkspace,
-        memes: archiveStaleMemes(loadedWorkspace.memes, new Date().toISOString())
-      }
-      workspaceRef.current = hydratedWorkspace
-      setWorkspace(hydratedWorkspace)
+      workspaceRef.current = loadedWorkspace
+      setWorkspace(loadedWorkspace)
+      setSavedFingerprint(JSON.stringify(loadedWorkspace))
       setLoadError(null)
       readyRef.current = true
       setReady(true)
@@ -106,6 +108,7 @@ export function useAudienceWorkspacePersistence({
     workspaceRef.current = initialWorkspace
     readyRef.current = true
     setWorkspace(initialWorkspace)
+    setSavedFingerprint(null)
     setLoadError(null)
     setReady(true)
     onSystemActivityRef.current(
@@ -125,7 +128,7 @@ export function useAudienceWorkspacePersistence({
     const timer = window.setTimeout(() => {
       void window.advx
         .saveAudienceWorkspace(workspace)
-        .then(handleSaveResult)
+        .then((result) => handleSaveResult(result, workspace))
         .catch(reportSaveFailure)
     }, 350)
     return () => window.clearTimeout(timer)
@@ -136,7 +139,7 @@ export function useAudienceWorkspacePersistence({
     const timer = window.setInterval(() => {
       void window.advx
         .saveAudienceWorkspace(workspaceRef.current)
-        .then(handleSaveResult)
+        .then((result) => handleSaveResult(result, workspaceRef.current))
         .catch(reportSaveFailure)
     }, 10_000)
     return () => window.clearInterval(timer)
@@ -151,7 +154,7 @@ export function useAudienceWorkspacePersistence({
         }
         void window.advx
           .saveAudienceWorkspace(workspaceRef.current)
-          .then(handleSaveResult)
+          .then((result) => handleSaveResult(result, workspaceRef.current))
           .catch(reportSaveFailure)
           .finally(() => window.advx.confirmCloseAfterAudienceSave())
       }),
@@ -165,6 +168,7 @@ export function useAudienceWorkspacePersistence({
     loadError,
     reset,
     retry,
-    documentsNeedSync
+    documentsNeedSync,
+    savedFingerprint
   }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import type { BackendConnectionState, ColorTheme } from '../../shared/contracts'
 import { AppShell, type AppShellStatusItem } from './app/AppShell'
 import { AudienceWorkspace } from './AudienceWorkspace'
@@ -7,14 +7,16 @@ import { SettingsView } from './features/settings/SettingsView'
 import { SourcePickerDialog } from './features/source-picker/SourcePickerDialog'
 import { useActivityFeed } from './hooks/useActivityFeed'
 import { useAudienceWorkspacePersistence } from './hooks/useAudienceWorkspacePersistence'
+import { useAudienceRuntimeControl } from './hooks/useAudienceRuntimeControl'
 import { useBackendRuntime } from './hooks/useBackendRuntime'
 import { useColorTheme } from './hooks/useColorTheme'
-import { useDemoBarrage } from './hooks/useDemoBarrage'
+import { useAudienceBarrage } from './hooks/useAudienceBarrage'
 import { useElapsedTime } from './hooks/useElapsedTime'
 import { useMediaController } from './hooks/useMediaController'
 import { useModelConfig } from './hooks/useModelConfig'
 import { useOverlaySettings } from './hooks/useOverlaySettings'
 import { useVisualPipeline } from './hooks/useVisualPipeline'
+import { useSharedBrain } from './hooks/useSharedBrain'
 import {
   selectActiveView,
   selectDispatchSession,
@@ -41,27 +43,36 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
   const session = useControlStore(selectSession)
   const dispatchSession = useControlStore(selectDispatchSession)
   const { colorTheme, toggleColorTheme } = useColorTheme(initialColorTheme)
-  const sessionStartedRef = useRef<() => void>(() => undefined)
-  const handleSessionStarted = useCallback(() => sessionStartedRef.current(), [])
-
   const backend = useBackendRuntime()
   const activityFeed = useActivityFeed()
   const audience = useAudienceWorkspacePersistence({
+    onSystemActivity: activityFeed.appendSystemActivity
+  })
+  const audienceRuntime = useAudienceRuntimeControl({
+    workspace: audience.workspace,
+    persistenceReady: audience.ready,
+    savedFingerprint: audience.savedFingerprint,
+    sessionId: backend.status?.session.sessionId,
+    recoverableSessionId: backend.status?.recoverableRuntimeSessionId,
+    backendConnected: backend.connection === 'connected',
+    providerConfigured: backend.status?.providersConfigured ?? false,
+    sessionStatus: session.status,
     onSystemActivity: activityFeed.appendSystemActivity
   })
   const media = useMediaController({
     sessionStatus: session.status,
     dispatchSession,
     onSystemActivity: activityFeed.appendSystemActivity,
-    onSessionStarted: handleSessionStarted,
+    onSessionStarted: () => undefined,
     backendConnected: backend.connection === 'connected',
     providersConfigured: backend.status?.providersConfigured ?? false,
     backendSessionId: backend.status?.session.sessionId,
-    onBackendSessionSnapshot: backend.applySessionSnapshot
+    onBackendSessionSnapshot: backend.applySessionSnapshot,
+    audienceWorkspace: audience.workspace
   })
-  const barrage = useDemoBarrage({
+  const barrage = useAudienceBarrage({
     workspace: audience.workspace,
-    setWorkspace: audience.setWorkspace,
+    runtimeViewers: audienceRuntime.runtime?.viewers ?? [],
     sessionStatus: session.status,
     overlayVisible: media.overlayVisible,
     showOverlay: media.showOverlay,
@@ -71,11 +82,32 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     appendUserActivity: activityFeed.appendUserActivity,
     appendSystemActivity: activityFeed.appendSystemActivity,
     clearAudienceActivity: activityFeed.clearAudienceActivity,
-    backendConnected: backend.connection === 'connected'
   })
+  const activeAudienceMode =
+    audience.workspace.modeState.modes.find(
+      (mode) => mode.id === audience.workspace.modeState.activeModeId
+    ) ?? audience.workspace.modeState.modes[0]
+  const sharedBrain = useSharedBrain({
+    roomId: audienceRuntime.runtime?.room_id ?? null,
+    namespaceId: activeAudienceMode?.namespaceId ?? null,
+    enabled: backend.connection === 'connected' && Boolean(audienceRuntime.runtime)
+  })
+  const appliedFrameBundle =
+    audienceRuntime.runtime?.canonical_runtime_spec.settings?.frame_bundle
+  const appliedFramePolicy = appliedFrameBundle
+    ? {
+        ...activeAudienceMode.visualSettings,
+        frameBundleSize: appliedFrameBundle.frame_bundle_size,
+        frameWindowMs: appliedFrameBundle.frame_window_ms,
+        frameSelectionStrategy: appliedFrameBundle.frame_selection_strategy,
+        frameMaxDimension: appliedFrameBundle.frame_max_dimension,
+        frameQuality: appliedFrameBundle.frame_quality / 100
+      }
+    : activeAudienceMode.visualSettings
   const visualPipeline = useVisualPipeline({
     sessionStatus: session.status,
     visualSettings: media.visualSettings,
+    framePolicy: appliedFramePolicy,
     captureStream: media.captureStream,
     cameraStream: media.cameraStream,
     captureStreamRef: media.captureStreamRef,
@@ -92,11 +124,6 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     backendConnection: backend.connection,
     onBackendStatus: backend.applyStatus
   })
-
-  useEffect(() => {
-    sessionStartedRef.current = () =>
-      barrage.emitBarrage('直播开始了，先热个场。', 'scroll', true)
-  }, [barrage.emitBarrage])
 
   useEffect(() => {
     const status = backend.status
@@ -166,10 +193,11 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
         onColorThemeToggle={toggleColorTheme}
         sessionStatus={session.status}
         audienceCount={barrage.activeAudience.length}
-        modeName={barrage.runtime.mode.name}
+        modeName={activeAudienceMode?.name ?? '未选择'}
         elapsedSeconds={elapsedSeconds}
         barrageTotal={barrage.barrageTotal}
         statusItems={statusItems}
+        roomId={audienceRuntime.runtime?.room_id ?? '未启动'}
         notice={
           backend.notice
             ? {
@@ -210,6 +238,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               microphoneLevel: media.microphoneLevel,
               message: activityFeed.message,
               messageSending: barrage.messageSending,
+              providerProbe: audienceRuntime.probe,
+              targetSuggestions: barrage.targetSuggestions,
               pipPreviewStyle: media.pipPreviewStyle,
               videoRef: media.videoRef,
               cameraVideoRef: media.cameraVideoRef,
@@ -220,7 +250,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               onTogglePause: media.togglePause,
               onClearBarrage: barrage.clearBarrage,
               onToggleOverlay: media.toggleOverlay,
-              onMessageChange: activityFeed.setMessage,
+              onMessageChange: barrage.changeMessage,
+              onSelectMessageTarget: barrage.selectMessageTarget,
               onSendUserMessage: () => void barrage.sendUserMessage()
             }}
             chat={{
@@ -275,13 +306,46 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             onChange={audience.setWorkspace}
             onRetryLoad={() => void audience.retry()}
             onResetRejected={audience.reset}
+            runtimeControl={{
+              runtime: audienceRuntime.runtime,
+              autoApply: audienceRuntime.autoApply,
+              pending: audienceRuntime.pending,
+              canApply: audienceRuntime.canApply,
+              applying: audienceRuntime.applying,
+              rollingBack: audienceRuntime.rollingBack,
+              recovering: audienceRuntime.recovering,
+              recoverableSessionId: backend.status?.recoverableRuntimeSessionId ?? null,
+              canRecover:
+                backend.connection === 'connected' &&
+                Boolean(backend.status?.recoverableRuntimeSessionId),
+              probing: audienceRuntime.probing,
+              loadingTraces: audienceRuntime.loadingTraces,
+              probe: audienceRuntime.probe,
+              traces: audienceRuntime.traces,
+              issue: audienceRuntime.issue,
+              onAutoApplyChange: audienceRuntime.setAutoApply,
+              onApply: () => void audienceRuntime.apply(),
+              onRollback: () => void audienceRuntime.rollback(),
+              onRecover: () => void audienceRuntime.recover(),
+              onProbe: () => void audienceRuntime.runProbe(),
+              onLoadTraces: () => void audienceRuntime.loadTraces()
+            }}
+            sharedBrain={sharedBrain}
+            sharedBrainAvailable={
+              backend.connection === 'connected' && Boolean(audienceRuntime.runtime)
+            }
           />
         )}
 
         {activeView === 'settings' && (
           <SettingsView
             modelBaseUrl={modelConfig.baseUrl}
+            providerProfileId={modelConfig.providerProfileId}
             modelName={modelConfig.model}
+            directorModel={modelConfig.directorModel}
+            viewerModel={modelConfig.viewerModel}
+            memoryModel={modelConfig.memoryModel}
+            visualSummaryModel={modelConfig.visualSummaryModel}
             apiKey={modelConfig.apiKey}
             asrApiKey={modelConfig.asrApiKey}
             modelConfigStatus={modelConfig.status}
@@ -293,7 +357,12 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             overlayTargets={overlay.targets}
             overlaySettingsNotice={overlay.notice}
             onModelBaseUrlChange={modelConfig.setBaseUrl}
+            onProviderProfileIdChange={modelConfig.setProviderProfileId}
             onModelNameChange={modelConfig.setModel}
+            onDirectorModelChange={modelConfig.setDirectorModel}
+            onViewerModelChange={modelConfig.setViewerModel}
+            onMemoryModelChange={modelConfig.setMemoryModel}
+            onVisualSummaryModelChange={modelConfig.setVisualSummaryModel}
             onApiKeyChange={modelConfig.setApiKey}
             onAsrApiKeyChange={modelConfig.setAsrApiKey}
             onSaveModelConfig={() => void modelConfig.save()}

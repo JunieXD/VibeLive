@@ -1,11 +1,13 @@
 import type { CSSProperties, Dispatch, RefObject, SetStateAction } from 'react'
 import type { DesktopSource, MediaAccessStatus } from '../../../../shared/contracts'
+import type { ProviderProbeResult } from '../../../../shared/backend-client'
 import type { SessionState } from '../../../../shared/session'
 import type {
   VisualMode,
   VisualPipelineStatus,
   VisualSettings
 } from '../../visual'
+import type { MessageTarget } from './message-target'
 
 export type LiveActivityItem = {
   id: string
@@ -34,6 +36,8 @@ export type LiveStageProps = {
   microphoneLevel: number
   message: string
   messageSending: boolean
+  providerProbe: ProviderProbeResult | null
+  targetSuggestions: readonly MessageTarget[]
   pipPreviewStyle: CSSProperties
   videoRef: RefObject<HTMLVideoElement | null>
   cameraVideoRef: RefObject<HTMLVideoElement | null>
@@ -45,6 +49,7 @@ export type LiveStageProps = {
   onClearBarrage: () => void | Promise<void>
   onToggleOverlay: () => void | Promise<void>
   onMessageChange: (message: string) => void
+  onSelectMessageTarget: (target: MessageTarget) => void
   onSendUserMessage: () => void
 }
 

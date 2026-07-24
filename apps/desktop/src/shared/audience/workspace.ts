@@ -5,10 +5,9 @@ import type { AudienceRuntimeSnapshot, AudienceWorkspaceState } from './types'
 
 export function createInitialAudienceWorkspace(): AudienceWorkspaceState {
   return {
-    version: 1,
+    version: 2,
     personas: BASE_PERSONAS,
-    modeState: createInitialModeState(),
-    memes: []
+    modeState: createInitialModeState()
   }
 }
 
@@ -17,7 +16,6 @@ export function compileAudienceWorkspaceSnapshot(
 ): AudienceRuntimeSnapshot {
   return compileAudienceRuntimeSnapshot(
     workspace.personas,
-    workspace.modeState,
-    workspace.memes
+    workspace.modeState
   )
 }

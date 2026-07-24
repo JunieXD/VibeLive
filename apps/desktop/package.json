@@ -7,6 +7,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:runtime": "pnpm build && node scripts/runtime-smoke.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run"
   },

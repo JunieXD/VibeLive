@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import type { SessionStatus } from '../../../shared/session'
+import type { AudienceVisualSettings } from '../../../shared/audience'
 import {
   COMPRESSION_PROFILES,
   compressCompositeCanvas,
   deliverAndReleaseVisualBatch,
   drawCompositeFrame,
+  grayscaleMeanAbsoluteDifference,
   releaseVisualFrames,
   requiredVisualSources,
+  sampleCanvasChangeSignature,
   selectVisualBatchFrames,
   type VisualBatchSink,
   type VisualFrame,
@@ -17,6 +20,7 @@ import {
 type UseVisualPipelineOptions = {
   sessionStatus: SessionStatus
   visualSettings: VisualSettings
+  framePolicy: AudienceVisualSettings
   captureStream: MediaStream | null
   cameraStream: MediaStream | null
   captureStreamRef: MutableRefObject<MediaStream | null>
@@ -37,6 +41,7 @@ type VisualPipeline = {
 export function useVisualPipeline({
   sessionStatus,
   visualSettings,
+  framePolicy,
   captureStream,
   cameraStream,
   captureStreamRef,
@@ -72,6 +77,7 @@ export function useVisualPipeline({
           inputId: frame.frameId,
           capturedAtMs: frame.capturedAt,
           mimeType: frame.blob.type || 'image/jpeg',
+          changeScore: frame.changeScore,
           body
         })
       }
@@ -97,7 +103,13 @@ export function useVisualPipeline({
     }
 
     setStatus('waiting-backend')
-    const profile = COMPRESSION_PROFILES[visualSettings.compressionPreset]
+    const presetProfile = COMPRESSION_PROFILES[visualSettings.compressionPreset]
+    const profile = {
+      ...presetProfile,
+      maxLongEdge: Math.min(presetProfile.maxLongEdge, framePolicy.frameMaxDimension)
+    }
+    const signatureCanvas = document.createElement('canvas')
+    let previousSignature: Uint8Array | null = null
     const batchAbortController = new AbortController()
 
     const sampleFrame = async (): Promise<void> => {
@@ -135,8 +147,15 @@ export function useVisualPipeline({
         })
         if (!drawn) return
 
-        const encoded = await compressCompositeCanvas(canvas, profile)
+        const signature = sampleCanvasChangeSignature(canvas, signatureCanvas)
+        const changeScore = grayscaleMeanAbsoluteDifference(previousSignature, signature)
+        const encoded = await compressCompositeCanvas(
+          canvas,
+          profile,
+          framePolicy.frameQuality
+        )
         if (runRef.current !== runId || sessionStatusRef.current !== 'running') return
+        previousSignature = signature
         const sequence = frameSequenceRef.current + 1
         frameSequenceRef.current = sequence
         const frame: VisualFrame = {
@@ -147,6 +166,7 @@ export function useVisualPipeline({
           mode: visualSettings.mode,
           bytes: encoded.blob.size,
           overTarget: encoded.overTarget,
+          changeScore,
           blob: encoded.blob
         }
         pendingFramesRef.current.push(frame)
@@ -221,6 +241,8 @@ export function useVisualPipeline({
     sessionStatus,
     videoRef,
     visualSettings.compressionPreset,
+    framePolicy.frameMaxDimension,
+    framePolicy.frameQuality,
     visualSettings.mirrorCamera,
     visualSettings.mode,
     visualSettings.pipPosition,

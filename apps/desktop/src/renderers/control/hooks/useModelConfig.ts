@@ -12,8 +12,14 @@ type UseModelConfigOptions = {
 }
 
 export function getModelConfigNotice(result: SaveModelConfigResult): string {
+  if (result.runtimeApplyRequired && result.restartRequired) {
+    return '模型配置已安全保存，显式应用运行时配置后切换；ASR 配置需重启后加载'
+  }
+  if (result.runtimeApplyRequired) {
+    return '模型配置已安全保存；当前 Session 保持不变，显式应用运行时配置后切换'
+  }
   if (result.restartRequired) {
-    return '配置已保存；后端已使用另一组配置，请重启桌面应用后生效'
+    return '配置已安全保存；当前后端需重启后加载保存的配置'
   }
   return result.securelyStored
     ? '模型与语音识别配置已安全保存并接入后端'
@@ -53,7 +59,12 @@ function describeError(error: unknown): string {
 export function useModelConfig(options: UseModelConfigOptions = {}) {
   const { backendConnection, onBackendStatus } = options
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
+  const [providerProfileId, setProviderProfileId] = useState('default')
   const [model, setModel] = useState('')
+  const [directorModel, setDirectorModel] = useState('')
+  const [viewerModel, setViewerModel] = useState('')
+  const [memoryModel, setMemoryModel] = useState('')
+  const [visualSummaryModel, setVisualSummaryModel] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [asrApiKey, setAsrApiKey] = useState('')
   const [status, setStatus] = useState<ModelConfigStatus | null>(null)
@@ -70,7 +81,12 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
         if (!active) return
         setStatus(nextStatus)
         if (nextStatus.baseUrl) setBaseUrl(nextStatus.baseUrl)
+        if (nextStatus.providerProfileId) setProviderProfileId(nextStatus.providerProfileId)
         if (nextStatus.model) setModel(nextStatus.model)
+        setDirectorModel(nextStatus.directorModel ?? '')
+        setViewerModel(nextStatus.viewerModel ?? '')
+        setMemoryModel(nextStatus.memoryModel ?? '')
+        setVisualSummaryModel(nextStatus.visualSummaryModel ?? '')
       })
       .catch(() => undefined)
       .finally(() => {
@@ -112,15 +128,31 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
     setSaving(true)
     setNotice(null)
     try {
-      const result = await window.advx.saveModelConfig({ baseUrl, model, apiKey, asrApiKey })
+      const result = await window.advx.saveModelConfig({
+        baseUrl,
+        providerProfileId,
+        model,
+        directorModel,
+        viewerModel,
+        memoryModel,
+        visualSummaryModel,
+        apiKey,
+        asrApiKey
+      })
       setApiKey('')
       setAsrApiKey('')
       setStatus({
         baseUrl: baseUrl.trim(),
+        providerProfileId: result.providerProfileId,
         model: model.trim(),
+        directorModel: directorModel.trim() || null,
+        viewerModel: viewerModel.trim() || null,
+        memoryModel: memoryModel.trim() || null,
+        visualSummaryModel: visualSummaryModel.trim() || null,
         modelApiKeyStored: result.securelyStored,
         asrApiKeyStored: result.securelyStored
       })
+      setProviderProfileId(result.providerProfileId)
       const backendStatus = await window.advx.getBackendStatus()
       onBackendStatus?.(backendStatus)
       setNotice(getModelConfigNotice(result))
@@ -130,13 +162,35 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
       savingRef.current = false
       setSaving(false)
     }
-  }, [apiKey, asrApiKey, baseUrl, canSave, model, onBackendStatus])
+  }, [
+    apiKey,
+    asrApiKey,
+    baseUrl,
+    canSave,
+    directorModel,
+    memoryModel,
+    model,
+    onBackendStatus,
+    providerProfileId,
+    viewerModel,
+    visualSummaryModel
+  ])
 
   return {
     baseUrl,
     setBaseUrl,
+    providerProfileId,
+    setProviderProfileId,
     model,
     setModel,
+    directorModel,
+    setDirectorModel,
+    viewerModel,
+    setViewerModel,
+    memoryModel,
+    setMemoryModel,
+    visualSummaryModel,
+    setVisualSummaryModel,
     apiKey,
     setApiKey,
     asrApiKey,

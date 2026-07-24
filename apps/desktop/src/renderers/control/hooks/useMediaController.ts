@@ -19,7 +19,8 @@ export function useMediaController({
   backendConnected = true,
   providersConfigured = true,
   backendSessionId,
-  onBackendSessionSnapshot
+  onBackendSessionSnapshot,
+  audienceWorkspace
 }: UseMediaControllerOptions): MediaController {
   const [sourcePickerOpen, setSourcePickerOpen] = useState(false)
   const sessionStatusRef = useRef<SessionStatus>(sessionStatus)
@@ -44,7 +45,8 @@ export function useMediaController({
     onSystemActivity,
     onSessionStarted,
     backendSessionId,
-    onBackendSessionSnapshot
+    onBackendSessionSnapshot,
+    audienceWorkspace
   })
 
   const isSessionActive = ['starting', 'running', 'paused', 'stopping'].includes(sessionStatus)

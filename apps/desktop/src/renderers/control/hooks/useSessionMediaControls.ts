@@ -7,6 +7,7 @@ import {
   type MutableRefObject
 } from 'react'
 import type { BackendSessionSnapshot } from '../../../shared/contracts'
+import type { AudienceWorkspaceState } from '../../../shared/audience'
 import type { SessionAction, SessionStatus } from '../../../shared/session'
 import { describeMediaError } from '../media'
 import { requiredVisualSources } from '../visual'
@@ -25,6 +26,7 @@ type UseSessionMediaControlsOptions = {
   onSessionStarted: () => void
   backendSessionId?: string | null
   onBackendSessionSnapshot?: (snapshot: BackendSessionSnapshot) => void
+  audienceWorkspace: AudienceWorkspaceState
 }
 
 function describeBackendError(error: unknown, fallback: string): string {
@@ -40,7 +42,8 @@ export function useSessionMediaControls({
   onSystemActivity,
   onSessionStarted,
   backendSessionId,
-  onBackendSessionSnapshot
+  onBackendSessionSnapshot,
+  audienceWorkspace
 }: UseSessionMediaControlsOptions) {
   const [overlayVisible, setOverlayVisible] = useState(true)
   const devicesRef = useRef(devices)
@@ -48,11 +51,14 @@ export function useSessionMediaControls({
   const onSessionStartedRef = useRef(onSessionStarted)
   const backendSessionIdRef = useRef(backendSessionId)
   const onBackendSessionSnapshotRef = useRef(onBackendSessionSnapshot)
+  const audienceWorkspaceRef = useRef(audienceWorkspace)
+  const startClientRequestIdRef = useRef<string | null>(null)
   devicesRef.current = devices
   onSystemActivityRef.current = onSystemActivity
   onSessionStartedRef.current = onSessionStarted
   backendSessionIdRef.current = backendSessionId
   onBackendSessionSnapshotRef.current = onBackendSessionSnapshot
+  audienceWorkspaceRef.current = audienceWorkspace
 
   const syncBackendSession = useCallback((snapshot: BackendSessionSnapshot): void => {
     sessionStatusRef.current = snapshot.state
@@ -124,11 +130,16 @@ export function useSessionMediaControls({
       }
       if (!devices.operation.isCurrent(operationId)) return
 
-      const backendSession = await window.advx.startBackendSession()
+      startClientRequestIdRef.current ??= `desktop-${crypto.randomUUID()}`
+      const backendSession = await window.advx.startBackendSession(
+        audienceWorkspaceRef.current,
+        startClientRequestIdRef.current
+      )
       backendSessionStarted = backendSession.sessionId !== null
       if (!devices.operation.isCurrent(operationId)) {
         if (backendSessionStarted) {
           await window.advx.stopBackendSession().catch(() => undefined)
+          startClientRequestIdRef.current = null
         }
         return
       }
@@ -137,6 +148,7 @@ export function useSessionMediaControls({
         await window.advx.hideOverlay()
         if (backendSessionStarted) {
           await window.advx.stopBackendSession().catch(() => undefined)
+          startClientRequestIdRef.current = null
         }
         return
       }
@@ -152,6 +164,7 @@ export function useSessionMediaControls({
       }
       if (backendSessionStarted) {
         await window.advx.stopBackendSession().catch(() => undefined)
+        startClientRequestIdRef.current = null
       }
       const overlayError = await releaseOverlay()
       if (!devices.operation.isCurrent(operationId)) return
@@ -201,7 +214,10 @@ export function useSessionMediaControls({
       if (devices.operation.isCurrent(operationId)) {
         sessionStatusRef.current = stopError ? 'error' : 'idle'
         if (stopError) dispatchSession({ type: 'fail', error: stopError })
-        else dispatchSession({ type: 'stopped' })
+        else {
+          startClientRequestIdRef.current = null
+          dispatchSession({ type: 'stopped' })
+        }
       }
       devices.operation.finish(operationId)
     }

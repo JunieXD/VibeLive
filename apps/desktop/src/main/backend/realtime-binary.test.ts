@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodeBinaryEnvelope } from './realtime-binary'
+import { encodeBinaryEnvelope, formatImageMimeType } from './realtime-binary'
 
 describe('ADVX-BIN/1 encoder', () => {
   it('writes the fixed header, UTF-8 fields and body in network byte order', () => {
@@ -36,6 +36,13 @@ describe('ADVX-BIN/1 encoder', () => {
       body: new Uint8Array([1])
     })
     expect(encoded[5]).toBe(2)
+  })
+
+  it('serializes validated visual change metadata into the image format', () => {
+    expect(formatImageMimeType('IMAGE/JPEG', 0.1256789))
+      .toBe('image/jpeg;advx-change-score=0.125679')
+    expect(() => formatImageMimeType('image/jpeg', Number.NaN)).toThrow('changeScore')
+    expect(() => formatImageMimeType('image/jpeg', 1.01)).toThrow('changeScore')
   })
 
   it('rejects invalid timestamps and empty media', () => {

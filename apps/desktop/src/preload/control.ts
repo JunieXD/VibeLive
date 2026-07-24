@@ -27,13 +27,68 @@ const api: ControlApi = {
   getModelConfigStatus: () => ipcRenderer.invoke("config:get-model-status"),
   getBackendStatus: () => ipcRenderer.invoke("backend:get-status"),
   restartBackend: () => ipcRenderer.invoke("backend:restart"),
-  startBackendSession: () => ipcRenderer.invoke("backend:session-start"),
+  startBackendSession: (workspace, clientRequestId) =>
+    ipcRenderer.invoke("backend:session-start", workspace, clientRequestId),
   pauseBackendSession: () => ipcRenderer.invoke("backend:session-pause"),
   resumeBackendSession: () => ipcRenderer.invoke("backend:session-resume"),
   stopBackendSession: () => ipcRenderer.invoke("backend:session-stop"),
-  submitUserText: (text) => ipcRenderer.invoke("backend:submit-text", text),
+  queryAudienceRuntime: (sessionId) =>
+    ipcRenderer.invoke("backend:runtime-query", sessionId),
+  applyAudienceRuntime: (sessionId, workspace, baseRevision) =>
+    ipcRenderer.invoke("backend:runtime-apply", sessionId, workspace, baseRevision),
+  rollbackAudienceRuntime: (sessionId, baseRevision, targetRevision) =>
+    ipcRenderer.invoke(
+      "backend:runtime-rollback",
+      sessionId,
+      baseRevision,
+      targetRevision
+    ),
+  recoverAudienceRuntime: (sessionId) =>
+    ipcRenderer.invoke("backend:runtime-recover", sessionId),
+  getAudienceRuntimeConfigHash: (workspace, configRevision, room) =>
+    ipcRenderer.invoke("backend:runtime-config-hash", workspace, configRevision, room),
+  probeAudienceProvider: () => ipcRenderer.invoke("backend:provider-probe"),
+  queryDebugTraces: (sessionId, cursor) =>
+    ipcRenderer.invoke("backend:debug-traces", sessionId, cursor),
+  submitUserText: (text, target) => ipcRenderer.invoke("backend:submit-text", text, target),
   submitAudioSegment: (input) => ipcRenderer.invoke("backend:submit-audio", input),
   submitVisualFrame: (input) => ipcRenderer.invoke("backend:submit-frame", input),
+  listRoomMemories: (roomId) => ipcRenderer.invoke("shared-brain:memory-list", roomId),
+  getRoomMemoryHead: (roomId) => ipcRenderer.invoke("shared-brain:memory-head", roomId),
+  editRoomMemory: (roomId, memoryId, edit) =>
+    ipcRenderer.invoke("shared-brain:memory-edit", roomId, memoryId, edit),
+  revokeRoomMemory: (roomId, memoryId, expectedRevision) =>
+    ipcRenderer.invoke("shared-brain:memory-revoke", roomId, memoryId, expectedRevision),
+  deleteRoomMemory: (roomId, memoryId, expectedRevision) =>
+    ipcRenderer.invoke("shared-brain:memory-delete", roomId, memoryId, expectedRevision),
+  resetRoomMemories: (roomId, expectedRevision) =>
+    ipcRenderer.invoke("shared-brain:memory-reset", roomId, expectedRevision),
+  listModeMemes: (namespaceId) => ipcRenderer.invoke("shared-brain:meme-list", namespaceId),
+  listPendingMemeCandidates: (namespaceId) =>
+    ipcRenderer.invoke("shared-brain:meme-candidate-list", namespaceId),
+  getModeMemeAutoIngest: (namespaceId) =>
+    ipcRenderer.invoke("shared-brain:meme-auto-ingest-get", namespaceId),
+  setModeMemeAutoIngest: (namespaceId, enabled, expectedRevision) =>
+    ipcRenderer.invoke(
+      "shared-brain:meme-auto-ingest-set",
+      namespaceId,
+      enabled,
+      expectedRevision
+    ),
+  approveMemeCandidate: (namespaceId, candidateId) =>
+    ipcRenderer.invoke("shared-brain:meme-candidate-approve", namespaceId, candidateId),
+  rejectMemeCandidate: (namespaceId, candidateId) =>
+    ipcRenderer.invoke("shared-brain:meme-candidate-reject", namespaceId, candidateId),
+  mutateModeMeme: (namespaceId, memeId, action, expectedRevision) =>
+    ipcRenderer.invoke(
+      "shared-brain:meme-mutate",
+      namespaceId,
+      memeId,
+      action,
+      expectedRevision
+    ),
+  editModeMeme: (namespaceId, memeId, edit) =>
+    ipcRenderer.invoke("shared-brain:meme-edit", namespaceId, memeId, edit),
   loadAudienceWorkspace: () => ipcRenderer.invoke("audience:load-workspace"),
   saveAudienceWorkspace: (workspace) =>
     ipcRenderer.invoke("audience:save-workspace", workspace),

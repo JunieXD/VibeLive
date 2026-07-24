@@ -434,6 +434,7 @@
 }
 
 .composer {
+  position: relative;
   display: grid;
   grid-template-columns: 20px 1fr 34px;
   align-items: center;
@@ -442,6 +443,79 @@
   padding: 10px 12px;
   border-top: 1px solid var(--border);
   color: var(--text-faint);
+}
+
+.mention-menu {
+  position: absolute;
+  right: 44px;
+  bottom: calc(100% + 6px);
+  z-index: 10;
+  display: grid;
+  width: min(320px, calc(100% - 56px));
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 16%);
+}
+
+.mention-menu button {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 7px 10px;
+  color: var(--text);
+  text-align: left;
+}
+
+.mention-menu button:hover {
+  background: var(--panel-raise);
+}
+
+.mention-menu span {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.provider-disclosure {
+  margin: -4px 12px 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.provider-capability {
+  position: relative;
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.provider-capability summary {
+  cursor: pointer;
+}
+
+.provider-capability > div {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 10;
+  display: grid;
+  min-width: 280px;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  padding: 10px;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 16%);
+  white-space: normal;
+}
+
+.provider-capability span {
+  color: var(--text-dim);
 }
 
 .composer input {

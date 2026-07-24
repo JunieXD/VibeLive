@@ -1,36 +1,326 @@
+import { clonePersonaTemplate, createPersonaTemplate } from './canonical'
 import { validatePersona } from './persona-markdown'
-import { findMemeConflict, normalizeMemeText } from './memes'
-import { BASE_PERSONAS, BUILT_IN_MODES } from './presets'
+import { BASE_PERSONAS, BUILT_IN_MODES, DEFAULT_VISUAL_SETTINGS } from './presets'
 import type {
   AudienceMode,
+  AudienceVisualSettings,
   AudienceWorkspaceState,
-  MemeEntry,
-  Persona,
-  PersonaOverride
+  PersonaOverride,
+  PersonaTemplate
 } from './types'
 
 const STABLE_ID_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/
 const MODE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
 export type AudienceWorkspaceParseResult =
-  | { readonly ok: true; readonly workspace: AudienceWorkspaceState }
+  | {
+      readonly ok: true
+      readonly workspace: AudienceWorkspaceState
+      readonly migratedFromVersion?: 1
+      readonly legacyMemes?: readonly LegacyLocalMeme[]
+    }
   | { readonly ok: false; readonly issues: readonly string[] }
 
-export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspaceParseResult {
-  const issues: string[] = []
-  if (!isRecord(value)) return { ok: false, issues: ['workspace must be an object'] }
-  if (value.version !== 1) issues.push('version must be 1')
+export type LegacyLocalMeme = {
+  readonly id: string
+  readonly text: string
+  readonly createdAt: string | null
+}
 
-  const personas = parsePersonas(value.personas, issues)
-  const memes = parseArray(value.memes, 'memes', parseMeme, issues)
+export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspaceParseResult {
+  if (!isRecord(value)) return { ok: false, issues: ['workspace must be an object'] }
+  if (value.version !== 1 && value.version !== 2) {
+    return { ok: false, issues: ['version must be 1 or 2'] }
+  }
+  const sourceVersion = value.version
+  const issues: string[] = []
+  const personas = parsePersonas(value.personas, sourceVersion, issues)
+  const legacyMemes = sourceVersion === 1
+    ? parseLegacyMemes(value.memes, issues)
+    : []
+  if (sourceVersion === 2 && Array.isArray(value.memes) && value.memes.length > 0) {
+    issues.push('legacy local memes require Shared Brain migration and were not loaded')
+  } else if (
+    sourceVersion === 2 &&
+    value.memes !== undefined &&
+    !Array.isArray(value.memes)
+  ) {
+    issues.push('legacy memes must be an array when present')
+  }
   const modeStateValue = value.modeState
   const modes = isRecord(modeStateValue)
-    ? parseArray(modeStateValue.modes, 'modeState.modes', parseMode, issues)
+    ? parseArray(
+        modeStateValue.modes,
+        'modeState.modes',
+        (item, path, nestedIssues) => parseMode(item, path, sourceVersion, nestedIssues),
+        issues
+      )
     : (issues.push('modeState must be an object'), [])
   const activeModeId = isRecord(modeStateValue) && typeof modeStateValue.activeModeId === 'string'
     ? modeStateValue.activeModeId
     : (issues.push('modeState.activeModeId must be a string'), '')
 
+  validateReferences(personas, modes, activeModeId, issues)
+  if (issues.length > 0) return { ok: false, issues }
+  return {
+    ok: true,
+    workspace: { version: 2, personas, modeState: { modes, activeModeId } },
+    ...(sourceVersion === 1 ? { migratedFromVersion: 1 as const } : {}),
+    ...(legacyMemes.length > 0 ? { legacyMemes } : {})
+  }
+}
+
+function parseLegacyMemes(value: unknown, issues: string[]): LegacyLocalMeme[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    issues.push('legacy memes must be an array when present')
+    return []
+  }
+  return value.flatMap((item, index) => {
+    const path = `memes[${index}]`
+    if (!isRecord(item)) {
+      issues.push(`${path} must be an object`)
+      return []
+    }
+    if (typeof item.id !== 'string' || !item.id.trim()) {
+      issues.push(`${path}.id must be a non-empty string`)
+    }
+    if (typeof item.text !== 'string' || !item.text.trim()) {
+      issues.push(`${path}.text must be a non-empty string`)
+    }
+    if (
+      item.createdAt !== undefined &&
+      (typeof item.createdAt !== 'string' || !Number.isFinite(Date.parse(item.createdAt)))
+    ) {
+      issues.push(`${path}.createdAt must be a valid date when present`)
+    }
+    if (issues.some((issue) => issue.startsWith(path))) return []
+    return [{
+      id: (item.id as string).trim(),
+      text: (item.text as string).trim(),
+      createdAt: typeof item.createdAt === 'string' ? item.createdAt : null
+    }]
+  })
+}
+
+function parsePersonas(
+  value: unknown,
+  sourceVersion: 1 | 2,
+  issues: string[]
+): PersonaTemplate[] {
+  const builtInIds = new Set(BASE_PERSONAS.map((persona) => persona.id))
+  const builtIns = BASE_PERSONAS.map(clonePersonaTemplate)
+  if (!Array.isArray(value)) {
+    issues.push('personas must be an array')
+    return builtIns
+  }
+  const customPersonas = value.flatMap((item, index) => {
+    if (isRecord(item) && typeof item.id === 'string' && builtInIds.has(item.id)) return []
+    const parsed = parsePersona(item, `personas[${index}]`, sourceVersion, issues)
+    return parsed ? [parsed] : []
+  })
+  return [...builtIns, ...customPersonas]
+}
+
+function parsePersona(
+  value: unknown,
+  path: string,
+  sourceVersion: 1 | 2,
+  issues: string[]
+): PersonaTemplate | null {
+  if (!isRecord(value)) return fail(path, 'must be an object', issues)
+  let candidate: PersonaTemplate
+  try {
+    const hasAnyTemplateMetadata = ['documentVersion', 'revision', 'contentHash'].some(
+      (field) => Object.hasOwn(value, field)
+    )
+    candidate = sourceVersion === 1 || !hasAnyTemplateMetadata
+      ? createPersonaTemplate(value as unknown as Parameters<typeof createPersonaTemplate>[0])
+      : value as unknown as PersonaTemplate
+  } catch {
+    issues.push(`${path} is not a valid persona`)
+    return null
+  }
+  const personaIssues = validatePersona(candidate)
+  if (personaIssues.length > 0) {
+    issues.push(...personaIssues.map((issue) => `${path}.${issue.field}: ${issue.message}`))
+    return null
+  }
+  return clonePersonaTemplate(candidate)
+}
+
+function parseMode(
+  value: unknown,
+  path: string,
+  sourceVersion: 1 | 2,
+  issues: string[]
+): AudienceMode | null {
+  if (!isRecord(value)) return fail(path, 'must be an object', issues)
+  for (const field of ['id', 'name', 'description'] as const) {
+    if (typeof value[field] !== 'string' || !value[field].trim()) {
+      issues.push(`${path}.${field} must be a non-empty string`)
+    }
+  }
+  if (typeof value.id === 'string' && !MODE_ID_PATTERN.test(value.id)) {
+    issues.push(`${path}.id must be a stable kebab-case identifier`)
+  }
+  if (typeof value.builtIn !== 'boolean') issues.push(`${path}.builtIn must be boolean`)
+
+  const personaIds = stringArray(value.personaIds, `${path}.personaIds`, issues)
+  if (new Set(personaIds).size !== personaIds.length) issues.push(`${path}.personaIds must be unique`)
+  const personaWeights = parsePersonaWeights(value.personaWeights, personaIds, path, issues)
+  const personaOverrides = parsePersonaOverrides(value.personaOverrides, path, issues)
+  const legacyBase = sourceVersion === 1
+    ? integerRange(value.baseActivity, `${path}.baseActivity`, issues)
+    : [0, 0] as const
+  const legacyBurst = sourceVersion === 1
+    ? integerRange(value.burstLimit, `${path}.burstLimit`, issues)
+    : [0, 0] as const
+  const normalResponseRange = sourceVersion === 1
+    ? legacyBase
+    : integerRange(value.normalResponseRange, `${path}.normalResponseRange`, issues)
+  const highlightResponseRange = sourceVersion === 1
+    ? legacyBurst
+    : integerRange(value.highlightResponseRange, `${path}.highlightResponseRange`, issues)
+  const viewerCount = sourceVersion === 1
+    ? clamp(legacyBurst[1], 1, 32)
+    : boundedInteger(value.viewerCount, `${path}.viewerCount`, 1, 32, issues)
+  if (normalResponseRange[1] > viewerCount) {
+    issues.push(`${path}.normalResponseRange maximum cannot exceed viewerCount`)
+  }
+  if (highlightResponseRange[1] > viewerCount) {
+    issues.push(`${path}.highlightResponseRange maximum cannot exceed viewerCount`)
+  }
+  if (value.ambience !== 'natural' && value.ambience !== 'continuous') {
+    issues.push(`${path}.ambience must be natural or continuous`)
+  }
+  const namespaceId = sourceVersion === 1
+    ? value.id as string
+    : nonEmptyStableId(value.namespaceId, `${path}.namespaceId`, issues)
+  const revision = sourceVersion === 1
+    ? 1
+    : boundedInteger(value.revision, `${path}.revision`, 1, Number.MAX_SAFE_INTEGER, issues)
+  const visualSettings = sourceVersion === 1
+    ? { ...DEFAULT_VISUAL_SETTINGS }
+    : parseVisualSettings(value.visualSettings, `${path}.visualSettings`, issues)
+
+  if (issues.some((issue) => issue.startsWith(path))) return null
+  return {
+    id: value.id as string,
+    namespaceId,
+    revision,
+    name: value.name as string,
+    description: value.description as string,
+    builtIn: value.builtIn as boolean,
+    viewerCount,
+    personaIds,
+    personaWeights,
+    personaOverrides,
+    normalResponseRange,
+    highlightResponseRange,
+    ambience: value.ambience as AudienceMode['ambience'],
+    visualSettings,
+    baseActivity: normalResponseRange,
+    burstLimit: highlightResponseRange
+  }
+}
+
+function parsePersonaWeights(
+  value: unknown,
+  personaIds: readonly string[],
+  path: string,
+  issues: string[]
+): Record<string, number> {
+  if (!isRecord(value)) {
+    issues.push(`${path}.personaWeights must be an object`)
+    return {}
+  }
+  const weights: Record<string, number> = {}
+  for (const [personaId, weight] of Object.entries(value)) {
+    if (!personaIds.includes(personaId) || typeof weight !== 'number' ||
+      !Number.isFinite(weight) || weight < 0) {
+      issues.push(`${path}.personaWeights.${personaId} must be a non-negative weight for a mode persona`)
+      continue
+    }
+    weights[personaId] = weight
+  }
+  for (const personaId of personaIds) {
+    if (!(personaId in weights)) issues.push(`${path}.personaWeights.${personaId} is required`)
+  }
+  if (!Object.values(weights).some((weight) => weight > 0)) {
+    issues.push(`${path}.personaWeights must contain a positive weight`)
+  }
+  return weights
+}
+
+function parsePersonaOverrides(
+  value: unknown,
+  path: string,
+  issues: string[]
+): Record<string, PersonaOverride> {
+  if (!isRecord(value)) {
+    issues.push(`${path}.personaOverrides must be an object`)
+    return {}
+  }
+  const overrides: Record<string, PersonaOverride> = {}
+  for (const [personaId, override] of Object.entries(value)) {
+    if (!STABLE_ID_PATTERN.test(personaId) || !isRecord(override)) {
+      issues.push(`${path}.personaOverrides.${personaId} must target a stable persona id`)
+      continue
+    }
+    validatePersonaOverride(override, `${path}.personaOverrides.${personaId}`, issues)
+    overrides[personaId] = clonePersonaOverride(override)
+  }
+  return overrides
+}
+
+function parseVisualSettings(
+  value: unknown,
+  path: string,
+  issues: string[]
+): AudienceVisualSettings {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object`)
+    return { ...DEFAULT_VISUAL_SETTINGS }
+  }
+  if (value.viewerVisualInputMode !== 'direct_frames' &&
+    value.viewerVisualInputMode !== 'shared_summary') {
+    issues.push(`${path}.viewerVisualInputMode is invalid`)
+  }
+  if (!['latest_n', 'evenly_spaced', 'change_peaks'].includes(
+    value.frameSelectionStrategy as string
+  )) {
+    issues.push(`${path}.frameSelectionStrategy is invalid`)
+  }
+  const frameBundleSize = boundedInteger(value.frameBundleSize, `${path}.frameBundleSize`, 1, 16, issues)
+  const frameWindowMs = boundedInteger(value.frameWindowMs, `${path}.frameWindowMs`, 1, 300_000, issues)
+  const frameMaxDimension = boundedInteger(
+    value.frameMaxDimension,
+    `${path}.frameMaxDimension`,
+    64,
+    4096,
+    issues
+  )
+  if (typeof value.frameQuality !== 'number' || !Number.isFinite(value.frameQuality) ||
+    value.frameQuality <= 0 || value.frameQuality > 1) {
+    issues.push(`${path}.frameQuality must be greater than 0 and at most 1`)
+  }
+  return {
+    viewerVisualInputMode: value.viewerVisualInputMode as AudienceVisualSettings['viewerVisualInputMode'],
+    frameBundleSize,
+    frameWindowMs,
+    frameSelectionStrategy: value.frameSelectionStrategy as AudienceVisualSettings['frameSelectionStrategy'],
+    frameMaxDimension,
+    frameQuality: value.frameQuality as number
+  }
+}
+
+function validateReferences(
+  personas: readonly PersonaTemplate[],
+  modes: readonly AudienceMode[],
+  activeModeId: string,
+  issues: string[]
+): void {
   const personaIds = new Set(personas.map((persona) => persona.id))
   const personasById = new Map(personas.map((persona) => [persona.id, persona]))
   if (personaIds.size !== personas.length) issues.push('persona ids must be unique')
@@ -48,140 +338,29 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
     for (const personaId of mode.personaIds) {
       if (!personaIds.has(personaId)) issues.push(`mode ${mode.id} references unknown persona ${personaId}`)
     }
+    if (!mode.personaIds.some((personaId) =>
+      personasById.get(personaId)?.enabled && mode.personaWeights[personaId] > 0
+    )) {
+      issues.push(`mode ${mode.id} must have a positive weight for an enabled persona`)
+    }
     for (const [personaId, override] of Object.entries(mode.personaOverrides)) {
       const base = personasById.get(personaId)
       if (!base) {
         issues.push(`mode ${mode.id} override references unknown persona ${personaId}`)
         continue
       }
-      const effective = { ...base, ...override, id: base.id } as Persona
-      issues.push(
-        ...validatePersona(effective).map(
-          (issue) => `mode ${mode.id} override ${personaId}.${issue.field}: ${issue.message}`
-        )
+      const effective = createPersonaTemplate({
+        ...base,
+        ...override,
+        revision: base.revision
+      })
+      const contentIssues = validatePersona(effective).filter(
+        (issue) => issue.field !== 'contentHash'
       )
+      issues.push(...contentIssues.map(
+        (issue) => `mode ${mode.id} override ${personaId}.${issue.field}: ${issue.message}`
+      ))
     }
-  }
-  if (new Set(memes.map((meme) => meme.id)).size !== memes.length) issues.push('meme ids must be unique')
-  for (const [index, meme] of memes.entries()) {
-    if (!modeIds.has(meme.modeId)) issues.push(`meme ${meme.id} references unknown mode ${meme.modeId}`)
-    if (meme.status !== 'archived') {
-      const conflict = findMemeConflict(memes.slice(0, index), meme)
-      if (conflict) issues.push(`meme ${meme.id} conflicts with an existing ${conflict} entry`)
-    }
-  }
-
-  if (issues.length > 0) return { ok: false, issues }
-  return {
-    ok: true,
-    workspace: { version: 1, personas, modeState: { modes, activeModeId }, memes }
-  }
-}
-
-function parsePersonas(value: unknown, issues: string[]): Persona[] {
-  const builtInIds = new Set(BASE_PERSONAS.map((persona) => persona.id))
-  const builtIns = BASE_PERSONAS.map(clonePersona)
-  if (!Array.isArray(value)) {
-    issues.push('personas must be an array')
-    return builtIns
-  }
-
-  const customPersonas = value.flatMap((item, index) => {
-    if (isRecord(item) && typeof item.id === 'string' && builtInIds.has(item.id)) return []
-    const parsed = parsePersona(item, `personas[${index}]`, issues)
-    return parsed ? [parsed] : []
-  })
-  return [...builtIns, ...customPersonas]
-}
-
-function clonePersona(persona: Persona): Persona {
-  return {
-    ...persona,
-    traits: [...persona.traits],
-    triggerPreferences: [...persona.triggerPreferences],
-    avoidPatterns: [...persona.avoidPatterns],
-    contentFlags: [...persona.contentFlags]
-  }
-}
-
-function parsePersona(value: unknown, path: string, issues: string[]): Persona | null {
-  if (!isRecord(value)) return fail(path, 'must be an object', issues)
-  const persona = value as unknown as Persona
-  const personaIssues = validatePersona(persona)
-  if (personaIssues.length > 0) {
-    issues.push(...personaIssues.map((issue) => `${path}.${issue.field}: ${issue.message}`))
-    return null
-  }
-  return {
-    ...persona,
-    traits: [...persona.traits],
-    triggerPreferences: [...persona.triggerPreferences],
-    avoidPatterns: [...persona.avoidPatterns],
-    contentFlags: [...persona.contentFlags]
-  }
-}
-
-function parseMode(value: unknown, path: string, issues: string[]): AudienceMode | null {
-  if (!isRecord(value)) return fail(path, 'must be an object', issues)
-  const stringFields = ['id', 'name', 'description'] as const
-  for (const field of stringFields) {
-    if (typeof value[field] !== 'string' || !value[field].trim()) {
-      issues.push(`${path}.${field} must be a non-empty string`)
-    }
-  }
-  if (typeof value.id === 'string' && !MODE_ID_PATTERN.test(value.id)) {
-    issues.push(`${path}.id must be a stable kebab-case identifier`)
-  }
-  if (typeof value.builtIn !== 'boolean') issues.push(`${path}.builtIn must be boolean`)
-  const personaIds = stringArray(value.personaIds, `${path}.personaIds`, issues)
-  if (new Set(personaIds).size !== personaIds.length) {
-    issues.push(`${path}.personaIds must be unique`)
-  }
-  if (!isRecord(value.personaWeights)) issues.push(`${path}.personaWeights must be an object`)
-  const personaWeights: Record<string, number> = isRecord(value.personaWeights)
-    ? Object.fromEntries(Object.entries(value.personaWeights).filter((entry): entry is [string, number] => {
-      const [id, weight] = entry
-      const valid =
-        personaIds.includes(id) &&
-        typeof weight === 'number' &&
-        Number.isFinite(weight) &&
-        weight > 0
-      if (!valid) issues.push(`${path}.personaWeights.${id} must be a positive weight for a mode persona`)
-      return valid
-    }))
-    : {}
-  for (const personaId of personaIds) {
-    if (!(personaId in personaWeights)) issues.push(`${path}.personaWeights.${personaId} is required`)
-  }
-  if (!isRecord(value.personaOverrides)) issues.push(`${path}.personaOverrides must be an object`)
-  const personaOverrides: Record<string, PersonaOverride> = {}
-  for (const [personaId, override] of Object.entries(
-    isRecord(value.personaOverrides) ? value.personaOverrides : {}
-  )) {
-    if (!STABLE_ID_PATTERN.test(personaId) || !isRecord(override)) {
-      issues.push(`${path}.personaOverrides.${personaId} must target a stable persona id`)
-      continue
-    }
-    validatePersonaOverride(override, `${path}.personaOverrides.${personaId}`, issues)
-    personaOverrides[personaId] = clonePersonaOverride(override)
-  }
-  const baseActivity = numberRange(value.baseActivity, `${path}.baseActivity`, issues)
-  const burstLimit = numberRange(value.burstLimit, `${path}.burstLimit`, issues)
-  if (value.ambience !== 'natural' && value.ambience !== 'continuous') {
-    issues.push(`${path}.ambience must be natural or continuous`)
-  }
-  if (issues.some((issue) => issue.startsWith(path))) return null
-  return {
-    id: value.id as string,
-    name: value.name as string,
-    description: value.description as string,
-    builtIn: value.builtIn as boolean,
-    personaIds,
-    personaWeights,
-    personaOverrides,
-    baseActivity,
-    burstLimit,
-    ambience: value.ambience as AudienceMode['ambience']
   }
 }
 
@@ -208,12 +387,13 @@ function validatePersonaOverride(
   }
   for (const field of ['silenceBias', 'burstBias', 'repetitionBias'] as const) {
     const value = override[field]
-    if (field in override && (!Number.isInteger(value) || typeof value !== 'number' || value < 0 || value > 4)) {
+    if (field in override && (typeof value !== 'number' || !Number.isInteger(value) ||
+      value < 0 || value > 4)) {
       issues.push(`${path}.${field} must be an integer from 0 to 4`)
     }
   }
-  if ('cooldownMs' in override &&
-    (!Number.isInteger(override.cooldownMs) || typeof override.cooldownMs !== 'number' || override.cooldownMs < 0)) {
+  if ('cooldownMs' in override && (typeof override.cooldownMs !== 'number' ||
+    !Number.isInteger(override.cooldownMs) || override.cooldownMs < 0)) {
     issues.push(`${path}.cooldownMs must be a non-negative integer`)
   }
   if ('maxCommentsPerDecision' in override &&
@@ -223,57 +403,6 @@ function validatePersonaOverride(
   if ('enabled' in override && typeof override.enabled !== 'boolean') {
     issues.push(`${path}.enabled must be boolean`)
   }
-}
-
-function parseMeme(value: unknown, path: string, issues: string[]): MemeEntry | null {
-  if (!isRecord(value)) return fail(path, 'must be an object', issues)
-  const entry = value as unknown as MemeEntry
-  const requiredNonEmptyStrings: Array<keyof MemeEntry> = [
-    'id', 'modeId', 'text', 'normalizedText', 'familyKey', 'createdAt'
-  ]
-  for (const field of requiredNonEmptyStrings) {
-    if (typeof entry[field] !== 'string' || !entry[field].trim()) {
-      issues.push(`${path}.${field} must be a non-empty string`)
-    }
-  }
-  if (typeof entry.id === 'string' && !STABLE_ID_PATTERN.test(entry.id)) {
-    issues.push(`${path}.id must be a stable lowercase identifier`)
-  }
-  if (
-    typeof entry.text === 'string' &&
-    typeof entry.normalizedText === 'string' &&
-    entry.normalizedText !== normalizeMemeText(entry.text)
-  ) {
-    issues.push(`${path}.normalizedText does not match text`)
-  }
-  stringArray(entry.personaTags, `${path}.personaTags`, issues)
-  const sourceKinds = stringArray(entry.sourceKinds, `${path}.sourceKinds`, issues)
-  const validSourceKinds = ['user_text', 'user_speech', 'screen_event', 'audience_barrage', 'manual']
-  if (sourceKinds.length === 0 || sourceKinds.some((kind) => !validSourceKinds.includes(kind))) {
-    issues.push(`${path}.sourceKinds contains an invalid source`)
-  }
-  if (typeof entry.evidenceSummary !== 'string') {
-    issues.push(`${path}.evidenceSummary must be a string`)
-  } else if (entry.evidenceSummary.length > 160) {
-    issues.push(`${path}.evidenceSummary is too long`)
-  }
-  if (!['automatic', 'manual'].includes(entry.source)) issues.push(`${path}.source is invalid`)
-  if (!['director', 'user'].includes(entry.createdBy)) issues.push(`${path}.createdBy is invalid`)
-  if (!['active', 'inactive', 'archived'].includes(entry.status)) issues.push(`${path}.status is invalid`)
-  if (typeof entry.createdAt !== 'string' || !Number.isFinite(Date.parse(entry.createdAt))) {
-    issues.push(`${path}.createdAt is invalid`)
-  }
-  if (!Number.isInteger(entry.revision) || entry.revision < 1) issues.push(`${path}.revision is invalid`)
-  if (!Number.isInteger(entry.usageCount) || entry.usageCount < 0) issues.push(`${path}.usageCount is invalid`)
-  if (
-    entry.lastUsedAt !== null &&
-    (typeof entry.lastUsedAt !== 'string' || !Number.isFinite(Date.parse(entry.lastUsedAt)))
-  ) {
-    issues.push(`${path}.lastUsedAt is invalid`)
-  }
-  if (typeof entry.pinned !== 'boolean') issues.push(`${path}.pinned must be boolean`)
-  if (issues.some((issue) => issue.startsWith(path))) return null
-  return { ...entry, personaTags: [...entry.personaTags], sourceKinds: [...entry.sourceKinds] }
 }
 
 function clonePersonaOverride(override: Record<string, unknown>): PersonaOverride {
@@ -308,13 +437,40 @@ function stringArray(value: unknown, path: string, issues: string[]): string[] {
   return [...value]
 }
 
-function numberRange(value: unknown, path: string, issues: string[]): readonly [number, number] {
-  if (!Array.isArray(value) || value.length !== 2 || value.some((item) => !Number.isInteger(item)) ||
+function integerRange(value: unknown, path: string, issues: string[]): readonly [number, number] {
+  if (!Array.isArray(value) || value.length !== 2 || value.some((item) =>
+    typeof item !== 'number' || !Number.isInteger(item)) ||
     value[0] < 0 || value[1] < value[0]) {
     issues.push(`${path} must be an ascending non-negative integer pair`)
     return [0, 0]
   }
   return [value[0] as number, value[1] as number]
+}
+
+function boundedInteger(
+  value: unknown,
+  path: string,
+  minimum: number,
+  maximum: number,
+  issues: string[]
+): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum || value > maximum) {
+    issues.push(`${path} must be an integer from ${minimum} to ${maximum}`)
+    return minimum
+  }
+  return value
+}
+
+function nonEmptyStableId(value: unknown, path: string, issues: string[]): string {
+  if (typeof value !== 'string' || !MODE_ID_PATTERN.test(value)) {
+    issues.push(`${path} must be a stable kebab-case identifier`)
+    return ''
+  }
+  return value
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

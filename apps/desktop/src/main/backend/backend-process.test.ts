@@ -14,12 +14,12 @@ function healthResponse(payload: object, ok = true, status = 200): Response {
 }
 
 describe("backend process readiness", () => {
-  it("waits until the compatible health endpoint is ready", async () => {
+  it("waits until the protocol v2 health endpoint is ready", async () => {
     let now = 0;
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockRejectedValueOnce(new Error("connection refused"))
-      .mockResolvedValueOnce(healthResponse({ status: "ok", protocol_version: 1 }));
+      .mockResolvedValueOnce(healthResponse({ status: "ok", protocol_version: 2 }));
 
     await waitForBackendHealth({
       baseUrl: "http://127.0.0.1:8765/",
@@ -36,7 +36,7 @@ describe("backend process readiness", () => {
     expect(fetchImpl.mock.calls[1][0]).toBe("http://127.0.0.1:8765/health");
   });
 
-  it("rejects incompatible health responses at the deadline", async () => {
+  it("rejects protocol v1 health responses at the deadline", async () => {
     let now = 0;
     await expect(
       waitForBackendHealth({
@@ -45,7 +45,7 @@ describe("backend process readiness", () => {
         intervalMs: 25,
         fetchImpl: vi
           .fn<typeof fetch>()
-          .mockResolvedValue(healthResponse({ status: "ok", protocol_version: 2 })),
+          .mockResolvedValue(healthResponse({ status: "ok", protocol_version: 1 })),
         now: () => now,
         sleep: async (milliseconds) => {
           now += milliseconds;

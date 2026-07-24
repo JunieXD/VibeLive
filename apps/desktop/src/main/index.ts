@@ -9,6 +9,7 @@ import {
   registerDesktopIpc
 } from "./ipc/register-desktop-ipc";
 import { BackendClient } from "./backend/backend-client";
+import { loadRuntimeSessionId } from "./backend/runtime-session-state";
 import {
   ExternalBackendProcess,
   SpawnedBackendProcess,
@@ -45,8 +46,10 @@ const backendClient = new BackendClient({
 });
 
 function createBackendProcessController(): BackendProcessController {
+  const externalOverride = process.env.ADVX_BACKEND_EXTERNAL;
   const externallyManaged =
-    process.env.ADVX_BACKEND_EXTERNAL === "1" || process.env.ADVX_BACKEND_URL !== undefined;
+    externalOverride === "1" ||
+    (externalOverride !== "0" && process.env.ADVX_BACKEND_URL !== undefined);
   if (externallyManaged) {
     return new ExternalBackendProcess({ baseUrl: backendBaseUrl });
   }
@@ -221,6 +224,10 @@ app.whenReady().then(async () => {
   await reconcileOverlayTarget();
 
   configureMediaAccess(() => controlWindow);
+  const recoverableRuntimeSessionId = await loadRuntimeSessionId(app.getPath("userData"));
+  if (recoverableRuntimeSessionId) {
+    backendClient.restoreRecoverableRuntimeSession(recoverableRuntimeSessionId);
+  }
   backendProcess = createBackendProcessController();
   backendProcess.onUnexpectedExit((exit) => {
     void backendClient.stop().finally(() => scheduleBackendRecovery(exit));
@@ -238,6 +245,7 @@ app.whenReady().then(async () => {
     }
     if (status.connection !== "connected" || savedProviderConfigChecked) return;
     savedProviderConfigChecked = true;
+    if (recoverableRuntimeSessionId) return;
     void configureSavedModelConfig(backendClient).catch((error: unknown) =>
       console.error("Failed to restore saved provider configuration", error)
     );

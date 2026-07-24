@@ -44,6 +44,8 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     microphoneLevel,
     message,
     messageSending,
+    providerProbe,
+    targetSuggestions,
     pipPreviewStyle,
     videoRef,
     cameraVideoRef,
@@ -55,6 +57,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     onClearBarrage,
     onToggleOverlay,
     onMessageChange,
+    onSelectMessageTarget,
     onSendUserMessage
   } = props
 
@@ -320,6 +323,23 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
             '结束直播'}
           {session.status === 'idle' && '开始直播'}
         </button>
+        <details className="provider-capability">
+          <summary>Provider · {providerProbe?.status ?? '未检测'}</summary>
+          <div>
+            <strong>{providerProbe?.provider_profile_id ?? '尚无检测结果'}</strong>
+            {providerProbe && (
+              <>
+                <span>模型：{providerProbe.discovered_model_ids.join('、') || '未发现'}</span>
+                {providerProbe.checks.map((check) => (
+                  <span key={check.capability}>
+                    {check.capability} · {check.status}
+                    {check.model_id ? ` · ${check.model_id}` : ''}
+                  </span>
+                ))}
+              </>
+            )}
+          </div>
+        </details>
         <button
           className="command-button"
           type="button"
@@ -384,7 +404,25 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
         >
           <Send size={16} />
         </button>
+        {targetSuggestions.length > 0 && (
+          <div className="mention-menu" role="listbox" aria-label="选择消息目标">
+            {targetSuggestions.map((target) => (
+              <button
+                type="button"
+                key={`${target.kind}:${target.id}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onSelectMessageTarget(target)}
+              >
+                <strong>@{target.label}</strong>
+                <span>{target.kind === 'viewer' ? 'Viewer' : 'Persona'}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+      <p className="provider-disclosure">
+        屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型 Provider；原始音频仅发送给 StepFun ASR，生成模型仅接收最终转写。原始音频和连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。
+      </p>
     </section>
   )
 }

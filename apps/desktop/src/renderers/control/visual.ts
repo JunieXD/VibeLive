@@ -43,6 +43,7 @@ export type VisualFrame = {
   mode: VisualMode
   bytes: number
   overTarget: boolean
+  changeScore: number
   blob: Blob | null
 }
 
@@ -67,6 +68,8 @@ const MIN_READABLE_LONG_EDGE = 720
 const JPEG_MAX_QUALITY = 0.9
 const JPEG_MIN_QUALITY = 0.42
 const JPEG_QUALITY_SEARCH_STEPS = 2
+const CHANGE_SIGNATURE_WIDTH = 32
+const CHANGE_SIGNATURE_HEIGHT = 18
 const PIP_WIDTH_RATIOS: Record<PipSize, number> = {
   small: 0.2,
   medium: 0.28,
@@ -252,6 +255,59 @@ export function cameraPreviewTransform(mirror: boolean): string {
   return mirror ? 'scaleX(-1)' : 'none'
 }
 
+export function grayscaleSignature(rgba: Uint8ClampedArray): Uint8Array {
+  if (rgba.length % 4 !== 0) throw new Error('RGBA pixels must contain complete pixels.')
+  const signature = new Uint8Array(rgba.length / 4)
+  for (let source = 0, target = 0; source < rgba.length; source += 4, target += 1) {
+    signature[target] =
+      (77 * rgba[source] + 150 * rgba[source + 1] + 29 * rgba[source + 2]) >> 8
+  }
+  return signature
+}
+
+export function grayscaleMeanAbsoluteDifference(
+  previous: Uint8Array | null,
+  current: Uint8Array
+): number {
+  if (previous === null) return 0
+  if (previous.length !== current.length || current.length === 0) {
+    throw new Error('Visual signatures must have the same non-zero length.')
+  }
+  let difference = 0
+  for (let index = 0; index < current.length; index += 1) {
+    difference += Math.abs(current[index] - previous[index])
+  }
+  return difference / (current.length * 255)
+}
+
+export function sampleCanvasChangeSignature(
+  sourceCanvas: HTMLCanvasElement,
+  sampleCanvas: HTMLCanvasElement
+): Uint8Array {
+  sampleCanvas.width = CHANGE_SIGNATURE_WIDTH
+  sampleCanvas.height = CHANGE_SIGNATURE_HEIGHT
+  const context = sampleCanvas.getContext('2d', {
+    alpha: false,
+    willReadFrequently: true
+  })
+  if (!context) throw new Error('Canvas 2D context is unavailable.')
+  context.drawImage(
+    sourceCanvas,
+    0,
+    0,
+    CHANGE_SIGNATURE_WIDTH,
+    CHANGE_SIGNATURE_HEIGHT
+  )
+  return grayscaleSignature(
+    context.getImageData(
+      0,
+      0,
+      CHANGE_SIGNATURE_WIDTH,
+      CHANGE_SIGNATURE_HEIGHT
+    ).data
+  )
+}
+
 function dimensionsForLongEdge(
   sourceWidth: number,
   sourceHeight: number,
@@ -269,8 +325,11 @@ export async function encodeJpegWithinTarget(
   sourceWidth: number,
   sourceHeight: number,
   profile: CompressionProfile,
-  encode: (width: number, height: number, quality: number) => Promise<Blob>
+  encode: (width: number, height: number, quality: number) => Promise<Blob>,
+  maximumQuality = JPEG_MAX_QUALITY
 ): Promise<EncodedJpeg> {
+  const highQuality = Math.min(1, Math.max(0.01, maximumQuality))
+  const lowQuality = Math.min(JPEG_MIN_QUALITY, highQuality)
   let longEdge = Math.min(profile.maxLongEdge, Math.max(sourceWidth, sourceHeight))
   let lastResult: EncodedJpeg | null = null
 
@@ -279,13 +338,13 @@ export async function encodeJpegWithinTarget(
     const highQualityBlob = await encode(
       dimensions.width,
       dimensions.height,
-      JPEG_MAX_QUALITY
+      highQuality
     )
     if (highQualityBlob.size <= profile.targetBytes) {
       return {
         blob: highQualityBlob,
         ...dimensions,
-        quality: JPEG_MAX_QUALITY,
+        quality: highQuality,
         overTarget: false
       }
     }
@@ -293,19 +352,19 @@ export async function encodeJpegWithinTarget(
     const lowQualityBlob = await encode(
       dimensions.width,
       dimensions.height,
-      JPEG_MIN_QUALITY
+      lowQuality
     )
     lastResult = {
       blob: lowQualityBlob,
       ...dimensions,
-      quality: JPEG_MIN_QUALITY,
+      quality: lowQuality,
       overTarget: lowQualityBlob.size > profile.targetBytes
     }
 
     if (!lastResult.overTarget) {
       let accepted = lastResult
-      let acceptedQuality = JPEG_MIN_QUALITY
-      let rejectedQuality = JPEG_MAX_QUALITY
+      let acceptedQuality = lowQuality
+      let rejectedQuality = highQuality
       for (let step = 0; step < JPEG_QUALITY_SEARCH_STEPS; step += 1) {
         const quality = (acceptedQuality + rejectedQuality) / 2
         const blob = await encode(dimensions.width, dimensions.height, quality)
@@ -443,7 +502,8 @@ export function drawCompositeFrame(
 
 export async function compressCompositeCanvas(
   sourceCanvas: HTMLCanvasElement,
-  profile: CompressionProfile
+  profile: CompressionProfile,
+  maximumQuality = JPEG_MAX_QUALITY
 ): Promise<EncodedJpeg> {
   const workCanvas = document.createElement('canvas')
   return encodeJpegWithinTarget(
@@ -463,7 +523,8 @@ export async function compressCompositeCanvas(
           quality
         )
       })
-    }
+    },
+    maximumQuality
   )
 }
 

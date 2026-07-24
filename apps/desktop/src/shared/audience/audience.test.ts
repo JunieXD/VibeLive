@@ -1,23 +1,20 @@
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import {
   BASE_PERSONAS,
   BUILT_IN_MODES,
+  allocateViewerCounts,
   activateMode,
-  archiveMeme,
-  archiveStaleMemes,
-  autoIngestMeme,
-  compileAudienceWorkspaceSnapshot,
+  compileViewerPool,
+  canonicalPersonaContent,
   createInitialAudienceWorkspace,
   duplicateModeAsCustom,
-  findMemeConflict,
   parseAudienceWorkspaceState,
   parsePersonaMarkdown,
-  recordMemeUsage,
   resetBuiltInMode,
-  restoreMeme,
+  reviseAudienceMode,
+  revisePersonaTemplate,
   serializePersonaMarkdown,
-  setMemePinned,
-  undoAutomaticMeme,
   validatePersona
 } from './index'
 
@@ -29,11 +26,15 @@ describe('audience presets and modes', () => {
     expect(BASE_PERSONAS.map((persona) => persona.id)).toContain('instigator')
     expect(BASE_PERSONAS.find((persona) => persona.id === 'instigator')?.name).toBe('串子哥')
     expect(BUILT_IN_MODES).toHaveLength(6)
+    expect(BUILT_IN_MODES.map((mode) => mode.viewerCount)).toEqual([24, 28, 16, 14, 24, 14])
     expect(BASE_PERSONAS.flatMap((persona) => validatePersona(persona))).toEqual([])
 
     const mode6657 = BUILT_IN_MODES.find((mode) => mode.id === 'room-6657')
     expect(mode6657).toMatchObject({
       ambience: 'continuous',
+      viewerCount: 28,
+      normalResponseRange: [6, 10],
+      highlightResponseRange: [20, 28],
       baseActivity: [6, 10],
       burstLimit: [20, 28]
     })
@@ -92,8 +93,12 @@ describe('audience presets and modes', () => {
 describe('persona Markdown', () => {
   it('round trips the first fenced JSON block and Markdown behavior', () => {
     const source = BASE_PERSONAS[0]
+    expect(source.contentHash).toBe(
+      `sha256:${createHash('sha256').update(canonicalPersonaContent(source)).digest('hex')}`
+    )
     const markdown = serializePersonaMarkdown(source)
-    expect(markdown).toContain('"version": 1')
+    expect(markdown).toContain('"document_version": 2')
+    expect(markdown).toContain(`"content_hash": "${source.contentHash}"`)
     const parsed = parsePersonaMarkdown(markdown)
     expect(parsed).toEqual({ ok: true, persona: source })
   })
@@ -105,12 +110,12 @@ describe('persona Markdown', () => {
 
   it('rejects unknown personality document versions', () => {
     const markdown = serializePersonaMarkdown(BASE_PERSONAS[0]).replace(
-      '"version": 1',
-      '"version": 2'
+      '"document_version": 2',
+      '"document_version": 3'
     )
     expect(parsePersonaMarkdown(markdown)).toMatchObject({
       ok: false,
-      issues: [{ field: 'version' }]
+      issues: [{ field: 'document_version' }]
     })
   })
 
@@ -120,143 +125,167 @@ describe('persona Markdown', () => {
       ok: false,
       issues: expect.arrayContaining([expect.objectContaining({ field: 'enabled' })])
     })
-    expect(parsePersonaMarkdown(valid.replace('"maxCommentsPerDecision": 2', '"maxCommentsPerDecision": "2"'))).toMatchObject({
+    expect(parsePersonaMarkdown(valid.replace(
+      '"max_comments_per_decision": 2',
+      '"max_comments_per_decision": "2"'
+    ))).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([
         expect.objectContaining({ field: 'maxCommentsPerDecision' })
       ])
     })
-    expect(parsePersonaMarkdown(valid.replace('"version": 1', '"version": 1,\n  "futureField": true'))).toMatchObject({
+    expect(parsePersonaMarkdown(valid.replace(
+      '"document_version": 2',
+      '"document_version": 2,\n  "futureField": true'
+    ))).toMatchObject({
       ok: false,
       issues: expect.arrayContaining([expect.objectContaining({ field: 'futureField' })])
     })
   })
+
+  it('uses canonical content hashes and increments revisions only for material changes', () => {
+    const source = BASE_PERSONAS[0]
+    expect(revisePersonaTemplate(source, {})).toBe(source)
+    expect(revisePersonaTemplate(source, { behavior: `${source.behavior}\r\n` })).toBe(source)
+
+    const revised = revisePersonaTemplate(source, { speechStyle: '更短' })
+    expect(revised).toMatchObject({
+      revision: source.revision + 1,
+      speechStyle: '更短'
+    })
+    expect(revised.contentHash).not.toBe(source.contentHash)
+    expect(parsePersonaMarkdown(serializePersonaMarkdown(revised))).toEqual({
+      ok: true,
+      persona: revised
+    })
+  })
 })
 
-describe('meme lifecycle and runtime isolation', () => {
-  const ingest = (modeId: string, id: string, text: string, familyKey?: string) =>
-    autoIngestMeme([], {
-      id,
-      modeId,
-      text,
-      familyKey,
-      personaTags: ['fun_seeker'],
-      sourceKinds: ['user_speech'],
-      evidenceSummary: '主播刚说出的短句',
-      createdAt: '2026-07-23T00:00:00.000Z'
+describe('viewer pool v2', () => {
+  it('allocates exact viewers with deterministic Hamilton tie breaking', () => {
+    const mode = {
+      ...BUILT_IN_MODES[0],
+      viewerCount: 5,
+      personaIds: ['reaction_qmark', 'cheat_suspector', 'praise_then_bite'],
+      personaWeights: {
+        reaction_qmark: 1,
+        cheat_suspector: 1,
+        praise_then_bite: 1
+      }
+    }
+    expect(allocateViewerCounts(mode, BASE_PERSONAS)).toEqual([
+      { personaId: 'reaction_qmark', count: 2 },
+      { personaId: 'cheat_suspector', count: 2 },
+      { personaId: 'praise_then_bite', count: 1 }
+    ])
+
+    const first = compileViewerPool(mode, BASE_PERSONAS, 'session-a')
+    const second = compileViewerPool(mode, BASE_PERSONAS, 'session-a')
+    expect(second).toEqual(first)
+    expect(first).toHaveLength(5)
+    expect(new Set(first.map((viewer) => viewer.viewerInstanceId)).size).toBe(5)
+    expect(first[0]).toMatchObject({
+      alias: '问号哥·01',
+      ordinal: 1
     })
-
-  it('suppresses exact duplicates and same-family variants only inside a mode', () => {
-    const first = ingest('room-6657', 'm1', '这波稳了', 'steady')
-    expect(first.accepted).toBe(true)
-    if (!first.accepted) return
-
-    expect(autoIngestMeme(first.entries, {
-      id: 'm2',
-      modeId: 'room-6657',
-      text: '这 波，稳了！',
-      familyKey: 'other',
-      sourceKinds: ['user_text'],
-      evidenceSummary: '',
-      createdAt: '2026-07-23T00:01:00.000Z'
-    })).toMatchObject({ accepted: false, reason: 'duplicate' })
-    expect(autoIngestMeme(first.entries, {
-      id: 'm3',
-      modeId: 'room-6657',
-      text: '稳得不行',
-      familyKey: 'steady',
-      sourceKinds: ['screen_event'],
-      evidenceSummary: '',
-      createdAt: '2026-07-23T00:02:00.000Z'
-    })).toMatchObject({ accepted: false, reason: 'family-suppressed' })
-    expect(autoIngestMeme(first.entries, {
-      id: 'm4',
-      modeId: 'newcomer-friendly',
-      text: '这波稳了',
-      familyKey: 'steady',
-      sourceKinds: ['manual'],
-      evidenceSummary: '',
-      createdAt: '2026-07-23T00:03:00.000Z'
-    }).accepted).toBe(true)
-
-    expect(findMemeConflict(first.entries, {
-      id: 'manual-edit',
-      modeId: 'room-6657',
-      normalizedText: '这波稳了',
-      familyKey: 'different'
-    })).toBe('duplicate')
-    expect(findMemeConflict(first.entries, {
-      id: 'manual-edit',
-      modeId: 'room-6657',
-      normalizedText: '另一句话',
-      familyKey: 'STEADY'
-    })).toBe('family-suppressed')
+    expect(first[0].viewerInstanceId).toMatch(
+      /^viewer:[0-9a-f]{8}:lively-game-room:reaction_qmark:01$/
+    )
+    expect(compileViewerPool(mode, BASE_PERSONAS, 'session-b')[0].viewerInstanceId)
+      .not.toBe(first[0].viewerInstanceId)
+    expect(compileViewerPool(mode, BASE_PERSONAS, 'session-b')[0].variant)
+      .not.toEqual(first[0].variant)
   })
 
-  it('archives, restores active, pins, records decay data and undoes automatic ingestion', () => {
-    const result = ingest('room-6657', 'm1', '这波稳了')
-    if (!result.accepted) throw new Error('fixture ingestion failed')
-    let entries = archiveMeme(result.entries, 'm1')
-    expect(entries[0]).toMatchObject({ status: 'archived', revision: 2 })
-    entries = restoreMeme(entries, 'm1')
-    entries = setMemePinned(entries, 'm1', true)
-    entries = recordMemeUsage(entries, 'm1', '2026-07-23T00:04:00.000Z')
-    expect(entries[0]).toMatchObject({
-      status: 'active',
-      pinned: true,
-      revision: 5,
-      usageCount: 1,
-      lastUsedAt: '2026-07-23T00:04:00.000Z'
+  it('keeps mode overrides isolated from base persona revision and hashes', () => {
+    const base = BASE_PERSONAS[0]
+    const mode = reviseAudienceMode(BUILT_IN_MODES[0], {
+      personaOverrides: { [base.id]: { name: '模式问号' } }
     })
-    expect(undoAutomaticMeme(entries, 'm1')).toEqual([])
-  })
-
-  it('compiles active personas with overrides and memes from only the active mode', () => {
-    const workspace = createInitialAudienceWorkspace()
-    const active = activateMode(workspace.modeState, 'room-6657')
-    const a = ingest('room-6657', 'm1', 'A')
-    const b = ingest('newcomer-friendly', 'm2', 'B')
-    if (!a.accepted || !b.accepted) throw new Error('fixture ingestion failed')
-    const snapshot = compileAudienceWorkspaceSnapshot({
-      ...workspace,
-      modeState: active,
-      memes: [...a.entries, ...b.entries]
-    })
-    expect(snapshot.mode.id).toBe('room-6657')
-    expect(snapshot.mode).toMatchObject({
-      baseActivity: [6, 10],
-      burstLimit: [20, 28],
-      ambience: 'continuous'
-    })
-    expect(snapshot.personas.map((persona) => persona.id)).toContain('reaction_qmark')
-    expect(snapshot.personas.find((persona) => persona.id === 'reaction_qmark')?.weight).toBe(3)
-    expect(snapshot.memes.map((meme) => meme.id)).toEqual(['m1'])
-  })
-
-  it('archives stale low-use memes while preserving pinned, frequent and invalid-date entries', () => {
-    const fixture = ingest('room-6657', 'old', '旧梗')
-    if (!fixture.accepted) throw new Error('fixture ingestion failed')
-    const old = { ...fixture.entry, createdAt: '2026-01-01T00:00:00.000Z' }
-    const entries = [
-      old,
-      { ...old, id: 'inactive', text: '停用梗', normalizedText: '停用梗', familyKey: 'inactive', status: 'inactive' as const },
-      { ...old, id: 'pinned', text: '置顶梗', normalizedText: '置顶梗', familyKey: 'pinned', pinned: true },
-      { ...old, id: 'frequent', text: '常用梗', normalizedText: '常用梗', familyKey: 'frequent', usageCount: 3 },
-      { ...old, id: 'invalid', text: '坏日期', normalizedText: '坏日期', familyKey: 'invalid', createdAt: 'not-a-date' },
-      { ...old, id: 'recent', text: '最近用过', normalizedText: '最近用过', familyKey: 'recent', lastUsedAt: '2026-02-20T00:00:00.000Z' }
-    ]
-
-    const archived = archiveStaleMemes(entries, '2026-03-01T00:00:00.000Z')
-    expect(archived.find((entry) => entry.id === 'old')).toMatchObject({ status: 'archived', revision: 2 })
-    expect(archived.find((entry) => entry.id === 'inactive')).toMatchObject({ status: 'archived', revision: 2 })
-    expect(archived.find((entry) => entry.id === 'pinned')?.status).toBe('active')
-    expect(archived.find((entry) => entry.id === 'frequent')?.status).toBe('active')
-    expect(archived.find((entry) => entry.id === 'invalid')?.status).toBe('active')
-    expect(archived.find((entry) => entry.id === 'recent')?.status).toBe('active')
+    const viewer = compileViewerPool(mode, BASE_PERSONAS)[0]
+    expect(viewer.alias).toBe('模式问号·01')
+    expect(viewer.personaRevision).toBe(base.revision)
+    expect(viewer.personaContentHash).toBe(base.contentHash)
+    expect(BASE_PERSONAS[0]).toBe(base)
+    expect(reviseAudienceMode(mode, {
+      personaOverrides: { [base.id]: { name: '模式问号' } }
+    })).toBe(mode)
   })
 })
 
 describe('workspace persistence', () => {
+  it('migrates v1 modes once and preserves the exact built-in viewer counts', () => {
+    const v2 = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    const v1 = {
+      ...v2,
+      version: 1,
+      personas: v2.personas.map((persona: Record<string, unknown>) => {
+        const { documentVersion, revision, contentHash, ...legacy } = persona
+        return legacy
+      }),
+      modeState: {
+        ...v2.modeState,
+        modes: v2.modeState.modes.map((mode: Record<string, unknown>) => {
+          const {
+            namespaceId,
+            revision,
+            viewerCount,
+            normalResponseRange,
+            highlightResponseRange,
+            visualSettings,
+            ...legacy
+          } = mode
+          return legacy
+        })
+      }
+    }
+    const parsed = parseAudienceWorkspaceState(v1)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.migratedFromVersion).toBe(1)
+    expect(parsed.workspace.version).toBe(2)
+    expect(parsed.workspace.modeState.modes.map((mode) => mode.viewerCount))
+      .toEqual([24, 28, 16, 14, 24, 14])
+    expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
+      viewerVisualInputMode: 'direct_frames',
+      frameBundleSize: 3,
+      frameSelectionStrategy: 'change_peaks'
+    })
+  })
+
+  it('extracts v1 local memes for one-time Shared Brain migration', () => {
+    const v1 = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    v1.version = 1
+    v1.memes = [{
+      id: 'legacy-joke',
+      text: '这波属于是',
+      createdAt: '2025-01-02T03:04:05.000Z'
+    }]
+    for (const persona of v1.personas) {
+      delete persona.documentVersion
+      delete persona.revision
+      delete persona.contentHash
+    }
+    for (const mode of v1.modeState.modes) {
+      delete mode.namespaceId
+      delete mode.revision
+      delete mode.viewerCount
+      delete mode.normalResponseRange
+      delete mode.highlightResponseRange
+      delete mode.visualSettings
+    }
+
+    const parsed = parseAudienceWorkspaceState(v1)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.legacyMemes).toEqual([{
+      id: 'legacy-joke',
+      text: '这波属于是',
+      createdAt: '2025-01-02T03:04:05.000Z'
+    }])
+    expect(parsed.workspace).not.toHaveProperty('memes')
+  })
+
   it('strictly hydrates a JSON round trip and rejects damaged references', () => {
     const jsonValue: unknown = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
     expect(parseAudienceWorkspaceState(jsonValue).ok).toBe(true)
@@ -306,8 +335,14 @@ describe('workspace persistence', () => {
     candidate.personas.push({
       ...BASE_PERSONAS[0],
       id: 'custom-persona',
-      name: '自定义人格'
+      name: '自定义人格',
+      documentVersion: undefined,
+      revision: undefined,
+      contentHash: undefined
     })
+    delete candidate.personas.at(-1).documentVersion
+    delete candidate.personas.at(-1).revision
+    delete candidate.personas.at(-1).contentHash
 
     const parsed = parseAudienceWorkspaceState(candidate)
     expect(parsed.ok).toBe(true)
@@ -319,6 +354,8 @@ describe('workspace persistence', () => {
       .toEqual(BASE_PERSONAS[1])
     expect(parsed.workspace.personas.find((persona) => persona.id === 'custom-persona')?.name)
       .toBe('自定义人格')
+    expect(parsed.workspace.personas.find((persona) => persona.id === 'custom-persona'))
+      .toMatchObject({ documentVersion: 2, revision: 1 })
   })
 
   it('returns validation issues instead of throwing on malformed nested values', () => {
@@ -334,34 +371,21 @@ describe('workspace persistence', () => {
       modeState: { modes: [], activeModeId: '' },
       memes: []
     }).ok).toBe(false)
+    expect(parseAudienceWorkspaceState({ version: 3 }).ok).toBe(false)
   })
 
-  it('rejects unsafe mode ids, damaged meme derivations and unknown overrides', () => {
+  it('rejects unsafe mode ids, legacy local memes and unknown overrides', () => {
     const unsafeMode = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
     unsafeMode.modeState.modes[0].id = '../outside'
     unsafeMode.modeState.activeModeId = '../outside'
     expect(parseAudienceWorkspaceState(unsafeMode).ok).toBe(false)
 
-    const damagedMeme = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
-    damagedMeme.memes.push({
-      id: 'meme-damaged',
-      modeId: damagedMeme.modeState.activeModeId,
-      text: '同一个梗',
-      normalizedText: '伪造值',
-      familyKey: 'family',
-      personaTags: [],
-      sourceKinds: ['manual'],
-      evidenceSummary: '',
-      createdBy: 'user',
-      source: 'manual',
-      createdAt: '2026-07-23T00:00:00.000Z',
-      revision: 1,
-      lastUsedAt: null,
-      usageCount: 0,
-      status: 'active',
-      pinned: false
+    const legacyMeme = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    legacyMeme.memes = [{ id: 'legacy-local-meme' }]
+    expect(parseAudienceWorkspaceState(legacyMeme)).toMatchObject({
+      ok: false,
+      issues: [expect.stringContaining('Shared Brain migration')]
     })
-    expect(parseAudienceWorkspaceState(damagedMeme).ok).toBe(false)
 
     const unknownOverride = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
     unknownOverride.modeState.modes[0].personaOverrides.missing_persona = { name: '不存在' }

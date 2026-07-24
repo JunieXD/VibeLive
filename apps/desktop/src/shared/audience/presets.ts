@@ -1,4 +1,5 @@
-import type { AudienceMode, Persona } from './types'
+import { createPersonaTemplate } from './canonical'
+import type { AudienceMode, AudienceVisualSettings, PersonaTemplate } from './types'
 
 type Bias = 0 | 1 | 2 | 3 | 4
 
@@ -10,8 +11,8 @@ function persona(
   boundary: string,
   biases: readonly [Bias, Bias, Bias],
   contentFlags: readonly string[] = []
-): Persona {
-  return {
+): PersonaTemplate {
+  return createPersonaTemplate({
     id,
     name,
     initials: name.slice(0, 2),
@@ -29,7 +30,7 @@ function persona(
     maxCommentsPerDecision: biases[1] >= 4 ? 2 : 1,
     contentFlags,
     enabled: true
-  }
+  })
 }
 
 function stableColor(id: string): string {
@@ -38,7 +39,7 @@ function stableColor(id: string): string {
   return ((hash & 0x7f7f7f) | 0x404040).toString(16).padStart(6, '0').slice(-6)
 }
 
-export const BASE_PERSONAS: readonly Persona[] = [
+export const BASE_PERSONAS: readonly PersonaTemplate[] = [
   persona('reaction_qmark', '问号哥', '即时反应、极短句', '意外击杀、离谱失误、看不懂的画面', '普通动作不刷问号，连续问号受密度限制。', [2, 4, 4]),
   persona('cheat_suspector', '科技鉴定员', '半夸半疑、夸张质疑', '爆头、穿烟、三杀、反常发挥', '不真实指控作弊，不煽动举报。', [2, 4, 2], ['allow-cheat-joke']),
   persona('praise_then_bite', '先夸后损', '前半夸、后半补刀', '好操作后立刻失误、击杀后死亡', '不长篇羞辱，不攻击外貌和现实能力。', [2, 3, 1]),
@@ -84,21 +85,38 @@ function createMode(
   ambience: 'natural' | 'continuous'
 ): AudienceMode {
   const personaIds = [...high, ...medium]
+  const normalResponseRange = [...baseActivity] as const
+  const highlightResponseRange = [...burstLimit] as const
   return {
     id,
+    namespaceId: id,
+    revision: 1,
     name,
     description,
     builtIn: true,
+    viewerCount: burstLimit[1],
     personaIds,
     personaWeights: Object.fromEntries([
       ...high.map((personaId) => [personaId, 3]),
       ...medium.map((personaId) => [personaId, 1])
     ]),
     personaOverrides: {},
-    baseActivity,
-    burstLimit,
-    ambience
+    normalResponseRange,
+    highlightResponseRange,
+    ambience,
+    visualSettings: DEFAULT_VISUAL_SETTINGS,
+    baseActivity: normalResponseRange,
+    burstLimit: highlightResponseRange
   }
+}
+
+export const DEFAULT_VISUAL_SETTINGS: AudienceVisualSettings = {
+  viewerVisualInputMode: 'direct_frames',
+  frameBundleSize: 3,
+  frameWindowMs: 10_000,
+  frameSelectionStrategy: 'change_peaks',
+  frameMaxDimension: 1280,
+  frameQuality: 0.82
 }
 
 export const BUILT_IN_MODES: readonly AudienceMode[] = [

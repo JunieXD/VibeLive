@@ -15,7 +15,12 @@ import type {
 
 export type SettingsViewProps = {
   modelBaseUrl: string
+  providerProfileId: string
   modelName: string
+  directorModel: string
+  viewerModel: string
+  memoryModel: string
+  visualSummaryModel: string
   apiKey: string
   asrApiKey: string
   modelConfigStatus: ModelConfigStatus | null
@@ -27,7 +32,12 @@ export type SettingsViewProps = {
   overlayTargets: readonly OverlayTarget[]
   overlaySettingsNotice: string | null
   onModelBaseUrlChange: (value: string) => void
+  onProviderProfileIdChange: (value: string) => void
   onModelNameChange: (value: string) => void
+  onDirectorModelChange: (value: string) => void
+  onViewerModelChange: (value: string) => void
+  onMemoryModelChange: (value: string) => void
+  onVisualSummaryModelChange: (value: string) => void
   onApiKeyChange: (value: string) => void
   onAsrApiKeyChange: (value: string) => void
   onSaveModelConfig: () => void
@@ -131,7 +141,12 @@ function ToggleField({
 
 export function SettingsView({
   modelBaseUrl,
+  providerProfileId,
   modelName,
+  directorModel,
+  viewerModel,
+  memoryModel,
+  visualSummaryModel,
   apiKey,
   asrApiKey,
   modelConfigStatus,
@@ -143,7 +158,12 @@ export function SettingsView({
   overlayTargets,
   overlaySettingsNotice,
   onModelBaseUrlChange,
+  onProviderProfileIdChange,
   onModelNameChange,
+  onDirectorModelChange,
+  onViewerModelChange,
+  onMemoryModelChange,
+  onVisualSummaryModelChange,
   onApiKeyChange,
   onAsrApiKeyChange,
   onSaveModelConfig,
@@ -182,6 +202,58 @@ export function SettingsView({
               placeholder="输入多模态模型名称"
             />
           </label>
+          <details className="border border-[var(--border)] p-3">
+            <summary className="cursor-pointer text-xs font-semibold text-[var(--text-dim)]">
+              高级模型覆盖
+            </summary>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className={labelClassName}>
+                Provider Profile
+                <input
+                  className={controlClassName}
+                  value={providerProfileId}
+                  onChange={(event) => onProviderProfileIdChange(event.target.value)}
+                  placeholder="default"
+                />
+              </label>
+              <label className={labelClassName}>
+                Director 模型
+                <input
+                  className={controlClassName}
+                  value={directorModel}
+                  onChange={(event) => onDirectorModelChange(event.target.value)}
+                  placeholder={`继承 ${modelName || '默认模型'}`}
+                />
+              </label>
+              <label className={labelClassName}>
+                Viewer 模型
+                <input
+                  className={controlClassName}
+                  value={viewerModel}
+                  onChange={(event) => onViewerModelChange(event.target.value)}
+                  placeholder={`继承 ${modelName || '默认模型'}`}
+                />
+              </label>
+              <label className={labelClassName}>
+                记忆模型
+                <input
+                  className={controlClassName}
+                  value={memoryModel}
+                  onChange={(event) => onMemoryModelChange(event.target.value)}
+                  placeholder={`继承 ${modelName || '默认模型'}`}
+                />
+              </label>
+              <label className={labelClassName}>
+                视觉摘要模型
+                <input
+                  className={controlClassName}
+                  value={visualSummaryModel}
+                  onChange={(event) => onVisualSummaryModelChange(event.target.value)}
+                  placeholder={`继承 ${modelName || '默认模型'}`}
+                />
+              </label>
+            </div>
+          </details>
           <label className={labelClassName}>
             <span className="flex items-center justify-between gap-3">
               模型 API Key

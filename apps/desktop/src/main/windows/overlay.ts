@@ -1,6 +1,7 @@
 import { BrowserWindow, Rectangle, screen, shell } from "electron";
 import { join } from "node:path";
 import type { BarrageEvent, OverlaySettings } from "../../shared/contracts";
+import { overlayIpcEnvelope } from "../../shared/overlay-protocol";
 import { getOverlaySettings } from "../overlay-settings";
 import { loadRenderer } from "./load-renderer";
 
@@ -37,7 +38,10 @@ export function createOverlayWindow(bounds: Rectangle, clickThrough = true): Bro
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.once("did-finish-load", () => {
-    window.webContents.send("overlay:settings-changed", getOverlaySettings());
+    window.webContents.send(
+      "overlay:settings-changed",
+      overlayIpcEnvelope(getOverlaySettings())
+    );
   });
   loadRenderer(window, "overlay");
   return window;
@@ -64,9 +68,10 @@ function getOverlayWindow(): BrowserWindow {
 function sendWhenReady(
   window: BrowserWindow,
   channel: string,
-  payload?: BarrageEvent | OverlaySettings
+  payload: BarrageEvent | OverlaySettings | true
 ): void {
-  const send = (): void => window.webContents.send(channel, payload);
+  const send = (): void =>
+    window.webContents.send(channel, overlayIpcEnvelope(payload));
 
   if (window.webContents.isLoadingMainFrame()) {
     window.webContents.once("did-finish-load", send);
@@ -85,7 +90,7 @@ export function hideOverlay(): void {
 
 export function clearOverlay(): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  sendWhenReady(overlayWindow, "overlay:clear");
+  sendWhenReady(overlayWindow, "overlay:clear", true);
 }
 
 export function pushBarrage(event: BarrageEvent): void {

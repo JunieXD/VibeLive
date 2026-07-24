@@ -1,29 +1,32 @@
-import { Library, RefreshCw, RotateCcw, ShieldAlert, Users } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { Brain, Library, RefreshCw, RotateCcw, ShieldAlert, Users } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import {
   BASE_PERSONAS,
   activateMode,
   duplicateModeAsCustom,
-  findMemeConflict,
-  normalizeMemeText,
   parsePersonaMarkdown,
   resetBuiltInMode,
-  restoreMeme,
+  reviseAudienceMode,
   serializePersonaMarkdown,
   validatePersona,
   type AudienceMode,
   type AudienceWorkspaceState,
-  type MemeEntry,
-  type MemeStatus,
   type Persona,
   type PersonaOverride
 } from '../../../../shared/audience'
 import type { SessionStatus } from '../../../../shared/session'
-import { MemeEditor } from './MemeEditor'
-import { MemeList } from './MemeList'
 import { ModeToolbar } from './ModeToolbar'
+import {
+  AudienceRuntimeToolbar,
+  type AudienceRuntimeToolbarProps
+} from './AudienceRuntimeToolbar'
 import { PersonaEditor } from './PersonaEditor'
 import { PersonaList } from './PersonaList'
+import {
+  BackendMemePanel,
+  RoomMemoryPanel,
+  type SharedBrainController
+} from './SharedBrainPanels'
 import { cx } from './styles'
 
 export type AudienceWorkspaceProps = {
@@ -34,33 +37,15 @@ export type AudienceWorkspaceProps = {
   onChange(next: AudienceWorkspaceState): void
   onRetryLoad(): void
   onResetRejected(): void
+  runtimeControl: AudienceRuntimeToolbarProps
+  sharedBrain: SharedBrainController
+  sharedBrainAvailable: boolean
 }
 
-type WorkspaceTab = 'personas' | 'memes'
+type WorkspaceTab = 'personas' | 'memes' | 'memories'
 type EditorTab = 'form' | 'markdown'
-type MemeFilter = 'all' | MemeStatus | 'new'
-
-type MemeDraft = {
-  text: string
-  familyKey: string
-  personaTags: string
-  evidenceSummary: string
-}
-
 const BUILT_IN_PERSONA_IDS = new Set(BASE_PERSONAS.map((persona) => persona.id))
-const STRUCTURE_LOCKED_STATUSES = new Set<SessionStatus>(['starting', 'running', 'stopping'])
-const MEME_SOURCE_LABELS: Record<MemeEntry['sourceKinds'][number], string> = {
-  user_text: '用户文字',
-  user_speech: '用户语音',
-  screen_event: '画面事件',
-  audience_barrage: 'AI 互动',
-  manual: '手动'
-}
-const MEME_STATUS_LABELS: Record<MemeStatus, string> = {
-  active: '启用',
-  inactive: '停用',
-  archived: '归档'
-}
+const STRUCTURE_LOCKED_STATUSES = new Set<SessionStatus>(['starting', 'stopping'])
 
 function createStableId(prefix: string): string {
   const random =
@@ -68,13 +53,6 @@ function createStableId(prefix: string): string {
       ? crypto.randomUUID().replaceAll('-', '').slice(0, 12)
       : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
   return `${prefix}-${random}`
-}
-
-function splitList(value: string): string[] {
-  return value
-    .split(/[\n,，]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
 }
 
 function effectivePersona(base: Persona, mode: AudienceMode): Persona {
@@ -127,16 +105,6 @@ function updateActiveMode(
   }
 }
 
-function updateMeme(
-  entries: readonly MemeEntry[],
-  id: string,
-  change: Partial<MemeEntry>
-): readonly MemeEntry[] {
-  return entries.map((entry) =>
-    entry.id === id ? { ...entry, ...change, revision: entry.revision + 1 } : entry
-  )
-}
-
 export function AudienceWorkspace({
   workspace,
   sessionStatus,
@@ -144,7 +112,10 @@ export function AudienceWorkspace({
   persistenceIssue,
   onChange,
   onRetryLoad,
-  onResetRejected
+  onResetRejected,
+  runtimeControl,
+  sharedBrain,
+  sharedBrainAvailable
 }: AudienceWorkspaceProps): React.JSX.Element {
   const [tab, setTab] = useState<WorkspaceTab>('personas')
   const [editorTab, setEditorTab] = useState<EditorTab>('form')
@@ -156,11 +127,6 @@ export function AudienceWorkspace({
   const [markdownDraft, setMarkdownDraft] = useState('')
   const [personaError, setPersonaError] = useState('')
   const [modeNameDraft, setModeNameDraft] = useState('')
-  const [memeSearch, setMemeSearch] = useState('')
-  const [memeFilter, setMemeFilter] = useState<MemeFilter>('all')
-  const [selectedMemeId, setSelectedMemeId] = useState('')
-  const [memeDraft, setMemeDraft] = useState<MemeDraft | null>(null)
-  const [memeError, setMemeError] = useState('')
 
   const structureLocked = STRUCTURE_LOCKED_STATUSES.has(sessionStatus)
   const activeMode =
@@ -188,43 +154,6 @@ export function AudienceWorkspace({
     setPersonaError('')
   }, [activeMode?.id, selectedBasePersona])
 
-  const modeMemes = useMemo(
-    () => workspace.memes.filter((entry) => entry.modeId === activeMode?.id),
-    [activeMode?.id, workspace.memes]
-  )
-  const visibleMemes = useMemo(() => {
-    const query = memeSearch.trim().toLocaleLowerCase()
-    return modeMemes.filter((entry) => {
-      const matchesSearch =
-        !query ||
-        `${entry.text} ${entry.familyKey} ${entry.personaTags.join(' ')} ${entry.evidenceSummary}`
-          .toLocaleLowerCase()
-          .includes(query)
-      const matchesStatus =
-        memeFilter === 'all' ||
-        (memeFilter === 'new'
-          ? entry.status === 'active' && entry.usageCount === 0
-          : entry.status === memeFilter)
-      return matchesSearch && matchesStatus
-    })
-  }, [memeFilter, memeSearch, modeMemes])
-  const selectedMeme =
-    modeMemes.find((entry) => entry.id === selectedMemeId) ?? visibleMemes[0]
-
-  useEffect(() => {
-    if (!selectedMeme) {
-      setMemeDraft(null)
-      setMemeError('')
-      return
-    }
-    setMemeDraft({
-      text: selectedMeme.text,
-      familyKey: selectedMeme.familyKey,
-      personaTags: selectedMeme.personaTags.join(', '),
-      evidenceSummary: selectedMeme.evidenceSummary
-    })
-    setMemeError('')
-  }, [selectedMeme?.id])
 
   if (!activeMode) {
     return (
@@ -234,12 +163,8 @@ export function AudienceWorkspace({
     )
   }
 
-  const emitMode = (nextMode: AudienceMode): void => {
-    onChange(updateActiveMode(workspace, () => nextMode))
-  }
-
   const patchMode = (change: Partial<AudienceMode>): void => {
-    onChange(updateActiveMode(workspace, (mode) => ({ ...mode, ...change })))
+    onChange(updateActiveMode(workspace, (mode) => reviseAudienceMode(mode, change)))
   }
 
   const commitModeName = (): void => {
@@ -254,17 +179,23 @@ export function AudienceWorkspace({
   const setPersonaParticipation = (personaId: string, enabled: boolean): void => {
     const base = workspace.personas.find((persona) => persona.id === personaId)
     if (!base) return
+    if (!enabled && activeMode.personaIds.length <= 1) {
+      setPersonaError('模式至少需要一个参与人格')
+      return
+    }
     const resolved = effectivePersona(base, activeMode)
     const personaIds =
-      enabled && !activeMode.personaIds.includes(personaId)
-        ? [...activeMode.personaIds, personaId]
-        : activeMode.personaIds
+      enabled
+        ? activeMode.personaIds.includes(personaId)
+          ? activeMode.personaIds
+          : [...activeMode.personaIds, personaId]
+        : activeMode.personaIds.filter((id) => id !== personaId)
     const personaWeights = { ...activeMode.personaWeights }
     if (enabled && !Object.hasOwn(personaWeights, personaId)) personaWeights[personaId] = 1
-    const nextPersona = { ...resolved, enabled }
-    const override = personaOverride(base, nextPersona)
+    if (!enabled) delete personaWeights[personaId]
+    const override = personaOverride(base, resolved)
     const personaOverrides = { ...activeMode.personaOverrides }
-    if (Object.keys(override).length === 0) delete personaOverrides[personaId]
+    if (!enabled || Object.keys(override).length === 0) delete personaOverrides[personaId]
     else personaOverrides[personaId] = override
     patchMode({ personaIds, personaWeights, personaOverrides })
     if (personaDraft?.id === personaId) {
@@ -294,7 +225,7 @@ export function AudienceWorkspace({
     const personaOverrides = { ...activeMode.personaOverrides }
     if (Object.keys(override).length === 0) delete personaOverrides[next.id]
     else personaOverrides[next.id] = override
-    emitMode({ ...activeMode, personaOverrides })
+    patchMode({ personaOverrides })
   }
 
   const savePersona = (): void => {
@@ -313,7 +244,7 @@ export function AudienceWorkspace({
     if (!selectedBasePersona) return
     const personaOverrides = { ...activeMode.personaOverrides }
     delete personaOverrides[selectedBasePersona.id]
-    emitMode({ ...activeMode, personaOverrides })
+    patchMode({ personaOverrides })
     setPersonaDraft(selectedBasePersona)
     setMarkdownDraft(serializePersonaMarkdown(selectedBasePersona))
     setPersonaError('')
@@ -419,8 +350,7 @@ export function AudienceWorkspace({
       modeState: {
         modes,
         activeModeId: modes[0]?.id ?? ''
-      },
-      memes: workspace.memes.filter((entry) => entry.modeId !== activeMode.id)
+      }
     })
   }
 
@@ -437,94 +367,6 @@ export function AudienceWorkspace({
     }
   }
 
-  const mutateMemes = (memes: readonly MemeEntry[]): void => {
-    onChange({ ...workspace, memes })
-  }
-
-  const addManualMeme = (): void => {
-    const now = new Date().toISOString()
-    const id = createStableId('meme')
-    let ordinal = 1
-    let text = `新梗 ${ordinal}`
-    while (
-      modeMemes.some(
-        (entry) =>
-          entry.status !== 'archived' &&
-          entry.normalizedText === normalizeMemeText(text)
-      )
-    ) {
-      ordinal += 1
-      text = `新梗 ${ordinal}`
-    }
-    const entry: MemeEntry = {
-      id,
-      modeId: activeMode.id,
-      text,
-      normalizedText: normalizeMemeText(text),
-      familyKey: id,
-      personaTags: [],
-      sourceKinds: ['manual'],
-      evidenceSummary: '',
-      createdBy: 'user',
-      source: 'manual',
-      createdAt: now,
-      revision: 1,
-      lastUsedAt: null,
-      usageCount: 0,
-      status: 'active',
-      pinned: false
-    }
-    mutateMemes([...workspace.memes, entry])
-    setSelectedMemeId(id)
-  }
-
-  const saveMeme = (): void => {
-    if (!selectedMeme || !memeDraft) return
-    const text = memeDraft.text.trim()
-    if (!text) {
-      setMemeError('弹幕文本不能为空')
-      return
-    }
-    const normalizedText = normalizeMemeText(text)
-    const familyKey = (
-      memeDraft.familyKey.trim() || normalizedText
-    ).toLocaleLowerCase()
-    const conflict = findMemeConflict(workspace.memes, {
-      id: selectedMeme.id,
-      modeId: selectedMeme.modeId,
-      normalizedText,
-      familyKey
-    })
-    if (conflict) {
-      setMemeError(
-        conflict === 'duplicate'
-          ? '当前模式已有相同弹幕'
-          : '当前模式已有同一梗家族的条目'
-      )
-      return
-    }
-    mutateMemes(
-      updateMeme(workspace.memes, selectedMeme.id, {
-        text,
-        normalizedText,
-        familyKey,
-        personaTags: splitList(memeDraft.personaTags),
-        evidenceSummary: memeDraft.evidenceSummary.trim().slice(0, 160)
-      })
-    )
-    setMemeError('')
-  }
-
-  const restoreSelectedMeme = (): void => {
-    if (!selectedMeme) return
-    try {
-      mutateMemes(restoreMeme(workspace.memes, selectedMeme.id))
-      setMemeError('')
-    } catch {
-      setMemeError('当前模式已有相同文本或同一梗家族，无法恢复')
-    }
-  }
-
   const personaRows = workspace.personas.filter((persona) => {
     const query = personaSearch.trim().toLocaleLowerCase()
     return (
@@ -534,12 +376,6 @@ export function AudienceWorkspace({
         .includes(query)
     )
   })
-  const stats = {
-    active: modeMemes.filter((entry) => entry.status === 'active').length,
-    new: modeMemes.filter((entry) => entry.status === 'active' && entry.usageCount === 0).length,
-    archived: modeMemes.filter((entry) => entry.status === 'archived').length
-  }
-
   return (
     <section
       className={cx('audience-workspace', !persistenceReady && 'has-persistence-alert')}
@@ -571,6 +407,7 @@ export function AudienceWorkspace({
           )}
         </div>
       )}
+      <AudienceRuntimeToolbar {...runtimeControl} />
       <ModeToolbar
         workspace={workspace}
         activeMode={activeMode}
@@ -607,12 +444,21 @@ export function AudienceWorkspace({
           <Library size={15} />
           成长梗库
         </button>
+        <button
+          type="button"
+          className={cx(tab === 'memories' && 'active')}
+          onClick={() => setTab('memories')}
+        >
+          <Brain size={15} />
+          长期记忆
+        </button>
       </nav>
 
       {tab === 'personas' ? (
         <div className={cx('aw-persona-layout')} data-audience-persona-layout>
           <PersonaList
             personas={personaRows}
+            allPersonas={workspace.personas}
             activeMode={activeMode}
             selectedPersonaId={selectedPersonaId}
             search={personaSearch}
@@ -642,33 +488,10 @@ export function AudienceWorkspace({
             onParticipationChange={setPersonaParticipation}
           />
         </div>
+      ) : tab === 'memes' ? (
+        <BackendMemePanel brain={sharedBrain} available={sharedBrainAvailable} />
       ) : (
-        <div className={cx('aw-meme-layout')}>
-          <MemeList
-            entries={visibleMemes}
-            selectedMemeId={selectedMeme?.id}
-            search={memeSearch}
-            filter={memeFilter}
-            stats={stats}
-            sourceLabels={MEME_SOURCE_LABELS}
-            statusLabels={MEME_STATUS_LABELS}
-            onSearchChange={setMemeSearch}
-            onFilterChange={setMemeFilter}
-            onAdd={addManualMeme}
-            onSelect={setSelectedMemeId}
-          />
-          <MemeEditor
-            memes={workspace.memes}
-            selectedMeme={selectedMeme}
-            draft={memeDraft}
-            error={memeError}
-            sourceLabels={MEME_SOURCE_LABELS}
-            setDraft={setMemeDraft}
-            onMutate={mutateMemes}
-            onRestore={restoreSelectedMeme}
-            onSave={saveMeme}
-          />
-        </div>
+        <RoomMemoryPanel brain={sharedBrain} available={sharedBrainAvailable} />
       )}
     </section>
   )

@@ -7,6 +7,8 @@ import {
   createWaitingVisualBatchSink,
   deliverAndReleaseVisualBatch,
   encodeJpegWithinTarget,
+  grayscaleMeanAbsoluteDifference,
+  grayscaleSignature,
   getContainRectangle,
   getPipRectangle,
   loadVisualSettings,
@@ -28,6 +30,7 @@ function createFrame(capturedAt: number): VisualFrame {
     mode: 'pip',
     bytes: blob.size,
     overTarget: false,
+    changeScore: 0,
     blob
   }
 }
@@ -68,6 +71,30 @@ describe('visual composition helpers', () => {
 })
 
 describe('visual compression', () => {
+  it('keeps identical pixels stable across different JPEG encodings', async () => {
+    const pixels = new Uint8ClampedArray([
+      20, 40, 60, 255,
+      100, 120, 140, 255
+    ])
+    const previous = grayscaleSignature(pixels)
+    const firstJpeg = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' })
+    const secondJpeg = new Blob([new Uint8Array([9, 8, 7, 6])], { type: 'image/jpeg' })
+
+    expect(firstJpeg.size).not.toBe(secondJpeg.size)
+    expect(grayscaleMeanAbsoluteDifference(previous, grayscaleSignature(pixels))).toBe(0)
+  })
+
+  it('reports a high visual delta for clearly different frames', () => {
+    const black = grayscaleSignature(
+      new Uint8ClampedArray([0, 0, 0, 255, 0, 0, 0, 255])
+    )
+    const white = grayscaleSignature(
+      new Uint8ClampedArray([255, 255, 255, 255, 255, 255, 255, 255])
+    )
+
+    expect(grayscaleMeanAbsoluteDifference(black, white)).toBe(1)
+  })
+
   it.each([
     ['economy', 960, 120 * 1024],
     ['balanced', 1440, 250 * 1024],
@@ -107,6 +134,24 @@ describe('visual compression', () => {
     expect(result.width).toBe(720)
     expect(result.overTarget).toBe(true)
     expect(encode.mock.calls.length).toBeLessThanOrEqual(12)
+  })
+
+  it('applies the canonical maximum dimension and JPEG quality ceiling', async () => {
+    const encode = vi.fn(async (_width: number, _height: number, _quality: number) =>
+      new Blob([new Uint8Array(1)], { type: 'image/jpeg' })
+    )
+
+    const result = await encodeJpegWithinTarget(
+      3840,
+      2160,
+      { ...COMPRESSION_PROFILES.clear, maxLongEdge: 1024 },
+      encode,
+      0.67
+    )
+
+    expect(Math.max(result.width, result.height)).toBe(1024)
+    expect(result.quality).toBe(0.67)
+    expect(encode).toHaveBeenCalledWith(1024, 576, 0.67)
   })
 })
 

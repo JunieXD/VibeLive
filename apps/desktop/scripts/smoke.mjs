@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -22,6 +23,25 @@ await mkdir(smokeUserDataDirectory, { recursive: true })
 
 const { ELECTRON_RUN_AS_NODE: _electronRunAsNode, ...electronEnvironment } = process.env
 
+function reservePort() {
+  return new Promise((resolvePort, reject) => {
+    const server = createServer()
+    server.unref()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      assert.ok(address && typeof address === 'object')
+      server.close((error) => (error ? reject(error) : resolvePort(address.port)))
+    })
+  })
+}
+
+const backendPort = await reservePort()
+const backendEnvironment = {
+  ADVX_BACKEND_EXTERNAL: '0',
+  ADVX_BACKEND_URL: `http://127.0.0.1:${backendPort}`
+}
+
 function launchApp() {
   return electron.launch({
     args: [
@@ -32,6 +52,7 @@ function launchApp() {
     cwd: root,
     env: {
       ...electronEnvironment,
+      ...backendEnvironment,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
     }
   })
@@ -248,11 +269,15 @@ try {
   }
 
   await page.getByRole('button', { name: '成长梗库', exact: true }).click()
-  await page.getByRole('button', { name: '手动新增梗', exact: true }).click()
-  await page.locator('[data-audience-meme-form] textarea').first().fill('烟火味这下有说法了')
-  await page.getByRole('button', { name: '保存', exact: true }).click()
-  await page.waitForTimeout(700)
-  await page.getByText('烟火味这下有说法了', { exact: true }).first().waitFor()
+  await page.getByText(
+    '开始直播并连接后端后，可管理当前房间的长期记忆与梗库。',
+    { exact: true }
+  ).waitFor()
+  assert.equal(
+    await page.getByRole('button', { name: '手动新增梗' }).count(),
+    0,
+    'The removed local meme editor leaked back into the control surface.'
+  )
 
   await electronApp.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()
@@ -262,9 +287,33 @@ try {
   await page.waitForTimeout(150)
   const audienceOverflow = await page.evaluate(() => ({
     document: document.documentElement.scrollWidth > window.innerWidth,
+    workspaceMetrics: (() => {
+      const workspace = document.querySelector('[data-audience-workspace]')
+      return workspace
+        ? {
+            clientWidth: workspace.clientWidth,
+            scrollWidth: workspace.scrollWidth,
+            offsetWidth: workspace.offsetWidth
+          }
+        : null
+    })(),
     workspace:
       (document.querySelector('[data-audience-workspace]')?.scrollWidth ?? 0) >
-      (document.querySelector('[data-audience-workspace]')?.clientWidth ?? 0)
+      (document.querySelector('[data-audience-workspace]')?.clientWidth ?? 0),
+    offenders: [...document.querySelectorAll('[data-audience-workspace] *')]
+      .filter((element) => {
+        const workspace = document.querySelector('[data-audience-workspace]')?.getBoundingClientRect()
+        const bounds = element.getBoundingClientRect()
+        return element.scrollWidth > element.clientWidth + 1 || Boolean(workspace && bounds.right > workspace.right + 1)
+      })
+      .slice(0, 8)
+      .map((element) => ({
+        tag: element.tagName,
+        className: element.className,
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        right: Math.round(element.getBoundingClientRect().right)
+      }))
   }))
   if (audienceOverflow.document || audienceOverflow.workspace) {
     throw new Error(`Audience workspace overflowed at 1120x720: ${JSON.stringify(audienceOverflow)}`)
@@ -323,7 +372,7 @@ try {
     return select instanceof HTMLSelectElement && select.value === 'room-6657'
   })
   await page.getByRole('button', { name: '成长梗库', exact: true }).click()
-  await page.getByText('烟火味这下有说法了', { exact: true }).first().waitFor()
+  assert.equal(await page.getByRole('button', { name: '手动新增梗' }).count(), 0)
 
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('heading', { name: '弹幕覆盖层', exact: true }).waitFor()
@@ -849,6 +898,7 @@ try {
       connection,
       providersConfigured: connection === 'connected',
       startupError,
+      recoverableRuntimeSessionId: null,
       session: sessionSnapshot()
     })
     const publishStatus = () => {
@@ -878,7 +928,15 @@ try {
       publishStatus()
       return runtimeStatus()
     })
-    ipcMain.handle('backend:session-start', () => transition('running'))
+    ipcMain.handle('backend:session-start', (_event, workspace, clientRequestId) => {
+      if (!workspace || typeof workspace !== 'object') {
+        throw new Error('Smoke expected the current workspace-first session start signature.')
+      }
+      if (typeof clientRequestId !== 'string' || !clientRequestId.trim()) {
+        throw new Error('Smoke expected a non-empty client request ID when starting a session.')
+      }
+      return transition('running')
+    })
     ipcMain.handle('backend:session-pause', () => transition('paused'))
     ipcMain.handle('backend:session-resume', () => transition('running'))
     ipcMain.handle('backend:session-stop', () => transition('idle'))
@@ -893,8 +951,32 @@ try {
 
   await page.getByRole('button', { name: '开始直播', exact: true }).click()
   await page.waitForFunction(() => document.body.textContent?.includes('直播中'))
-  await page.getByText('直播开始了，先热个场。', { exact: true }).waitFor()
-  await overlayPage.getByText('直播开始了，先热个场。', { exact: true }).waitFor()
+  const smokeBarrageText = 'Smoke test-only 实时弹幕'
+  // Test-only renderer event: this proves UI fan-out only. runtime-smoke owns backend linkage proof.
+  await electronApp.evaluate(({ BrowserWindow }, event) => {
+    BrowserWindow.getAllWindows()
+      .find((window) => window.webContents.getURL().includes('/control/'))
+      ?.webContents.send('backend:barrage', event)
+  }, {
+    barrageId: 'smoke-test-only-runtime-barrage',
+    audienceId: 'smoke-viewer-1',
+    audienceName: 'Smoke 观众',
+    text: smokeBarrageText,
+    createdAt: Date.now(),
+    roomId: 'smoke-room',
+    sessionId: 'smoke-session',
+    audienceEpoch: 1,
+    observationId: 'smoke-observation-1',
+    generationRequestId: 'smoke-generation-1',
+    viewerInstanceId: 'smoke-viewer-1',
+    personaId: 'reaction_qmark',
+    viewerSequence: 1,
+    reactionType: 'smoke',
+    evidenceRefs: [],
+    expiresAt: Date.now() + 10_000
+  })
+  await page.getByText(smokeBarrageText, { exact: true }).waitFor()
+  await overlayPage.getByText(smokeBarrageText, { exact: true }).waitFor()
   await page.waitForFunction(
     () => {
       const valueFor = (label) => {
@@ -1018,9 +1100,9 @@ try {
   await page.getByRole('button', { name: /AI 观众/ }).click()
   await page.getByRole('heading', { name: 'AI 观众', exact: true }).waitFor()
   const liveEditPolicy = {
-    modeLocked: await page.getByLabel('观众模式').isDisabled(),
-    duplicateLocked: await page.getByRole('button', { name: '复制为自定义模式' }).isDisabled(),
-    personaSaveLocked: await page.getByRole('button', { name: '保存覆盖' }).isDisabled(),
+    modeEditable: await page.getByLabel('观众模式').isEnabled(),
+    duplicateEnabled: await page.getByRole('button', { name: '复制为自定义模式' }).isEnabled(),
+    personaSaveEnabled: await page.getByRole('button', { name: '保存覆盖' }).isEnabled(),
     activityEditable: await page.locator('[data-audience-range] input').first().isEnabled(),
     participationEditable: await page
       .locator('[data-audience-persona-row] [data-audience-participation] input')
@@ -1028,21 +1110,14 @@ try {
       .isEnabled()
   }
   if (
-    !liveEditPolicy.modeLocked ||
-    !liveEditPolicy.duplicateLocked ||
-    !liveEditPolicy.personaSaveLocked ||
+    !liveEditPolicy.modeEditable ||
+    !liveEditPolicy.duplicateEnabled ||
+    !liveEditPolicy.personaSaveEnabled ||
     !liveEditPolicy.activityEditable ||
     !liveEditPolicy.participationEditable
   ) {
     throw new Error(`Unexpected live audience edit policy: ${JSON.stringify(liveEditPolicy)}`)
   }
-  await page.getByRole('button', { name: '成长梗库', exact: true }).click()
-  if (await page.getByRole('button', { name: '手动新增梗' }).isDisabled()) {
-    throw new Error('The active mode meme library should remain editable while live.')
-  }
-  await page.getByText('这下真有说法了', { exact: true }).first().click()
-  await page.getByRole('button', { name: '撤销自动梗' }).click()
-  await page.getByText('这下真有说法了', { exact: true }).waitFor({ state: 'detached' })
   await page.getByRole('button', { name: '直播控制台', exact: true }).click()
 
   await page.getByRole('button', { name: '暂停', exact: true }).click()
@@ -1192,7 +1267,7 @@ try {
   await page.locator('[data-audience-range] input').first().fill('7')
 
   console.log(
-    `Monorepo desktop smoke passed: ${sourceCount} sources, six audience modes, 32 personas, live edit policy, meme candidate ingestion/undo, camera denied before explicit enable, ${cameraDevices} camera entries, three visual modes, ${compressedKilobytes} KB composite JPEG, versioned settings restore, microphone meter peak ${microphonePeak}%, and complete pause/stop track cleanup.`
+    `Monorepo desktop smoke passed: ${sourceCount} sources, six audience modes, 32 personas, live edit policy, Shared Brain-only meme controls, camera denied before explicit enable, ${cameraDevices} camera entries, three visual modes, ${compressedKilobytes} KB composite JPEG, versioned settings restore, microphone meter peak ${microphonePeak}%, and complete pause/stop track cleanup.`
   )
   console.log(`Screenshot: ${resolve(artifactDirectory, 'control-console.png')}`)
   console.log(`Saved model credentials: ${resolve(artifactDirectory, 'model-config-saved.png')}`)
@@ -1643,7 +1718,7 @@ const personaDocument = await readFile(
 if (!personaDocument.includes('串子哥')) {
   throw new Error('The mode-specific personality.md file was not materialized.')
 }
-if (!personaDocument.includes('"version": 1')) {
+if (!personaDocument.includes('"document_version": 2')) {
   throw new Error('The materialized personality.md file has no supported format version.')
 }
 
@@ -1654,6 +1729,7 @@ const recoveryApp = await electron.launch({
   cwd: root,
   env: {
     ...electronEnvironment,
+    ...backendEnvironment,
     ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
   }
 })

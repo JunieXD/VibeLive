@@ -43,6 +43,8 @@ export function duplicateModeAsCustom(
   const copy: AudienceMode = {
     ...source,
     id: customId,
+    namespaceId: customId,
+    revision: 1,
     name: customName.trim(),
     builtIn: false,
     personaIds: [...source.personaIds],
@@ -55,6 +57,86 @@ export function duplicateModeAsCustom(
     )
   }
   return { modes: [...state.modes, copy], activeModeId: copy.id }
+}
+
+export function reviseAudienceMode(
+  current: AudienceMode,
+  patch: Partial<Omit<AudienceMode, 'id' | 'builtIn' | 'revision' | 'baseActivity' | 'burstLimit'>>
+): AudienceMode {
+  const candidate = normalizeModeAliases({ ...current, ...patch })
+  return canonicalModeContent(candidate) === canonicalModeContent(current)
+    ? current
+    : { ...candidate, revision: current.revision + 1 }
+}
+
+export function canonicalModeContent(mode: AudienceMode): string {
+  return `${JSON.stringify({
+    mode_id: mode.id,
+    namespace_id: mode.namespaceId,
+    name: mode.name,
+    description: mode.description,
+    built_in: mode.builtIn,
+    viewer_count: mode.viewerCount,
+    persona_ids: [...mode.personaIds],
+    persona_weights: Object.fromEntries(
+      mode.personaIds.map((personaId) => [personaId, mode.personaWeights[personaId]])
+    ),
+    persona_overrides: Object.fromEntries(
+      Object.keys(mode.personaOverrides).sort().map((personaId) => [
+        personaId,
+        canonicalOverride(mode.personaOverrides[personaId])
+      ])
+    ),
+    normal_response_range: [...mode.normalResponseRange],
+    highlight_response_range: [...mode.highlightResponseRange],
+    ambience: mode.ambience,
+    visual_settings: {
+      viewer_visual_input_mode: mode.visualSettings.viewerVisualInputMode,
+      frame_bundle_size: mode.visualSettings.frameBundleSize,
+      frame_window_ms: mode.visualSettings.frameWindowMs,
+      frame_selection_strategy: mode.visualSettings.frameSelectionStrategy,
+      frame_max_dimension: mode.visualSettings.frameMaxDimension,
+      frame_quality: mode.visualSettings.frameQuality
+    }
+  })}\n`
+}
+
+function canonicalOverride(override: PersonaOverride): PersonaOverride {
+  const entries = [
+    ['name', override.name],
+    ['initials', override.initials],
+    ['role', override.role],
+    ['color', override.color],
+    ['traits', override.traits ? [...override.traits] : undefined],
+    ['speechStyle', override.speechStyle],
+    ['behavior', override.behavior],
+    ['triggerPreferences', override.triggerPreferences
+      ? [...override.triggerPreferences]
+      : undefined],
+    ['avoidPatterns', override.avoidPatterns ? [...override.avoidPatterns] : undefined],
+    ['silenceBias', override.silenceBias],
+    ['burstBias', override.burstBias],
+    ['repetitionBias', override.repetitionBias],
+    ['cooldownMs', override.cooldownMs],
+    ['maxCommentsPerDecision', override.maxCommentsPerDecision],
+    ['contentFlags', override.contentFlags ? [...override.contentFlags] : undefined],
+    ['enabled', override.enabled]
+  ] as const
+  return Object.fromEntries(entries.filter(([, value]) => value !== undefined)) as PersonaOverride
+}
+
+function normalizeModeAliases(mode: AudienceMode): AudienceMode {
+  return {
+    ...mode,
+    personaIds: [...mode.personaIds],
+    personaWeights: { ...mode.personaWeights },
+    personaOverrides: { ...mode.personaOverrides },
+    normalResponseRange: [...mode.normalResponseRange],
+    highlightResponseRange: [...mode.highlightResponseRange],
+    visualSettings: { ...mode.visualSettings },
+    baseActivity: [...mode.normalResponseRange],
+    burstLimit: [...mode.highlightResponseRange]
+  }
 }
 
 function clonePersonaOverride(override: PersonaOverride): PersonaOverride {

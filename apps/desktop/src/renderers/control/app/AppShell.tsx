@@ -113,7 +113,7 @@ export function AppShell({
   statusItems,
   notice,
   children,
-  roomId = 'AX-1024',
+  roomId = '未启动',
   emergencyStopShortcut = 'Ctrl/⌘ + Shift + X'
 }: AppShellProps): JSX.Element {
   const navigationItems = [

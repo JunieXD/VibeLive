@@ -14,6 +14,7 @@ import {
   parseAudienceWorkspaceState,
   serializePersonaMarkdown,
   type AudienceWorkspaceState,
+  type LegacyLocalMeme,
   type Persona
 } from "../../shared/audience";
 import type {
@@ -26,11 +27,37 @@ import type {
   ModelConfig,
   ModelConfigStatus,
   OverlaySettings,
+  RuntimeRoomIdentity,
   SaveAudienceWorkspaceResult,
   SaveModelConfigResult
 } from "../../shared/contracts";
-import { BackendClient, BackendClientError } from "../backend/backend-client";
-import { resolveModelConfig } from "../model-config";
+import {
+  compileCanonicalRuntimeSpec,
+  type ModeMemeEdit,
+  type RoomMemoryEdit,
+  type TextSubmitTarget
+} from "../../shared/backend-client";
+import { BackendClient } from "../backend/backend-client";
+import { formatImageMimeType } from "../backend/realtime-binary";
+import {
+  clearRuntimeSessionId,
+  saveRuntimeSessionId
+} from "../backend/runtime-session-state";
+import {
+  configureIdleModelProvider,
+  createRuntimeProviderCandidate,
+  mergeProviderProfileSnapshots,
+  modelProviderChanged,
+  reviseProviderProfileForActiveSession,
+  resolveModelConfig,
+  resolveModelProvider,
+  selectRuntimeProviderConfig,
+  type RuntimeProviderIdentity
+} from "../model-config";
+import {
+  migrateLegacyMemes,
+  runLegacyMemeMigration
+} from "../legacy-meme-migration";
 import {
   getOverlaySettings,
   listOverlayTargets,
@@ -48,6 +75,11 @@ import { applyControlWindowTheme } from "../windows/control";
 let selectedSourceId: string | null = null;
 let displayCaptureAuthorization: { webContentsId: number; expiresAt: number } | null = null;
 let cameraCaptureAuthorization: { webContentsId: number; expiresAt: number } | null = null;
+let pendingLegacyMemeMigration: {
+  raw: string;
+  memes: readonly LegacyLocalMeme[];
+  recoveryPath: string | null;
+} | null = null;
 
 function hasDisplayCaptureAuthorization(webContentsId: number): boolean {
   return (
@@ -82,38 +114,39 @@ async function saveModelConfig(
   config: ModelConfig,
   backendClient: BackendClient
 ): Promise<SaveModelConfigResult> {
-  const normalized = resolveModelConfig(config, await loadStoredModelConfig());
-
-  let backendConfigured = false;
-  let restartRequired = false;
-  try {
-    await backendClient.configureProviders(normalized);
-    backendConfigured = true;
-  } catch (error) {
-    if (error instanceof BackendClientError && error.code === "providers_already_configured") {
-      restartRequired = true;
-    } else {
-      throw error;
-    }
-  }
+  const configStore = await loadStoredModelConfigStore();
+  const stored = configStore?.current ?? null;
+  const sessionActive = backendClient.currentStatus().session.state !== "idle";
+  const normalized = reviseProviderProfileForActiveSession(
+    resolveModelConfig(config, stored),
+    stored,
+    sessionActive,
+    randomUUID()
+  );
+  const runtimeApplyRequired = sessionActive && modelProviderChanged(normalized, stored);
+  let restartRequired =
+    sessionActive && (stored === null || normalized.asrApiKey !== stored.asrApiKey);
 
   const configDirectory = app.getPath("userData");
   await mkdir(configDirectory, { recursive: true });
 
-  const storedConfig: Record<string, string> = {
-    baseUrl: normalized.baseUrl,
-    model: normalized.model
-  };
+  const storedConfig: Record<string, string> = {};
 
   let securelyStored = false;
   if (safeStorage.isEncryptionAvailable()) {
-    storedConfig.encryptedModelApiKey = safeStorage
-      .encryptString(normalized.apiKey)
-      .toString("base64");
-    storedConfig.encryptedAsrApiKey = safeStorage
-      .encryptString(normalized.asrApiKey)
+    const profiles = mergeProviderProfileSnapshots(configStore?.profiles ?? [], normalized);
+    storedConfig.encryptedConfig = safeStorage
+      .encryptString(JSON.stringify({ current: normalized, profiles }))
       .toString("base64");
     securelyStored = true;
+  } else {
+    storedConfig.baseUrl = normalized.baseUrl;
+    storedConfig.providerProfileId = normalized.providerProfileId;
+    storedConfig.model = normalized.model;
+    storedConfig.directorModel = normalized.directorModel;
+    storedConfig.viewerModel = normalized.viewerModel;
+    storedConfig.memoryModel = normalized.memoryModel;
+    storedConfig.visualSummaryModel = normalized.visualSummaryModel;
   }
 
   await writeFile(
@@ -121,10 +154,52 @@ async function saveModelConfig(
     JSON.stringify(storedConfig, null, 2),
     "utf8"
   );
-  return { ok: true, securelyStored, backendConfigured, restartRequired };
+
+  const providerConfiguration = await configureIdleModelProvider(
+    sessionActive,
+    () => backendClient.configureProviders(normalized)
+  );
+  restartRequired ||= providerConfiguration.restartRequired;
+  return {
+    ok: true,
+    providerProfileId: normalized.providerProfileId,
+    securelyStored,
+    backendConfigured: providerConfiguration.backendConfigured,
+    restartRequired,
+    runtimeApplyRequired
+  };
 }
 
-async function loadStoredModelConfig(): Promise<ModelConfig | null> {
+type ModelConfigStore = {
+  current: ModelConfig;
+  profiles: ModelConfig[];
+};
+
+function parseModelConfigRecord(config: Record<string, unknown>): ModelConfig | null {
+  if (
+    typeof config.baseUrl !== "string" ||
+    typeof config.model !== "string" ||
+    typeof config.apiKey !== "string" ||
+    typeof config.asrApiKey !== "string"
+  ) {
+    return null;
+  }
+  return {
+    baseUrl: config.baseUrl,
+    providerProfileId:
+      typeof config.providerProfileId === "string" ? config.providerProfileId : "default",
+    model: config.model,
+    directorModel: typeof config.directorModel === "string" ? config.directorModel : "",
+    viewerModel: typeof config.viewerModel === "string" ? config.viewerModel : "",
+    memoryModel: typeof config.memoryModel === "string" ? config.memoryModel : "",
+    visualSummaryModel:
+      typeof config.visualSummaryModel === "string" ? config.visualSummaryModel : "",
+    apiKey: config.apiKey,
+    asrApiKey: config.asrApiKey
+  };
+}
+
+async function loadStoredModelConfigStore(): Promise<ModelConfigStore | null> {
   let raw: string;
   try {
     raw = await readFile(join(app.getPath("userData"), "model-config.json"), "utf8");
@@ -135,6 +210,34 @@ async function loadStoredModelConfig(): Promise<ModelConfig | null> {
   if (!safeStorage.isEncryptionAvailable()) return null;
 
   const parsed = JSON.parse(raw) as Record<string, unknown>;
+  if (typeof parsed.encryptedConfig === "string") {
+    try {
+      const decrypted = safeStorage.decryptString(
+        Buffer.from(parsed.encryptedConfig, "base64")
+      );
+      const config = JSON.parse(decrypted) as Record<string, unknown>;
+      if (typeof config.current === "object" && config.current !== null) {
+        const current = parseModelConfigRecord(config.current as Record<string, unknown>);
+        const profiles = Array.isArray(config.profiles)
+          ? config.profiles.flatMap((profile) => {
+              if (typeof profile !== "object" || profile === null) return [];
+              const parsedProfile = parseModelConfigRecord(profile as Record<string, unknown>);
+              return parsedProfile ? [parsedProfile] : [];
+            })
+          : [];
+        if (current) {
+          return {
+            current,
+            profiles: mergeProviderProfileSnapshots(profiles, current)
+          };
+        }
+      }
+      const legacy = parseModelConfigRecord(config);
+      if (legacy) return { current: legacy, profiles: [legacy] };
+    } catch {
+      return null;
+    }
+  }
   const encryptedModelApiKey =
     typeof parsed.encryptedModelApiKey === "string"
       ? parsed.encryptedModelApiKey
@@ -150,15 +253,35 @@ async function loadStoredModelConfig(): Promise<ModelConfig | null> {
     return null;
   }
   try {
-    return {
+    const current = {
       baseUrl: parsed.baseUrl,
+      providerProfileId: "default",
       model: parsed.model,
+      directorModel: "",
+      viewerModel: "",
+      memoryModel: "",
+      visualSummaryModel: "",
       apiKey: safeStorage.decryptString(Buffer.from(encryptedModelApiKey, "base64")),
       asrApiKey: safeStorage.decryptString(Buffer.from(parsed.encryptedAsrApiKey, "base64"))
     };
+    return { current, profiles: [current] };
   } catch {
     return null;
   }
+}
+
+async function loadStoredModelConfig(): Promise<ModelConfig | null> {
+  return (await loadStoredModelConfigStore())?.current ?? null;
+}
+
+async function loadRuntimeProviderConfig(
+  target: RuntimeProviderIdentity
+): Promise<ModelConfig> {
+  const store = await loadStoredModelConfigStore();
+  if (!store) {
+    throw new Error(`缺少 Provider ${target.provider_profile_id} 的安全凭据快照，已阻止运行时切换。`);
+  }
+  return selectRuntimeProviderConfig(store.profiles, target);
 }
 
 async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
@@ -166,14 +289,24 @@ async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
   if (!config) {
     return {
       baseUrl: null,
+      providerProfileId: null,
       model: null,
+      directorModel: null,
+      viewerModel: null,
+      memoryModel: null,
+      visualSummaryModel: null,
       modelApiKeyStored: false,
       asrApiKeyStored: false
     };
   }
   return {
     baseUrl: config.baseUrl,
+    providerProfileId: config.providerProfileId,
     model: config.model,
+    directorModel: config.directorModel || null,
+    viewerModel: config.viewerModel || null,
+    memoryModel: config.memoryModel || null,
+    visualSummaryModel: config.visualSummaryModel || null,
     modelApiKeyStored: true,
     asrApiKeyStored: true
   };
@@ -184,6 +317,33 @@ export async function configureSavedModelConfig(backendClient: BackendClient): P
   if (!config) return false;
   await backendClient.configureProviders(config);
   return true;
+}
+
+async function compileAudienceRuntime(
+  workspace: AudienceWorkspaceState,
+  configRevision: number,
+  room?: RuntimeRoomIdentity
+) {
+  const modelConfig = await loadStoredModelConfig();
+  if (!modelConfig) throw new Error("请先保存模型配置，再启动或应用观众运行时。");
+  const provider = resolveModelProvider(modelConfig);
+  return compileCanonicalRuntimeSpec(workspace, {
+    configRevision,
+    provider: {
+      providerProfileId: provider.providerProfileId,
+      directorModel: provider.directorModel,
+      viewerModel: provider.viewerModel,
+      memoryModel: provider.memoryModel,
+      visualSummaryModel: provider.visualSummaryModel
+    },
+    roomId: room?.roomId,
+    roomDisplayName: room?.displayName,
+    roomRevision: room?.revision
+  });
+}
+
+async function loadRuntimeProviderCandidate(target: RuntimeProviderIdentity) {
+  return createRuntimeProviderCandidate(await loadRuntimeProviderConfig(target));
 }
 
 function hasCameraCaptureAuthorization(webContentsId: number): boolean {
@@ -257,6 +417,15 @@ async function loadAudienceWorkspace(): Promise<AudienceWorkspaceState | null> {
       raw,
       `观众配置校验失败：${parsed.issues.slice(0, 3).join("；")}`
     );
+  }
+  if (parsed.legacyMemes?.length) {
+    pendingLegacyMemeMigration = {
+      raw,
+      memes: parsed.legacyMemes,
+      recoveryPath: await preserveRejectedAudienceWorkspace(raw)
+    };
+  } else {
+    pendingLegacyMemeMigration = null;
   }
   return parsed.workspace;
 }
@@ -374,6 +543,13 @@ async function replaceAudienceWorkspaceFile(temporary: string, target: string): 
 async function saveAudienceWorkspace(
   candidate: AudienceWorkspaceState
 ): Promise<SaveAudienceWorkspaceResult> {
+  if (pendingLegacyMemeMigration) {
+    throw new Error(
+      pendingLegacyMemeMigration.recoveryPath
+        ? `旧版本地梗尚未迁移到 Shared Brain。原内容已保留在 ${pendingLegacyMemeMigration.recoveryPath}`
+        : "旧版本地梗尚未迁移到 Shared Brain，原配置文件未被覆盖。"
+    );
+  }
   const parsed = parseAudienceWorkspaceState(candidate);
   if (!parsed.ok) {
     throw new Error(`观众配置校验失败：${parsed.issues.slice(0, 3).join("；")}`);
@@ -629,10 +805,76 @@ export function registerDesktopIpc(
     assertControlSender(event);
     return restartBackend();
   });
-  ipcMain.handle("backend:session-start", (event) => {
-    assertControlSender(event);
-    return backendClient.startSession();
-  });
+  ipcMain.handle(
+    "backend:session-start",
+    async (event, workspace: AudienceWorkspaceState, clientRequestId: string) => {
+      assertControlSender(event);
+      if (typeof clientRequestId !== "string" || !clientRequestId.trim()) {
+        throw new Error("client_request_id 无效。");
+      }
+      const parsed = parseAudienceWorkspaceState(workspace);
+      if (!parsed.ok) throw new Error(parsed.issues.join("; "));
+      if (!(await configureSavedModelConfig(backendClient))) {
+        throw new Error("请先保存模型配置，再启动观众运行时。");
+      }
+      const compiled = await compileAudienceRuntime(parsed.workspace, 1);
+      const started = await backendClient.startSession(
+        clientRequestId,
+        compiled
+      );
+      if (pendingLegacyMemeMigration && started.sessionId) {
+        const migration = pendingLegacyMemeMigration;
+        await runLegacyMemeMigration({
+          sessionId: started.sessionId,
+          migrate: async () => {
+            try {
+              const activeMode = compiled.spec.modes.find(
+                (mode) => mode.mode_id === compiled.spec.active_mode_id
+              );
+              if (!activeMode) {
+                throw new Error("当前运行时缺少激活 Mode。");
+              }
+              const runtime = await backendClient.queryRuntime(started.sessionId as string);
+              await migrateLegacyMemes(
+                migration.memes,
+                {
+                  roomId: runtime.room_id,
+                  sessionId: runtime.session_id,
+                  audienceEpoch: runtime.audience_epoch,
+                  namespaceId: activeMode.namespace_id
+                },
+                backendClient
+              );
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : "未知迁移错误";
+              throw new Error(
+                migration.recoveryPath
+                  ? `${reason} 原始 v1 配置保留在 ${migration.recoveryPath}`
+                  : `${reason} 原始 v1 配置仍保留在原路径。`
+              );
+            }
+          },
+          persistWorkspace: async () => {
+            pendingLegacyMemeMigration = null;
+            try {
+              await saveAudienceWorkspace(parsed.workspace);
+            } catch (error) {
+              pendingLegacyMemeMigration = migration;
+              throw error;
+            }
+          },
+          saveRecoverySession: () =>
+            saveRuntimeSessionId(app.getPath("userData"), started.sessionId as string),
+          clearRecoverySession: () => clearRuntimeSessionId(app.getPath("userData")),
+          stopSession: () => backendClient.stopSession()
+        });
+      }
+      if (started.sessionId) {
+        await saveRuntimeSessionId(app.getPath("userData"), started.sessionId);
+      }
+      return started;
+    }
+  );
   ipcMain.handle("backend:session-pause", (event) => {
     assertControlSender(event);
     return backendClient.pauseSession();
@@ -641,16 +883,21 @@ export function registerDesktopIpc(
     assertControlSender(event);
     return backendClient.resumeSession();
   });
-  ipcMain.handle("backend:session-stop", (event) => {
+  ipcMain.handle("backend:session-stop", async (event) => {
     assertControlSender(event);
-    return backendClient.stopSession();
+    const stopped = await backendClient.stopSession();
+    await clearRuntimeSessionId(app.getPath("userData"));
+    return stopped;
   });
-  ipcMain.handle("backend:submit-text", (event, text: string) => {
+  ipcMain.handle("backend:submit-text", (event, text: string, target?: TextSubmitTarget) => {
     assertControlSender(event);
     if (typeof text !== "string" || !text.trim() || text.length > 4_000) {
       throw new Error("文字输入无效。");
     }
-    return backendClient.submitText(`text-${randomUUID()}`, Date.now(), text.trim());
+    if (target?.targetViewerId && target?.targetPersonaId) {
+      throw new Error("文字输入不能同时指定 Viewer 和 Persona。");
+    }
+    return backendClient.submitText(`text-${randomUUID()}`, Date.now(), text.trim(), target);
   });
   ipcMain.handle(
     "backend:submit-audio",
@@ -666,10 +913,21 @@ export function registerDesktopIpc(
     "backend:submit-frame",
     (
       event,
-      input: { inputId: string; capturedAtMs: number; mimeType: string; body: Uint8Array }
+      input: {
+        inputId: string;
+        capturedAtMs: number;
+        mimeType: string;
+        changeScore: number;
+        body: Uint8Array;
+      }
     ) => {
       assertControlSender(event);
-      return backendClient.submitFrame(input);
+      return backendClient.submitFrame({
+        inputId: input.inputId,
+        capturedAtMs: input.capturedAtMs,
+        mimeType: formatImageMimeType(input.mimeType, input.changeScore),
+        body: input.body
+      });
     }
   );
   ipcMain.handle("audience:load-workspace", (event) => {
@@ -680,6 +938,192 @@ export function registerDesktopIpc(
     assertControlSender(event);
     return enqueueAudienceWorkspaceSave(workspace);
   });
+  ipcMain.handle("backend:runtime-query", (event, sessionId: string) => {
+    assertControlSender(event);
+    return backendClient.queryRuntime(sessionId);
+  });
+  ipcMain.handle(
+    "backend:runtime-apply",
+    async (
+      event,
+      sessionId: string,
+      workspace: AudienceWorkspaceState,
+      baseRevision: number
+    ) => {
+      assertControlSender(event);
+      const parsed = parseAudienceWorkspaceState(workspace);
+      if (!parsed.ok) throw new Error(parsed.issues.join("; "));
+      const compiled = await compileAudienceRuntime(parsed.workspace, baseRevision + 1);
+      return backendClient.applyRuntime(
+        sessionId,
+        `apply-${randomUUID()}`,
+        baseRevision,
+        compiled,
+        await loadRuntimeProviderCandidate(compiled.spec.provider)
+      );
+    }
+  );
+  ipcMain.handle(
+    "backend:runtime-rollback",
+    async (event, sessionId: string, baseRevision: number, targetRevision: number) => {
+      assertControlSender(event);
+      const targetProvider = backendClient.runtimeProviderAtRevision(
+        sessionId,
+        targetRevision
+      );
+      if (!targetProvider) {
+        throw new Error(`无法读取 runtime revision ${targetRevision} 的 Provider，已阻止回滚。`);
+      }
+      return backendClient.rollbackRuntime(
+        sessionId,
+        `rollback-${randomUUID()}`,
+        baseRevision,
+        targetRevision,
+        await loadRuntimeProviderCandidate(targetProvider)
+      );
+    }
+  );
+  ipcMain.handle("backend:runtime-recover", async (event, sessionId: string) => {
+    assertControlSender(event);
+    if (typeof sessionId !== "string" || !sessionId.trim()) {
+      throw new Error("runtime session ID 无效。");
+    }
+    const persisted = await backendClient.queryRuntime(sessionId);
+    const providerConfig = await loadRuntimeProviderConfig(
+      persisted.canonical_runtime_spec.provider
+    );
+    await backendClient.configureProviders(providerConfig);
+    const recovered = await backendClient.recoverRuntime(sessionId);
+    await saveRuntimeSessionId(app.getPath("userData"), recovered.session_id);
+    return recovered;
+  });
+  ipcMain.handle(
+    "backend:runtime-config-hash",
+    async (
+      event,
+      workspace: AudienceWorkspaceState,
+      configRevision: number,
+      room: RuntimeRoomIdentity
+    ) => {
+      assertControlSender(event);
+      const parsed = parseAudienceWorkspaceState(workspace);
+      if (!parsed.ok) throw new Error(parsed.issues.join("; "));
+      return (await compileAudienceRuntime(parsed.workspace, configRevision, room)).configHash;
+    }
+  );
+  ipcMain.handle("backend:provider-probe", (event) => {
+    assertControlSender(event);
+    return backendClient.probeProvider();
+  });
+  ipcMain.handle("backend:debug-traces", (event, sessionId: string, cursor?: string) => {
+    assertControlSender(event);
+    return backendClient.queryDebugTraces(sessionId, cursor);
+  });
+  ipcMain.handle("shared-brain:memory-list", (event, roomId: string) => {
+    assertControlSender(event);
+    return backendClient.listRoomMemories(roomId);
+  });
+  ipcMain.handle("shared-brain:memory-head", (event, roomId: string) => {
+    assertControlSender(event);
+    return backendClient.getRoomMemoryHead(roomId);
+  });
+  ipcMain.handle(
+    "shared-brain:memory-edit",
+    (event, roomId: string, memoryId: string, edit: RoomMemoryEdit) => {
+      assertControlSender(event);
+      return backendClient.editRoomMemory(roomId, memoryId, edit);
+    }
+  );
+  ipcMain.handle(
+    "shared-brain:memory-revoke",
+    (event, roomId: string, memoryId: string, expectedRevision: number) => {
+      assertControlSender(event);
+      return backendClient.revokeRoomMemory(roomId, memoryId, expectedRevision);
+    }
+  );
+  ipcMain.handle(
+    "shared-brain:memory-delete",
+    (event, roomId: string, memoryId: string, expectedRevision: number) => {
+      assertControlSender(event);
+      return backendClient.deleteRoomMemory(roomId, memoryId, expectedRevision);
+    }
+  );
+  ipcMain.handle(
+    "shared-brain:memory-reset",
+    (event, roomId: string, expectedRevision: number) => {
+      assertControlSender(event);
+      return backendClient.resetRoomMemories(roomId, expectedRevision);
+    }
+  );
+  ipcMain.handle("shared-brain:meme-list", (event, namespaceId: string) => {
+    assertControlSender(event);
+    return backendClient.listModeMemes(namespaceId);
+  });
+  ipcMain.handle("shared-brain:meme-candidate-list", (event, namespaceId: string) => {
+    assertControlSender(event);
+    return backendClient.listPendingMemeCandidates(namespaceId);
+  });
+  ipcMain.handle("shared-brain:meme-auto-ingest-get", (event, namespaceId: string) => {
+    assertControlSender(event);
+    return backendClient.getModeMemeAutoIngest(namespaceId);
+  });
+  ipcMain.handle(
+    "shared-brain:meme-auto-ingest-set",
+    (event, namespaceId: string, enabled: boolean, expectedRevision: number) => {
+      assertControlSender(event);
+      return backendClient.setModeMemeAutoIngest(namespaceId, enabled, expectedRevision);
+    }
+  );
+  ipcMain.handle(
+    "shared-brain:meme-candidate-approve",
+    (event, namespaceId: string, candidateId: string) => {
+      assertControlSender(event);
+      return backendClient.approveMemeCandidate(namespaceId, candidateId);
+    }
+  );
+  ipcMain.handle(
+    "shared-brain:meme-candidate-reject",
+    (event, namespaceId: string, candidateId: string) => {
+      assertControlSender(event);
+      return backendClient.rejectMemeCandidate(namespaceId, candidateId);
+    }
+  );
+  ipcMain.handle(
+    "shared-brain:meme-mutate",
+    (
+      event,
+      namespaceId: string,
+      memeId: string,
+      action: "undo" | "revoke" | "disable" | "restore" | "pin" | "unpin" | "archive" | "restart",
+      expectedRevision: number
+    ) => {
+      assertControlSender(event);
+      const supported = new Set([
+        "undo",
+        "revoke",
+        "disable",
+        "restore",
+        "pin",
+        "unpin",
+        "archive",
+        "restart"
+      ]);
+      if (!supported.has(action)) throw new Error("不支持的梗库操作。");
+      return backendClient.mutateModeMeme(
+        namespaceId,
+        memeId,
+        action,
+        expectedRevision
+      );
+    }
+  );
+  ipcMain.handle(
+    "shared-brain:meme-edit",
+    (event, namespaceId: string, memeId: string, edit: ModeMemeEdit) => {
+      assertControlSender(event);
+      return backendClient.editModeMeme(namespaceId, memeId, edit);
+    }
+  );
   ipcMain.handle("app:set-color-theme", (event, theme: ColorTheme) => {
     assertControlSender(event);
     if (theme !== "light" && theme !== "dark") {

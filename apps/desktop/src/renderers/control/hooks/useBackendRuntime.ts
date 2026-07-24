@@ -15,6 +15,7 @@ export function createDisconnectedBackendStatus(now = Date.now()): BackendRuntim
     connection: 'disconnected',
     providersConfigured: false,
     startupError: null,
+    recoverableRuntimeSessionId: null,
     session: {
       sessionId: null,
       state: 'idle',

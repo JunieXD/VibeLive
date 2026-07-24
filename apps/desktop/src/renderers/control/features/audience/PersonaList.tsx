@@ -1,10 +1,16 @@
 import { Plus, Search } from 'lucide-react'
-import type { AudienceMode, Persona } from '../../../../shared/audience'
+import {
+  allocateViewerCounts,
+  createPersonaTemplate,
+  type AudienceMode,
+  type Persona
+} from '../../../../shared/audience'
 import { IconButton } from './IconButton'
 import { cx } from './styles'
 
 type PersonaListProps = {
   personas: readonly Persona[]
+  allPersonas: readonly Persona[]
   activeMode: AudienceMode
   selectedPersonaId: string
   search: string
@@ -22,6 +28,7 @@ function effectivePersona(base: Persona, mode: AudienceMode): Persona {
 
 export function PersonaList({
   personas,
+  allPersonas,
   activeMode,
   selectedPersonaId,
   search,
@@ -32,6 +39,14 @@ export function PersonaList({
   onParticipationChange,
   onWeightChange
 }: PersonaListProps): React.JSX.Element {
+  const allocations = new Map(
+    allocateViewerCounts(
+      activeMode,
+      allPersonas.map((persona) =>
+        'documentVersion' in persona ? persona : createPersonaTemplate(persona)
+      )
+    ).map((item) => [item.personaId, item.count])
+  )
   return (
     <aside className={cx('aw-directory')}>
       <div className={cx('aw-search-row')}>
@@ -68,7 +83,10 @@ export function PersonaList({
                 <i style={{ backgroundColor: resolved.color }}>{resolved.initials}</i>
                 <span>
                   <strong>{resolved.name}</strong>
-                  <small>{resolved.role}</small>
+                  <small>
+                    {resolved.role}
+                    {participating ? ` · 实例 ${allocations.get(persona.id) ?? 0}` : ''}
+                  </small>
                 </span>
               </button>
               <label
@@ -99,6 +117,9 @@ export function PersonaList({
           )
         })}
       </div>
+      <footer className={cx('aw-viewer-allocation-total')}>
+        共 {Array.from(allocations.values()).reduce((total, count) => total + count, 0)} 个 Viewer
+      </footer>
     </aside>
   )
 }

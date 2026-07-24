@@ -6,20 +6,24 @@ describe('model configuration notices', () => {
     expect(
       getModelConfigNotice({
         ok: true,
+        providerProfileId: 'default',
         securelyStored: true,
         backendConfigured: false,
-        restartRequired: true
+        restartRequired: true,
+        runtimeApplyRequired: false
       })
-    ).toContain('重启桌面应用后生效')
+    ).toContain('重启后加载')
   })
 
   it('reports secure storage for both model and speech credentials', () => {
     expect(
       getModelConfigNotice({
         ok: true,
+        providerProfileId: 'default',
         securelyStored: true,
         backendConfigured: true,
-        restartRequired: false
+        restartRequired: false,
+        runtimeApplyRequired: false
       })
     ).toBe('模型与语音识别配置已安全保存并接入后端')
   })
@@ -28,9 +32,11 @@ describe('model configuration notices', () => {
     expect(
       getModelConfigNotice({
         ok: true,
+        providerProfileId: 'default',
         securelyStored: false,
         backendConfigured: true,
-        restartRequired: false
+        restartRequired: false,
+        runtimeApplyRequired: false
       })
     ).toContain('密钥不会落盘')
   })
@@ -44,7 +50,12 @@ describe('model configuration notices', () => {
         asrApiKey: '',
         status: {
           baseUrl: 'https://api.openai.com/v1',
+          providerProfileId: 'default',
           model: 'gpt-4.1',
+          directorModel: null,
+          viewerModel: null,
+          memoryModel: null,
+          visualSummaryModel: null,
           modelApiKeyStored: true,
           asrApiKeyStored: true
         },
@@ -68,5 +79,31 @@ describe('model configuration notices', () => {
         saving: false
       })
     ).toBe(false)
+  })
+
+  it('describes active-session saves as pending an explicit runtime apply', () => {
+    expect(
+      getModelConfigNotice({
+        ok: true,
+        providerProfileId: 'default-rev-12345678',
+        securelyStored: true,
+        backendConfigured: false,
+        restartRequired: false,
+        runtimeApplyRequired: true
+      })
+    ).toContain('显式应用运行时配置后切换')
+  })
+
+  it('separates model apply from ASR restart guidance', () => {
+    expect(
+      getModelConfigNotice({
+        ok: true,
+        providerProfileId: 'default-rev-12345678',
+        securelyStored: true,
+        backendConfigured: false,
+        restartRequired: true,
+        runtimeApplyRequired: true
+      })
+    ).toBe('模型配置已安全保存，显式应用运行时配置后切换；ASR 配置需重启后加载')
   })
 })
