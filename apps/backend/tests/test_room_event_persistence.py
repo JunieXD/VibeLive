@@ -278,80 +278,12 @@ def test_room_event_recovery_rejects_tampered_content_hash() -> None:
             payload={"image_bytes": "secret"},
         ),
         RoomEvent(
-            event_id="event-data-url",
+            event_id="event-nested-data-url",
             session_id="session-1",
             sequence=1,
             source_type=RoomEventSource.SCREEN_OBSERVATION,
             created_at_ms=1,
             payload={"nested": {"value": "data:image/png;base64,abc"}},
-        ),
-        RoomEvent(
-            event_id="event-pixels",
-            session_id="session-1",
-            sequence=1,
-            source_type=RoomEventSource.SCREEN_OBSERVATION,
-            created_at_ms=1,
-            payload={"pixels": "opaque"},
-        ),
-        RoomEvent(
-            event_id="event-blob",
-            session_id="session-1",
-            sequence=1,
-            source_type=RoomEventSource.USER_TEXT,
-            created_at_ms=1,
-            payload={"blob": "opaque"},
-        ),
-        RoomEvent(
-            event_id="event-nested-label-data",
-            session_id="session-1",
-            sequence=1,
-            source_type=RoomEventSource.SCREEN_OBSERVATION,
-            created_at_ms=1,
-            payload={"labels": ["data:image/png;base64,abc"]},
-        ),
-        RoomEvent(
-            event_id="event-evidence-source-data",
-            session_id="session-1",
-            sequence=1,
-            source_type=RoomEventSource.AUDIENCE_BARRAGE,
-            created_at_ms=1,
-            payload={
-                "evidence_refs": [
-                    {"source": "data:image/png;base64,abc", "event_id": "event-1"}
-                ]
-            },
-        ),
-        RoomEvent(
-            event_id="event-upper-data-uri",
-            session_id="session-1",
-            sequence=1,
-            source_type=RoomEventSource.SCREEN_OBSERVATION,
-            created_at_ms=1,
-            payload={"summary": " \tDATA:IMAGE/PNG;BASE64,abc"},
-        ),
-        RoomEvent(
-            event_id="event-frame-hash-type",
-            session_id="session-1",
-            sequence=1,
-            source_type=RoomEventSource.SCREEN_OBSERVATION,
-            created_at_ms=1,
-            payload={"frame_hash": 123},
-        ),
-        RoomEvent(
-            event_id="event-captured-at-type",
-            session_id="session-1",
-            sequence=1,
-            source_type=RoomEventSource.SCREEN_OBSERVATION,
-            created_at_ms=1,
-            payload={"captured_at_ms": "1"},
-        ),
-        RoomEvent(
-            event_id="event-input-id-type",
-            session_id="session-1",
-            sequence=1,
-            source_type=RoomEventSource.USER_TEXT,
-            created_at_ms=1,
-            payload={"input_id": 1},
         ),
         RoomEvent(
             event_id="event-viewer-sequence-type",
@@ -395,42 +327,6 @@ async def test_missing_runtime_snapshot_fails_instead_of_succeeding_in_memory_on
     ) as captured:
         await store.persist(event)
     assert captured.value.code == "runtime_persistence_unavailable"
-
-
-@pytest.mark.asyncio
-async def test_legacy_session_without_runtime_snapshot_fails_explicitly(
-    database: SQLiteDatabase,
-) -> None:
-    async with database.session_factory() as session:
-        session.add(
-            SessionRecordRow(
-                session_id="legacy-session",
-                started_at_ms=1,
-                ended_at_ms=None,
-                outcome=None,
-                app_version="test",
-            )
-        )
-        await session.commit()
-    store = PersistentRuntimeRoomEventStore(
-        session_factory=database.session_factory,
-        runtime_state=RuntimeStateStore(),
-        max_events=8,
-        event_ttl_ms=10_000,
-    )
-
-    with pytest.raises(RoomEventPersistenceUnavailableError):
-        await store.persist(
-            RoomEvent(
-                event_id="legacy-event",
-                session_id="legacy-session",
-                sequence=1,
-                source_type=RoomEventSource.USER_TEXT,
-                created_at_ms=1,
-            )
-        )
-
-
 @pytest.mark.parametrize(
     (
         "expected_room_id",

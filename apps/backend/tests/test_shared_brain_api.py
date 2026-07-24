@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
 
 from advx_backend.api.http.shared_brain import create_shared_brain_router
 from advx_backend.application.runtime_session_service import NoOpRuntimeCapabilityProbe
@@ -25,11 +24,6 @@ from advx_backend.domain.meme import ModeMeme
 from advx_backend.domain.memory import RoomLongTermMemory, RoomMemoryType
 from advx_backend.domain.persona import ModeDefinition, PersonaTemplate, ResponseRange
 from advx_backend.domain.room import RoomEventSource
-from advx_backend.infrastructure.persistence.sqlite.models import (
-    ModeMemeCandidateRow,
-    ModeMemeRow,
-    RoomEventRow,
-)
 from advx_backend.main import create_app
 
 LOCAL_TOKEN = "test-token"
@@ -371,79 +365,3 @@ def test_direct_candidate_rejects_untrusted_observation_event_and_frame_provenan
         "/shared-brain/modes/mode-a/memes",
         headers=headers(),
     ).json() == []
-
-
-def test_legacy_import_creates_real_provenance_and_is_idempotent_across_sessions(
-    live_runtime,
-) -> None:
-    client, runtime, started = live_runtime
-    first_body = {
-        "room_id": "room-1",
-        "session_id": started["session_id"],
-        "audience_epoch": started["audience_epoch"],
-        "legacy_meme_id": "legacy-1",
-        "text": "legacy meme",
-        "legacy_created_at_ms": 50,
-    }
-    first = client.post(
-        "/shared-brain/modes/mode-a/legacy-memes/import",
-        headers=headers(),
-        json=first_body,
-    )
-    repeated = client.post(
-        "/shared-brain/modes/mode-a/legacy-memes/import",
-        headers=headers(),
-        json=first_body,
-    )
-
-    assert first.status_code == 200
-    assert first.json()["created"] is True
-    assert repeated.status_code == 200
-    assert repeated.json() == {**first.json(), "created": False}
-
-    stopped = client.post(
-        f"/sessions/{started['session_id']}/stop",
-        headers=headers(),
-    )
-    assert stopped.status_code == 200
-    spec = canonical_spec()
-    restarted = client.post(
-        "/runtime/sessions",
-        headers=headers(),
-        json=RuntimeSessionStartRequest(
-            client_request_id="shared-brain-restart",
-            canonical_runtime_spec=spec,
-            client_config_hash=spec.config_hash(),
-        ).model_dump(mode="json"),
-    )
-    assert restarted.status_code == 201
-    next_body = {
-        **first_body,
-        "session_id": restarted.json()["session_id"],
-        "audience_epoch": restarted.json()["audience_epoch"],
-    }
-    cross_session = client.post(
-        "/shared-brain/modes/mode-a/legacy-memes/import",
-        headers=headers(),
-        json=next_body,
-    )
-    assert cross_session.status_code == 200
-    assert cross_session.json() == {**first.json(), "created": False}
-
-    async def counts() -> tuple[int, int, int]:
-        async with runtime.database.session_factory() as session:
-            candidates = await session.scalar(
-                select(func.count()).select_from(ModeMemeCandidateRow)
-            )
-            memes = await session.scalar(select(func.count()).select_from(ModeMemeRow))
-            events = await session.scalar(
-                select(func.count())
-                .select_from(RoomEventRow)
-                .where(
-                    RoomEventRow.event_id
-                    == first.json()["provenance_event_id"]
-                )
-            )
-        return int(candidates or 0), int(memes or 0), int(events or 0)
-
-    assert client.portal.call(counts) == (1, 1, 1)

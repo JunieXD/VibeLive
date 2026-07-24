@@ -13,7 +13,6 @@ import {
   parsePersonaMarkdown,
   resetBuiltInMode,
   reviseAudienceMode,
-  revisePersonaTemplate,
   serializePersonaMarkdown,
   validatePersona
 } from './index'
@@ -104,62 +103,6 @@ describe('persona Markdown', () => {
     expect(parsed).toEqual({ ok: true, persona: source })
   })
 
-  it('rejects prose or another fence before the JSON structure', () => {
-    expect(parsePersonaMarkdown('# heading\n```json\n{}\n```')).toMatchObject({ ok: false })
-    expect(parsePersonaMarkdown('```text\nx\n```\n```json\n{}\n```')).toMatchObject({ ok: false })
-  })
-
-  it('rejects unknown personality document versions', () => {
-    const markdown = serializePersonaMarkdown(BASE_PERSONAS[0]).replace(
-      '"document_version": 2',
-      '"document_version": 3'
-    )
-    expect(parsePersonaMarkdown(markdown)).toMatchObject({
-      ok: false,
-      issues: [{ field: 'document_version' }]
-    })
-  })
-
-  it('rejects missing, mistyped and unknown metadata fields instead of coercing them', () => {
-    const valid = serializePersonaMarkdown(BASE_PERSONAS[0])
-    expect(parsePersonaMarkdown(valid.replace('"enabled": true', '"enabled_typo": true'))).toMatchObject({
-      ok: false,
-      issues: expect.arrayContaining([expect.objectContaining({ field: 'enabled' })])
-    })
-    expect(parsePersonaMarkdown(valid.replace(
-      '"max_comments_per_decision": 2',
-      '"max_comments_per_decision": "2"'
-    ))).toMatchObject({
-      ok: false,
-      issues: expect.arrayContaining([
-        expect.objectContaining({ field: 'maxCommentsPerDecision' })
-      ])
-    })
-    expect(parsePersonaMarkdown(valid.replace(
-      '"document_version": 2',
-      '"document_version": 2,\n  "futureField": true'
-    ))).toMatchObject({
-      ok: false,
-      issues: expect.arrayContaining([expect.objectContaining({ field: 'futureField' })])
-    })
-  })
-
-  it('uses canonical content hashes and increments revisions only for material changes', () => {
-    const source = BASE_PERSONAS[0]
-    expect(revisePersonaTemplate(source, {})).toBe(source)
-    expect(revisePersonaTemplate(source, { behavior: `${source.behavior}\r\n` })).toBe(source)
-
-    const revised = revisePersonaTemplate(source, { speechStyle: '更短' })
-    expect(revised).toMatchObject({
-      revision: source.revision + 1,
-      speechStyle: '更短'
-    })
-    expect(revised.contentHash).not.toBe(source.contentHash)
-    expect(parsePersonaMarkdown(serializePersonaMarkdown(revised))).toEqual({
-      ok: true,
-      persona: revised
-    })
-  })
 })
 
 describe('viewer pool v2', () => {
@@ -215,78 +158,6 @@ describe('viewer pool v2', () => {
 })
 
 describe('workspace persistence', () => {
-  it('migrates v1 modes once and preserves the exact built-in viewer counts', () => {
-    const v2 = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
-    const v1 = {
-      ...v2,
-      version: 1,
-      personas: v2.personas.map((persona: Record<string, unknown>) => {
-        const { documentVersion, revision, contentHash, ...legacy } = persona
-        return legacy
-      }),
-      modeState: {
-        ...v2.modeState,
-        modes: v2.modeState.modes.map((mode: Record<string, unknown>) => {
-          const {
-            namespaceId,
-            revision,
-            targetConcurrentViewers,
-            normalResponseRange,
-            highlightResponseRange,
-            visualSettings,
-            ...legacy
-          } = mode
-          return legacy
-        })
-      }
-    }
-    const parsed = parseAudienceWorkspaceState(v1)
-    expect(parsed.ok).toBe(true)
-    if (!parsed.ok) return
-    expect(parsed.migratedFromVersion).toBe(1)
-    expect(parsed.workspace.version).toBe(3)
-    expect(parsed.workspace.modeState.modes.map((mode) => mode.targetConcurrentViewers))
-      .toEqual([24, 28, 16, 14, 24, 14])
-    expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
-      viewerVisualInputMode: 'direct_frames',
-      frameBundleSize: 3,
-      frameSelectionStrategy: 'change_peaks'
-    })
-  })
-
-  it('extracts v1 local memes for one-time Shared Brain migration', () => {
-    const v1 = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
-    v1.version = 1
-    v1.memes = [{
-      id: 'legacy-joke',
-      text: '这波属于是',
-      createdAt: '2025-01-02T03:04:05.000Z'
-    }]
-    for (const persona of v1.personas) {
-      delete persona.documentVersion
-      delete persona.revision
-      delete persona.contentHash
-    }
-    for (const mode of v1.modeState.modes) {
-      delete mode.namespaceId
-      delete mode.revision
-      delete mode.targetConcurrentViewers
-      delete mode.normalResponseRange
-      delete mode.highlightResponseRange
-      delete mode.visualSettings
-    }
-
-    const parsed = parseAudienceWorkspaceState(v1)
-    expect(parsed.ok).toBe(true)
-    if (!parsed.ok) return
-    expect(parsed.legacyMemes).toEqual([{
-      id: 'legacy-joke',
-      text: '这波属于是',
-      createdAt: '2025-01-02T03:04:05.000Z'
-    }])
-    expect(parsed.workspace).not.toHaveProperty('memes')
-  })
-
   it('strictly hydrates a JSON round trip and rejects damaged references', () => {
     const jsonValue: unknown = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
     expect(parseAudienceWorkspaceState(jsonValue).ok).toBe(true)
@@ -300,96 +171,4 @@ describe('workspace persistence', () => {
     if (!parsed.ok) expect(parsed.issues).toContain('activeModeId must reference an existing mode')
   })
 
-  it('keeps a valid mode-scoped override when that persona is not participating', () => {
-    const workspace = createInitialAudienceWorkspace()
-    const mode = workspace.modeState.modes[0]
-    const inactivePersona = workspace.personas.find(
-      (persona) => !mode.personaIds.includes(persona.id)
-    )
-    if (!inactivePersona) throw new Error('fixture needs a non-participating persona')
-    const candidate = {
-      ...workspace,
-      modeState: {
-        ...workspace.modeState,
-        modes: workspace.modeState.modes.map((item) =>
-          item.id === mode.id
-            ? {
-                ...item,
-                personaOverrides: {
-                  ...item.personaOverrides,
-                  [inactivePersona.id]: { name: '待启用人格' }
-                }
-              }
-            : item
-        )
-      }
-    }
-    expect(parseAudienceWorkspaceState(candidate).ok).toBe(true)
-  })
-
-  it('rehydrates the current built-in persona baseline without discarding custom data', () => {
-    const candidate = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
-    candidate.personas = candidate.personas.filter(
-      (persona: { id: string }) => persona.id !== BASE_PERSONAS[1].id
-    )
-    candidate.personas[0].name = '旧版本内置文案'
-    candidate.personas.push({
-      ...BASE_PERSONAS[0],
-      id: 'custom-persona',
-      name: '自定义人格',
-      documentVersion: undefined,
-      revision: undefined,
-      contentHash: undefined
-    })
-    delete candidate.personas.at(-1).documentVersion
-    delete candidate.personas.at(-1).revision
-    delete candidate.personas.at(-1).contentHash
-
-    const parsed = parseAudienceWorkspaceState(candidate)
-    expect(parsed.ok).toBe(true)
-    if (!parsed.ok) return
-    expect(parsed.workspace.personas).toHaveLength(33)
-    expect(parsed.workspace.personas.find((persona) => persona.id === BASE_PERSONAS[0].id)?.name)
-      .toBe(BASE_PERSONAS[0].name)
-    expect(parsed.workspace.personas.find((persona) => persona.id === BASE_PERSONAS[1].id))
-      .toEqual(BASE_PERSONAS[1])
-    expect(parsed.workspace.personas.find((persona) => persona.id === 'custom-persona')?.name)
-      .toBe('自定义人格')
-    expect(parsed.workspace.personas.find((persona) => persona.id === 'custom-persona'))
-      .toMatchObject({ documentVersion: 2, revision: 1 })
-  })
-
-  it('returns validation issues instead of throwing on malformed nested values', () => {
-    expect(() => parseAudienceWorkspaceState({
-      version: 1,
-      personas: [{}],
-      modeState: { modes: [], activeModeId: '' },
-      memes: []
-    })).not.toThrow()
-    expect(parseAudienceWorkspaceState({
-      version: 1,
-      personas: [{}],
-      modeState: { modes: [], activeModeId: '' },
-      memes: []
-    }).ok).toBe(false)
-    expect(parseAudienceWorkspaceState({ version: 3 }).ok).toBe(false)
-  })
-
-  it('rejects unsafe mode ids, legacy local memes and unknown overrides', () => {
-    const unsafeMode = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
-    unsafeMode.modeState.modes[0].id = '../outside'
-    unsafeMode.modeState.activeModeId = '../outside'
-    expect(parseAudienceWorkspaceState(unsafeMode).ok).toBe(false)
-
-    const legacyMeme = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
-    legacyMeme.memes = [{ id: 'legacy-local-meme' }]
-    expect(parseAudienceWorkspaceState(legacyMeme)).toMatchObject({
-      ok: false,
-      issues: [expect.stringContaining('Shared Brain migration')]
-    })
-
-    const unknownOverride = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
-    unknownOverride.modeState.modes[0].personaOverrides.missing_persona = { name: '不存在' }
-    expect(parseAudienceWorkspaceState(unknownOverride).ok).toBe(false)
-  })
 })

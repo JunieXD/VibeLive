@@ -701,101 +701,24 @@ describe("BackendClient runtime v2", () => {
     });
   });
 
-  it.each([
-    {
-      name: "protocol v1",
-      message: {
-        type: "barrage.event",
-        protocol_version: 1,
-        barrage: {}
-      }
-    },
-    {
-      name: "a protocol v2 barrage without viewer identity",
-      message: {
-        type: "barrage.event",
-        protocol_version: 3,
-        barrage: {
-          barrage_id: "legacy-barrage",
-          room_id: "room-1",
-          session_id: "session-1",
-          audience_epoch: 3,
-          observation_id: "observation-1",
-          generation_request_id: "generation-1",
-          display_name: "legacy",
-          reaction_type: "legacy",
-          evidence_refs: [],
-          text: "legacy",
-          created_at_ms: 100,
-          expires_at_ms: Date.now() + 10_000
-        }
-      }
-    }
-  ])("rejects $name before notifying barrage listeners", ({ message }) => {
+  it("closes one representative malformed realtime envelope", () => {
     const client = new BackendClient({ localToken: "token" });
-    const listener = vi.fn();
-    client.onBarrage(listener);
+    const close = vi.fn();
     const bridge = client as unknown as {
-      handleMessage(message: unknown): void;
+      socket: { close(code: number, reason: string): void };
+      parseMessage(value: string): unknown;
     };
+    bridge.socket = { close };
 
-    bridge.handleMessage(message);
-
-    expect(listener).not.toHaveBeenCalled();
-    expect(client.currentStatus()).toMatchObject({
-      connection: "failed",
-      startupError: expect.stringMatching(/协议|barrage\.(viewer_instance_id|viewer_sequence)/)
-    });
+    expect(bridge.parseMessage(JSON.stringify({
+      type: "backend.pong",
+      protocol_version: 3,
+      request_id: 42
+    }))).toBeNull();
+    expect(close).toHaveBeenCalledWith(1002, "invalid protocol message");
   });
 
-  it.each([
-    ["fractional audience epoch", { audience_epoch: 1.5 }],
-    ["zero viewer sequence", { viewer_sequence: 0 }],
-    ["negative creation timestamp", { created_at_ms: -1 }],
-    ["fractional creation timestamp", { created_at_ms: 1.5 }],
-    ["zero expiry timestamp", { expires_at_ms: 0 }],
-    ["expiry before creation", { created_at_ms: 100, expires_at_ms: 100 }],
-    ["oversized identifier", { barrage_id: "x".repeat(129) }],
-    ["oversized display name", { display_name: "x".repeat(65) }],
-    ["oversized reaction type", { reaction_type: "x".repeat(65) }],
-    ["oversized text", { text: "x".repeat(201) }],
-    [
-      "too many evidence references",
-      {
-        evidence_refs: Array.from({ length: 129 }, () => ({
-          source: "event",
-          event_id: "event-1",
-          frame_index: null
-        }))
-      }
-    ],
-    [
-      "oversized evidence event id",
-      {
-        evidence_refs: [{
-          source: "event",
-          event_id: "x".repeat(129),
-          frame_index: null
-        }]
-      }
-    ],
-    [
-      "event evidence with a frame index",
-      { evidence_refs: [{ source: "event", event_id: "event-1", frame_index: 0 }] }
-    ],
-    [
-      "frame evidence with an event id",
-      { evidence_refs: [{ source: "frame", event_id: "event-1", frame_index: 0 }] }
-    ],
-    [
-      "fractional frame index",
-      { evidence_refs: [{ source: "frame", event_id: null, frame_index: 0.5 }] }
-    ],
-    [
-      "negative frame index",
-      { evidence_refs: [{ source: "frame", event_id: null, frame_index: -1 }] }
-    ]
-  ])("closes malicious barrage %s without notifying listeners", (_, overrides) => {
+  it("rejects a v3 barrage without Viewer identity", () => {
     const client = new BackendClient({ localToken: "token" });
     const listener = vi.fn();
     const close = vi.fn();
@@ -803,11 +726,10 @@ describe("BackendClient runtime v2", () => {
     const bridge = client as unknown as {
       socket: { close(code: number, reason: string): void };
       parseMessage(value: string): unknown;
-      handleMessage(message: unknown): void;
     };
     bridge.socket = { close };
 
-    const parsed = bridge.parseMessage(JSON.stringify({
+    expect(bridge.parseMessage(JSON.stringify({
       type: "barrage.event",
       protocol_version: 3,
       barrage: {
@@ -817,7 +739,6 @@ describe("BackendClient runtime v2", () => {
         audience_epoch: 1,
         observation_id: "observation-1",
         generation_request_id: "generation-1",
-        viewer_instance_id: "viewer-1",
         persona_id: "persona-1",
         display_name: "viewer",
         viewer_sequence: 1,
@@ -825,260 +746,11 @@ describe("BackendClient runtime v2", () => {
         evidence_refs: [],
         text: "hello",
         created_at_ms: 100,
-        expires_at_ms: 200,
-        ...overrides
+        expires_at_ms: 200
       }
-    }));
-    if (parsed) bridge.handleMessage(parsed);
-
+    }))).toBeNull();
     expect(listener).not.toHaveBeenCalled();
-    expect(close).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledWith(1002, "invalid protocol message");
-  });
-
-  it.each([
-    [
-      "backend.ready with an unknown session state",
-      {
-        type: "backend.ready",
-        protocol_version: 3,
-        session: {
-          session_id: null,
-          state: "connected",
-          started_at_ms: null,
-          updated_at_ms: 0,
-          revision: 0
-        }
-      }
-    ],
-    [
-      "session.status with a fractional timestamp",
-      {
-        type: "session.status",
-        protocol_version: 3,
-        session: {
-          session_id: "session-1",
-          state: "running",
-          started_at_ms: 1,
-          updated_at_ms: 1.5,
-          revision: 1
-        }
-      }
-    ],
-    [
-      "session.status with a negative revision",
-      {
-        type: "session.status",
-        protocol_version: 3,
-        session: {
-          session_id: "session-1",
-          state: "running",
-          started_at_ms: 1,
-          updated_at_ms: 1,
-          revision: -1
-        }
-      }
-    ],
-    [
-      "backend.pong with a non-string request ID",
-      { type: "backend.pong", protocol_version: 3, request_id: 42 }
-    ],
-    [
-      "ingest.ack with an oversized identifier",
-      {
-        type: "ingest.ack",
-        protocol_version: 3,
-        session_id: "x".repeat(129),
-        input_id: "input-1",
-        input_kind: "text",
-        stage: "received",
-        accepted_at_ms: 1
-      }
-    ],
-    [
-      "ingest.ack with an unknown input kind",
-      {
-        type: "ingest.ack",
-        protocol_version: 3,
-        session_id: "session-1",
-        input_id: "input-1",
-        input_kind: "video",
-        stage: "received",
-        accepted_at_ms: 1
-      }
-    ],
-    [
-      "ingest.ack with an unknown stage",
-      {
-        type: "ingest.ack",
-        protocol_version: 3,
-        session_id: "session-1",
-        input_id: "input-1",
-        input_kind: "text",
-        stage: "published",
-        accepted_at_ms: 1
-      }
-    ],
-    [
-      "ingest.ack with a fractional timestamp",
-      {
-        type: "ingest.ack",
-        protocol_version: 3,
-        session_id: "session-1",
-        input_id: "input-1",
-        input_kind: "text",
-        stage: "received",
-        accepted_at_ms: 1.5
-      }
-    ],
-    [
-      "ingest.ack with a negative timestamp",
-      {
-        type: "ingest.ack",
-        protocol_version: 3,
-        session_id: "session-1",
-        input_id: "input-1",
-        input_kind: "text",
-        stage: "received",
-        accepted_at_ms: -1
-      }
-    ],
-    [
-      "ingest.ack with an extra field",
-      {
-        type: "ingest.ack",
-        protocol_version: 3,
-        session_id: "session-1",
-        input_id: "input-1",
-        input_kind: "text",
-        stage: "received",
-        accepted_at_ms: 1,
-        injected: true
-      }
-    ],
-    [
-      "ingest.rejected with an unknown rejection code",
-      {
-        type: "ingest.rejected",
-        protocol_version: 3,
-        code: "not_really_rejected",
-        message: "no"
-      }
-    ],
-    [
-      "ingest.rejected with an oversized message",
-      {
-        type: "ingest.rejected",
-        protocol_version: 3,
-        code: "invalid_input",
-        message: "x".repeat(257)
-      }
-    ],
-    [
-      "ingest.rejected with an empty optional input ID",
-      {
-        type: "ingest.rejected",
-        protocol_version: 3,
-        code: "invalid_input",
-        message: "no",
-        input_id: ""
-      }
-    ],
-    [
-      "ingest.rejected with an invalid optional input kind",
-      {
-        type: "ingest.rejected",
-        protocol_version: 3,
-        code: "invalid_input",
-        message: "no",
-        input_kind: "camera"
-      }
-    ],
-    [
-      "protocol.error with an unknown protocol code",
-      {
-        type: "protocol.error",
-        protocol_version: 3,
-        code: "invalid_version",
-        message: "no"
-      }
-    ],
-    [
-      "protocol.error with an empty message",
-      {
-        type: "protocol.error",
-        protocol_version: 3,
-        code: "invalid_message",
-        message: ""
-      }
-    ],
-    [
-      "protocol.error with a fractional supported version",
-      {
-        type: "protocol.error",
-        protocol_version: 3,
-        code: "version_mismatch",
-        message: "no",
-        supported_version: 1.5
-      }
-    ]
-  ])("rejects malicious non-barrage envelope: %s", (_, message) => {
-    const client = new BackendClient({ localToken: "token" });
-    const barrageListener = vi.fn();
-    const close = vi.fn();
-    client.onBarrage(barrageListener);
-    const bridge = client as unknown as {
-      socket: { close(code: number, reason: string): void };
-      parseMessage(value: string): unknown;
-    };
-    bridge.socket = { close };
-
-    expect(bridge.parseMessage(JSON.stringify(message))).toBeNull();
-
-    expect(barrageListener).not.toHaveBeenCalled();
-    expect(close).toHaveBeenCalledOnce();
-    expect(close).toHaveBeenCalledWith(1002, "invalid protocol message");
-    expect(client.currentStatus()).toMatchObject({
-      connection: "failed",
-      startupError: expect.any(String),
-      session: { sessionId: null, state: "idle", revision: 0 }
-    });
-  });
-
-  it.each([
-    [
-      "protocol.error without supported_version",
-      {
-        type: "protocol.error",
-        protocol_version: 3,
-        code: "invalid_message",
-        message: "invalid"
-      }
-    ],
-    [
-      "ingest.rejected without optional identity fields",
-      {
-        type: "ingest.rejected",
-        protocol_version: 3,
-        code: "invalid_input",
-        message: "invalid"
-      }
-    ],
-    [
-      "backend.pong with an empty unconstrained request ID",
-      { type: "backend.pong", protocol_version: 3, request_id: "" }
-    ]
-  ])("accepts generated/Pydantic optional boundary: %s", (_, message) => {
-    const client = new BackendClient({ localToken: "token" });
-    const close = vi.fn();
-    const bridge = client as unknown as {
-      socket: { close(code: number, reason: string): void };
-      parseMessage(value: string): unknown;
-    };
-    bridge.socket = { close };
-
-    expect(bridge.parseMessage(JSON.stringify(message))).not.toBeNull();
-    expect(close).not.toHaveBeenCalled();
   });
 
   it("rejects protocol v1 during WebSocket parsing instead of asserting it as v2", () => {

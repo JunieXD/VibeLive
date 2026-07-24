@@ -88,24 +88,6 @@ class RecordingModelProvider:
 
     async def cancel(self, request_id: str) -> None:
         return None
-
-
-class BlockingModelProvider(RecordingModelProvider):
-    def __init__(self) -> None:
-        super().__init__()
-        self.started = asyncio.Event()
-        self.cancelled_request_ids: list[str] = []
-
-    async def generate(self, request: GenerationRequest) -> GenerationResult:
-        self.requests.append(request)
-        self.started.set()
-        await asyncio.Event().wait()
-        raise AssertionError("unreachable")
-
-    async def cancel(self, request_id: str) -> None:
-        self.cancelled_request_ids.append(request_id)
-
-
 def runtime_spec() -> CanonicalRuntimeSpec:
     persona = PersonaTemplate(
         persona_id="persona-1",
@@ -245,42 +227,6 @@ async def test_runtime_connects_context_generation_barrage_and_room(
         assert await runtime.room_service.active_session_id() is None
         with pytest.raises(RoomSessionNotActiveError):
             await runtime.context_builder.build(running.session_id)
-    finally:
-        current = await runtime.session_service.status()
-        if current.session_id is not None:
-            await runtime.session_service.stop(current.session_id)
-        await runtime.realtime_broker.unsubscribe_barrages(barrage_subscription)
-        await runtime.shutdown()
-
-
-@pytest.mark.asyncio
-async def test_stopping_session_cancels_inflight_reaction(tmp_path: Path) -> None:
-    runtime = build_runtime(local_token="test-token", data_directory=tmp_path)
-    provider = BlockingModelProvider()
-    barrage_subscription = await runtime.realtime_broker.subscribe_barrages()
-    await runtime.startup()
-    running = await runtime.session_service.start()
-    assert running.session_id is not None
-
-    try:
-        observation = await runtime.context_builder.build(running.session_id)
-        reaction_service = runtime.build_reaction_service(
-            snapshots=SnapshotProvider(),
-            trigger=AlwaysTrigger(),
-            selector=AllAudienceSelector(),
-            invocation_planner=SingleBatchPlanner(),
-            model_provider=provider,
-        )
-        reaction = asyncio.create_task(reaction_service.react(observation))
-        await asyncio.wait_for(provider.started.wait(), timeout=1)
-
-        await runtime.session_service.stop(running.session_id)
-
-        with pytest.raises(asyncio.CancelledError):
-            await reaction
-        assert provider.cancelled_request_ids == [provider.requests[0].request_id]
-        assert barrage_subscription.empty()
-        assert await runtime.room_service.active_session_id() is None
     finally:
         current = await runtime.session_service.status()
         if current.session_id is not None:

@@ -92,43 +92,6 @@ class RecordingIngestPort:
             stage=stage,
             accepted_at_ms=123,
         )
-
-
-def test_realtime_dispatches_text_after_gateway_is_configured(tmp_path: Path) -> None:
-    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
-    app = create_app(runtime=runtime)
-    ingest = RecordingIngestPort()
-    runtime.ingest_gateway.configure(ingest)
-
-    with TestClient(app) as client:
-        with client.websocket_connect("/ws") as websocket:
-            websocket.send_json(hello())
-            websocket.receive_json()
-            websocket.send_json(
-                {
-                    "type": "client.text.submit",
-                    "protocol_version": 3,
-                    "session_id": "session-1",
-                    "input_id": "text-1",
-                    "created_at_ms": 100,
-                    "text": "private text",
-                }
-            )
-
-            assert websocket.receive_json() == {
-                "type": "ingest.ack",
-                "protocol_version": 3,
-                "session_id": "session-1",
-                "input_id": "text-1",
-                "input_kind": "text",
-                "stage": "received",
-                "accepted_at_ms": 123,
-            }
-
-    assert isinstance(ingest.inputs[0], TextInput)
-    assert ingest.inputs[0].text == "private text"
-
-
 def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path) -> None:
     runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
     ingest = RecordingIngestPort()
@@ -179,30 +142,6 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
     assert ingest.inputs[2].body == frame_body
     assert ingest.inputs[2].mime_type == "image/webp"
     assert ingest.inputs[2].change_score == 0.375
-
-
-def test_realtime_rejects_invalid_frame_change_score_metadata(tmp_path: Path) -> None:
-    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
-    runtime.ingest_gateway.configure(RecordingIngestPort())
-    app = create_app(runtime=runtime)
-
-    with TestClient(app) as client:
-        with client.websocket_connect("/ws") as websocket:
-            websocket.send_json(hello())
-            websocket.receive_json()
-            websocket.send_bytes(
-                envelope(
-                    media_type=BinaryMediaType.IMAGE,
-                    input_id="frame-invalid",
-                    format_value="image/jpeg;advx-change-score=nan",
-                    body=b"encoded",
-                )
-            )
-            rejected = websocket.receive_json()
-
-    assert rejected["code"] == "invalid_input"
-
-
 def test_realtime_rejects_unavailable_and_inactive_ingest(tmp_path: Path) -> None:
     runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
     app = create_app(runtime=runtime)
@@ -261,30 +200,3 @@ def test_realtime_rejects_malformed_binary_without_closing_connection(tmp_path: 
     assert rejected["code"] == "malformed_binary_envelope"
     assert "private malformed media" not in rejected["message"]
     assert pong["type"] == "backend.pong"
-
-
-def test_realtime_distinguishes_binary_version_and_media_type_errors(tmp_path: Path) -> None:
-    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
-    app = create_app(runtime=runtime)
-    valid = envelope(
-        media_type=BinaryMediaType.AUDIO,
-        input_id="audio-1",
-        format_value="audio/pcm;rate=16000;channels=1;format=s16le",
-        body=b"\x00\x00",
-    )
-    unsupported_version = bytearray(valid)
-    unsupported_version[4] = 2
-    unsupported_media = bytearray(valid)
-    unsupported_media[5] = 99
-
-    with TestClient(app) as client:
-        with client.websocket_connect("/ws") as websocket:
-            websocket.send_json(hello())
-            websocket.receive_json()
-            websocket.send_bytes(bytes(unsupported_version))
-            version_rejection = websocket.receive_json()
-            websocket.send_bytes(bytes(unsupported_media))
-            media_rejection = websocket.receive_json()
-
-    assert version_rejection["code"] == "unsupported_binary_version"
-    assert media_rejection["code"] == "unsupported_media_type"

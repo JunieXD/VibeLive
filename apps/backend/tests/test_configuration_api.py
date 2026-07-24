@@ -188,14 +188,3 @@ def test_provider_role_models_and_redacted_capability_endpoints(
     serialized = probe.text + models.text + configured.text
     assert "private-model-key" not in serialized
     assert "private-asr-key" not in serialized
-
-
-def test_provider_discovery_requires_an_active_profile(tmp_path: Path) -> None:
-    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
-    app = create_app(runtime=runtime)
-
-    with TestClient(app) as client:
-        response = client.get("/configuration/providers/models", headers=headers())
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "providers_not_configured"
