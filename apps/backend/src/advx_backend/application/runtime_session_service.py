@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from typing import Protocol
 
 from sqlalchemy import select, update
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from advx_backend.application.ports.session import Clock, IdGenerator
 from advx_backend.application.room_event_persistence import RoomEventRecoveryReader
 from advx_backend.application.room_service import RoomService
+from advx_backend.application.runtime_capability_probe import RuntimeCapabilityProbeError
 from advx_backend.application.runtime_config_service import (
     RuntimeApplyError,
     RuntimeCapabilityProbe,
@@ -61,6 +63,39 @@ from advx_backend.infrastructure.persistence.sqlite.runtime_repositories import 
 from advx_backend.infrastructure.persistence.sqlite.runtime_repositories import (
     ViewerInstance as PersistedViewerInstance,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _log_capability_probe_failure(
+    error: RuntimeCapabilityProbeError,
+    *,
+    operation: str,
+    client_request_id: str | None = None,
+    apply_id: str | None = None,
+    provider_profile_id: str,
+    session_id: str | None = None,
+) -> None:
+    logger.warning(
+        "runtime.capability_probe.rejected",
+        extra={
+            "operation": operation,
+            "client_request_id": client_request_id,
+            "apply_id": apply_id,
+            "provider_profile_id": provider_profile_id,
+            "session_id": session_id,
+            "capability_checks": [
+                {
+                    "capability": check.capability,
+                    "status": check.status.value,
+                    "model_id": check.model_id,
+                    "error_code": check.error_code,
+                    "http_status": check.http_status,
+                }
+                for check in error.checks
+            ],
+        },
+    )
 
 
 class RuntimeSessionError(RuntimeError):
@@ -142,6 +177,14 @@ class RuntimeSessionService:
             spec = request.canonical_runtime_spec
             try:
                 await self._capability_probe.probe(spec)
+            except RuntimeCapabilityProbeError as error:
+                _log_capability_probe_failure(
+                    error,
+                    operation="start",
+                    client_request_id=request.client_request_id,
+                    provider_profile_id=spec.provider.provider_profile_id,
+                )
+                raise RuntimeApplyError(str(error)) from error
             except Exception as error:
                 raise RuntimeApplyError(str(error)) from error
             provider_generation = self._current_provider_generation(spec)

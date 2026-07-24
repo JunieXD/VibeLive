@@ -27,7 +27,7 @@ The realtime ingest contract, including binary audio/image envelopes and privacy
 
 ## Local persistence
 
-The backend applies Alembic migrations before accepting a session and owns the SQLite connection lifecycle. The launcher supplies `ADVX_DATA_DIR`; the database is created as `advx.sqlite3` inside that directory. Production should pass Electron's `userData/data` directory. Development uses the ignored repository-local `.advx-data` directory.
+The backend applies Alembic migrations before accepting a session and owns the SQLite connection lifecycle. The launcher supplies `ADVX_DATA_DIR`; the database is created as `advx.sqlite3` inside that directory. Production should pass Electron's `userData/data` directory. Development uses the ignored repository-local `.advx-data` directory. Backend diagnostics are written as bounded, rotated JSONL files at `logs/backend.jsonl` under the same data directory; they exclude credentials, request bodies, and provider response bodies.
 
 SQLite runs with foreign keys, WAL and a bounded busy timeout enabled. Repositories and the Unit of Work live under `infrastructure/persistence/sqlite`; application code depends only on the persistence Ports. Audio, frames, full room events, prompts, credentials and raw provider responses are never stored in this schema.
 

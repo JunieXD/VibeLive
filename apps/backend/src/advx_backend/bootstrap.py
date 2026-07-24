@@ -71,7 +71,7 @@ from advx_backend.application.viewer_runtime_coordinator import (
 )
 from advx_backend.contracts.configuration import ProviderConfigurationRequest
 from advx_backend.domain.barrage import BarragePolicy
-from advx_backend.infrastructure.logging import AiCallStore, TraceStore
+from advx_backend.infrastructure.logging import AiCallStore, TraceStore, configure_logging
 from advx_backend.infrastructure.persistence.sqlite import (
     DatabaseConfig,
     SQLiteDatabase,
@@ -724,9 +724,16 @@ def build_runtime(
 
 
 def build_runtime_from_environment() -> BackendRuntime:
+    data_directory = os.environ.get(DATA_DIRECTORY_ENV)
+    resolved_data_directory = (
+        Path(DEFAULT_DATA_DIRECTORY if data_directory is None else data_directory)
+        .expanduser()
+        .resolve()
+    )
+    configure_logging(log_directory=resolved_data_directory / "logs")
     runtime = build_runtime(
         local_token=os.environ.get(LOCAL_TOKEN_ENV),
-        data_directory=os.environ.get(DATA_DIRECTORY_ENV),
+        data_directory=resolved_data_directory,
     )
     provider_values = {
         "model_base_url": os.environ.get(MODEL_BASE_URL_ENV),
