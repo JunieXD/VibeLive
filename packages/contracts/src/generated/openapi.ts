@@ -902,13 +902,15 @@ export interface components {
             output_tokens?: number | null;
             /** Total Tokens */
             total_tokens?: number | null;
+            /** Model Output */
+            model_output?: string | null;
             parsed_output?: components["schemas"]["JsonValue"];
         };
         /**
          * AiCallRole
          * @enum {string}
          */
-        AiCallRole: "legacy_director" | "viewer" | "visual_summary" | "memory" | "asr";
+        AiCallRole: "legacy_director" | "viewer" | "visual_summary" | "history_summary" | "memory" | "asr";
         /**
          * AiCallStatus
          * @enum {string}
@@ -1167,7 +1169,7 @@ export interface components {
         FrameBundleSettings: {
             /**
              * Frame Bundle Size
-             * @default 60
+             * @default 15
              */
             frame_bundle_size: number;
             /**
@@ -1670,6 +1672,16 @@ export interface components {
             visual_summary_model?: string | null;
             /** Model Api Key */
             model_api_key: string;
+            /**
+             * Asr Base Url
+             * @default https://api.stepfun.com/v1
+             */
+            asr_base_url: string;
+            /**
+             * Asr Model
+             * @default stepaudio-2.5-asr
+             */
+            asr_model: string;
             /** Asr Api Key */
             asr_api_key: string;
         };
@@ -1689,6 +1701,8 @@ export interface components {
             memory_model?: string | null;
             /** Visual Summary Model */
             visual_summary_model?: string | null;
+            /** Asr Base Url */
+            asr_base_url?: string | null;
             /** Asr Model */
             asr_model?: string | null;
         };
@@ -1729,7 +1743,7 @@ export interface components {
              * Provider Role
              * @enum {string}
              */
-            provider_role: "viewer" | "memory" | "visual_summary" | "asr";
+            provider_role: "viewer" | "memory" | "visual_summary" | "history_summary" | "asr";
             /** Generation Request Id */
             generation_request_id: string;
             /** Call Index */
@@ -1745,7 +1759,7 @@ export interface components {
              * Provider Role
              * @enum {string}
              */
-            provider_role: "viewer" | "memory" | "visual_summary" | "asr";
+            provider_role: "viewer" | "memory" | "visual_summary" | "history_summary" | "asr";
             /** Output */
             output: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -1772,7 +1786,7 @@ export interface components {
                 [key: string]: components["schemas"]["JsonValue"];
             }[];
             /** Consumed Provider Roles */
-            consumed_provider_roles: ("viewer" | "memory" | "visual_summary" | "asr")[];
+            consumed_provider_roles: ("viewer" | "memory" | "visual_summary" | "history_summary" | "asr")[];
             /** Consumed Provider Outputs */
             consumed_provider_outputs: components["schemas"]["RecordedOutputConsumption"][];
             /**
@@ -2574,6 +2588,11 @@ export interface components {
          * @enum {string}
          */
         ViewerVisualInputMode: "direct_frames" | "shared_summary" | "text_only";
+        /**
+         * AudioSource
+         * @enum {string}
+         */
+        AudioSource: "microphone" | "system_audio";
         /** ClientAudioCommit */
         ClientAudioCommit: {
             /** Protocol Version */
@@ -2589,6 +2608,8 @@ export interface components {
             input_id: string;
             /** Committed At Ms */
             committed_at_ms: number;
+            /** @default microphone */
+            source: components["schemas"]["AudioSource"];
         };
         /** ClientHello */
         ClientHello: {
@@ -2658,9 +2679,41 @@ export interface components {
             session_id: string;
             /** Occurred At Ms */
             occurred_at_ms: number;
+            /** @default microphone */
+            source: components["schemas"]["AudioSource"];
         };
         /** ClientMessageEnvelope */
         ClientMessageEnvelope: components["schemas"]["ClientHello"] | components["schemas"]["ClientPing"] | components["schemas"]["ClientTextSubmit"] | components["schemas"]["ClientAudioCommit"] | components["schemas"]["ClientVoiceActivity"];
+        /** AsrTranscriptEvent */
+        AsrTranscriptEvent: {
+            /**
+             * Protocol Version
+             * @default 3
+             * @constant
+             */
+            protocol_version: 3;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "asr.transcript";
+            source: components["schemas"]["AudioSource"];
+            /** Text */
+            text: string;
+            /** Final */
+            final: boolean;
+            /** Started At Ms */
+            started_at_ms: number;
+            /** Ended At Ms */
+            ended_at_ms: number;
+            /**
+             * Utterance Id
+             * @default null
+             */
+            utterance_id: string | null;
+            /** Revision */
+            revision: number;
+        };
         /** BackendPong */
         BackendPong: {
             /**
@@ -2918,7 +2971,7 @@ export interface components {
          */
         ViewerTargetKind: "host" | "scene" | "room" | "viewer" | "event";
         /** ServerMessageEnvelope */
-        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["RealtimeProtocolError"] | components["schemas"]["IngestAck"] | components["schemas"]["IngestRejected"] | components["schemas"]["ViewerPresenceEvent"];
+        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["RealtimeProtocolError"] | components["schemas"]["IngestAck"] | components["schemas"]["IngestRejected"] | components["schemas"]["AsrTranscriptEvent"] | components["schemas"]["ViewerPresenceEvent"];
         /**
          * BinaryMediaType
          * @enum {string}
@@ -2931,11 +2984,13 @@ export interface components {
         BinaryEnvelopeHeader: {
             /**
              * Version
-             * @default 1
-             * @constant
+             * @default 2
+             * @enum {integer}
              */
-            version: 1;
+            version: 1 | 2;
             media_type: components["schemas"]["BinaryMediaType"];
+            /** @default null */
+            source: components["schemas"]["AudioSource"] | null;
             /** Session Id */
             session_id: string;
             /** Input Id */
@@ -3187,6 +3242,11 @@ export interface components {
             text: string | null;
             /** Reaction Type */
             reaction_type: string;
+            /**
+             * Decision Reason
+             * @default null
+             */
+            decision_reason: string | null;
             /** Evidence Refs */
             evidence_refs?: components["schemas"]["EvidenceRef"][];
         };

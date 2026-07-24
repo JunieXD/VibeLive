@@ -87,7 +87,7 @@ class ViewerRequestTrace(DebugContractModel):
     public_context_event_ids: list[str] = Field(default_factory=list, max_length=512)
     private_state_event_ids: list[str] = Field(default_factory=list, max_length=128)
     memory: MemoryReferenceTrace
-    frame_hashes: list[str] = Field(default_factory=list, max_length=32)
+    frame_hashes: list[str] = Field(default_factory=list, max_length=60)
     prompt_manifest: PromptManifest
     provider: ProviderTrace
     response_status: TraceResponseStatus
@@ -108,9 +108,7 @@ class ViewerRequestTrace(DebugContractModel):
             return {
                 "room_id": room_id,
                 "memory_revision": memory_revision,
-                "memory_ids": list(memory_ids)
-                if isinstance(memory_ids, (list, tuple))
-                else [],
+                "memory_ids": list(memory_ids) if isinstance(memory_ids, (list, tuple)) else [],
             }
         return value
 
@@ -129,7 +127,7 @@ class ObservationWaveTrace(DebugContractModel):
     triggers: list[ObservationTrigger] = Field(min_length=1, max_length=4)
     event_ids: list[str] = Field(default_factory=list, max_length=128)
     trigger_event_ids: list[str] = Field(default_factory=list, max_length=128)
-    frame_hashes: list[str] = Field(default_factory=list, max_length=32)
+    frame_hashes: list[str] = Field(default_factory=list, max_length=60)
     memory: MemoryReferenceTrace
     status: ObservationWaveStatus
     selected_viewer_ids: list[str] = Field(default_factory=list, max_length=32)
@@ -163,6 +161,7 @@ class AiCallRole(StrEnum):
     LEGACY_DIRECTOR = "legacy_director"
     VIEWER = "viewer"
     VISUAL_SUMMARY = "visual_summary"
+    HISTORY_SUMMARY = "history_summary"
     MEMORY = "memory"
     ASR = "asr"
 
@@ -203,6 +202,7 @@ class AiCallResponseSummary(DebugContractModel):
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     total_tokens: int | None = Field(default=None, ge=0)
+    model_output: str | None = None
     parsed_output: JsonValue = None
 
 

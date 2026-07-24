@@ -10,6 +10,7 @@ from typing import Protocol
 
 from advx_backend.application.observation_wave_builder import select_frame_bundle
 from advx_backend.application.ports.session import Clock
+from advx_backend.application.reaction_scheduler import ReactionPreparationError
 from advx_backend.application.runtime_state import CommittedRuntime, RuntimeStateStore
 from advx_backend.application.viewer_behavior_service import ViewerBehaviorService
 from advx_backend.application.viewer_runtime import (
@@ -163,9 +164,7 @@ class _WavePolicyState:
     consecutive_ambient_waves: int = 0
     last_ambient_at_ms: int | None = None
     last_screen_at_ms: int | None = None
-    semantic_inputs: OrderedDict[str, tuple[int, int]] = field(
-        default_factory=OrderedDict
-    )
+    semantic_inputs: OrderedDict[str, tuple[int, int]] = field(default_factory=OrderedDict)
 
 
 @dataclass(slots=True)
@@ -239,69 +238,69 @@ class ViewerRuntimeCoordinator:
                 committed = await self._runtime_state.snapshot(observation.session_id)
             except Exception:
                 logger.exception("Viewer population reconciliation failed")
-        await self._cancel_stale_background_tasks(
-            observation.session_id,
-            committed.audience_epoch,
-        )
+        try:
+            await self._cancel_stale_background_tasks(
+                observation.session_id,
+                committed.audience_epoch,
+            )
 
-        core_wave = await self._build_wave(observation, committed)
-        core_wave, duplicate, proposed_policy = self._admit_wave(core_wave, committed)
-        if core_wave is None:
-            return ViewerCoordinatorResult(
-                skipped=True,
-                semantic_duplicate=duplicate,
-            )
-        if not committed.accepting_results:
-            self._record_observation_trace(
-                wave=core_wave,
-                runtime=committed.spec,
-                status=ObservationWaveStatus.SKIPPED,
-                failure_reason="runtime_not_accepting_results",
-            )
-            return ViewerCoordinatorResult(wave=core_wave)
+            core_wave = await self._build_wave(observation, committed)
+            core_wave, duplicate, proposed_policy = self._admit_wave(core_wave, committed)
+            if core_wave is None:
+                return ViewerCoordinatorResult(
+                    skipped=True,
+                    semantic_duplicate=duplicate,
+                )
+            if not committed.accepting_results:
+                self._record_observation_trace(
+                    wave=core_wave,
+                    runtime=committed.spec,
+                    status=ObservationWaveStatus.SKIPPED,
+                    failure_reason="runtime_not_accepting_results",
+                )
+                return ViewerCoordinatorResult(wave=core_wave)
 
-        memory_slice = await self._read_memory_slice(core_wave)
-        if memory_slice is None:
-            self._record_observation_trace(
-                wave=core_wave,
-                runtime=committed.spec,
-                status=ObservationWaveStatus.FAILED,
-                failure_reason="memory_slice_unavailable",
+            memory_slice = await self._read_memory_slice(core_wave)
+            if memory_slice is None:
+                raise ReactionPreparationError(
+                    "room memory could not be read before model dispatch"
+                )
+            public_context, history_summary = await self._compact_history(
+                observation,
+                committed,
             )
-            return ViewerCoordinatorResult(
-                wave=core_wave,
-                memory_failed=True,
+            runtime = self._freeze_runtime(
+                committed.spec,
+                observation,
+                memory_slice,
+                public_context=public_context,
+                history_summary=history_summary,
             )
-        public_context, history_summary = await self._compact_history(
-            observation,
-            committed,
-        )
-        runtime = self._freeze_runtime(
-            committed.spec,
-            observation,
-            memory_slice,
-            public_context=public_context,
-            history_summary=history_summary,
-        )
-        wave = await self._prepare_visual_wave(core_wave, runtime)
-        if wave is None:
-            self._record_observation_trace(
-                wave=core_wave,
-                runtime=runtime,
-                status=ObservationWaveStatus.FAILED,
-                failure_reason="visual_preparation_failed",
-            )
-            return ViewerCoordinatorResult(wave=core_wave, visual_failed=True)
-        retained_frames = await self._retain_wave_frames(wave)
-        if retained_frames is None:
-            # A capture failure must not suppress text or ASR reactions.
-            wave = replace(
-                wave,
-                visual_input_mode=ViewerVisualInputMode.TEXT_ONLY,
-                frame_bundle=None,
-                shared_visual_summary=None,
-            )
-            retained_frames = ()
+            wave = await self._prepare_visual_wave(core_wave, runtime)
+            if wave is None:
+                self._record_observation_trace(
+                    wave=core_wave,
+                    runtime=runtime,
+                    status=ObservationWaveStatus.FAILED,
+                    failure_reason="visual_preparation_failed",
+                )
+                return ViewerCoordinatorResult(wave=core_wave, visual_failed=True)
+            retained_frames = await self._retain_wave_frames(wave)
+            if retained_frames is None:
+                # A capture failure must not suppress text or ASR reactions.
+                wave = replace(
+                    wave,
+                    visual_input_mode=ViewerVisualInputMode.TEXT_ONLY,
+                    frame_bundle=None,
+                    shared_visual_summary=None,
+                )
+                retained_frames = ()
+        except ReactionPreparationError:
+            raise
+        except Exception as error:
+            raise ReactionPreparationError(
+                "viewer reaction preparation failed before model dispatch"
+            ) from error
         try:
             return await self._react_with_prepared_wave(
                 wave=wave,
@@ -311,6 +310,62 @@ class ViewerRuntimeCoordinator:
             )
         finally:
             await self._release_wave_frames(wave, retained_frames)
+
+    async def record_reaction_failure(
+        self,
+        observation: Observation,
+        error: Exception,
+    ) -> None:
+        """Persist a visible terminal failure when scheduling cannot start a wave."""
+
+        try:
+            committed = await self._runtime_state.snapshot(observation.session_id)
+            wave = self._failure_wave(observation, committed)
+            original = error.__cause__ if isinstance(error.__cause__, Exception) else error
+            self._record_observation_trace(
+                wave=wave,
+                runtime=committed.spec,
+                status=ObservationWaveStatus.FAILED,
+                failure_reason=f"preparation_failed:{type(original).__name__}",
+            )
+        except Exception:
+            logger.exception(
+                "Could not record Viewer reaction preparation failure",
+                extra={
+                    "session_id": observation.session_id,
+                    "observation_id": observation.observation_id,
+                },
+            )
+
+    @staticmethod
+    def _failure_wave(
+        observation: Observation,
+        committed: CommittedRuntime,
+    ) -> ObservationWave:
+        settings = committed.spec.settings
+        events = tuple(observation.room_events[-128:])
+        event_ids = [event.event_id for event in events]
+        available_event_ids = set(event_ids)
+        trigger_event_ids = [
+            event_id
+            for event_id in observation.trigger_event_ids
+            if event_id in available_event_ids
+        ]
+        triggers = ViewerRuntimeCoordinator._triggers(observation)
+        if not triggers:
+            triggers = [ObservationTrigger.USER_TEXT]
+        return ObservationWave(
+            room_id=committed.spec.room.room_id,
+            session_id=observation.session_id,
+            audience_epoch=committed.audience_epoch,
+            observation_id=observation.observation_id,
+            created_at_ms=observation.created_at_ms,
+            deadline_at_ms=observation.created_at_ms + settings.viewer_request_ttl_ms,
+            triggers=triggers,
+            event_ids=event_ids,
+            trigger_event_ids=trigger_event_ids,
+            visual_input_mode=ViewerVisualInputMode.TEXT_ONLY,
+        )
 
     async def _react_with_prepared_wave(
         self,
@@ -500,9 +555,7 @@ class ViewerRuntimeCoordinator:
         )
         if persona is None:
             raise ValueError("Viewer references an unavailable PersonaTemplate")
-        mode = next(
-            item for item in spec.modes if item.mode_id == spec.active_mode_id
-        )
+        mode = next(item for item in spec.modes if item.mode_id == spec.active_mode_id)
         override = mode.persona_overrides.get(persona_id)
         if override is None:
             return persona
@@ -537,9 +590,7 @@ class ViewerRuntimeCoordinator:
 
     async def stop_session(self, session_id: str) -> None:
         tasks = tuple(
-            task
-            for task, scope in self._background_task_scopes.items()
-            if scope[0] == session_id
+            task for task, scope in self._background_task_scopes.items() if scope[0] == session_id
         )
         await self._drain_background_tasks(tasks, cancel=True)
         self._policy_state.pop(session_id, None)
@@ -565,8 +616,7 @@ class ViewerRuntimeCoordinator:
             now_ms=observation.created_at_ms,
         )
         selected = tuple(
-            item.model_copy(update={"frame_index": index})
-            for index, item in enumerate(selected)
+            item.model_copy(update={"frame_index": index}) for index, item in enumerate(selected)
         )
         frame_bundle = (
             FrameBundle(
@@ -588,14 +638,10 @@ class ViewerRuntimeCoordinator:
         ) = self._targets_from_events(delta_events)
         target_ambiguous = observation.target_ambiguous or event_target_ambiguous
         target_viewer_id = (
-            None
-            if target_ambiguous
-            else observation.target_viewer_id or event_target_viewer_id
+            None if target_ambiguous else observation.target_viewer_id or event_target_viewer_id
         )
         target_persona_id = (
-            None
-            if target_ambiguous
-            else observation.target_persona_id or event_target_persona_id
+            None if target_ambiguous else observation.target_persona_id or event_target_persona_id
         )
         return ObservationWave(
             room_id=committed.spec.room.room_id,
@@ -603,19 +649,13 @@ class ViewerRuntimeCoordinator:
             audience_epoch=committed.audience_epoch,
             observation_id=observation.observation_id,
             created_at_ms=observation.created_at_ms,
-            deadline_at_ms=(
-                observation.created_at_ms + settings.viewer_request_ttl_ms
-            ),
+            deadline_at_ms=(observation.created_at_ms + settings.viewer_request_ttl_ms),
             triggers=self._triggers(observation),
             event_ids=event_ids,
             trigger_event_ids=trigger_event_ids,
             trigger_frame_ids=trigger_frame_ids,
             trigger_screen_change_score=max(
-                (
-                    frame.change_score
-                    for frame in frames
-                    if frame.frame_id in trigger_frame_ids
-                ),
+                (frame.change_score for frame in frames if frame.frame_id in trigger_frame_ids),
                 default=0.0,
             ),
             frame_bundle=frame_bundle,
@@ -685,8 +725,7 @@ class ViewerRuntimeCoordinator:
             return False
         return (
             state.last_ambient_at_ms is None
-            or wave.created_at_ms
-            >= state.last_ambient_at_ms + settings.ambient_tick_cooldown_ms
+            or wave.created_at_ms >= state.last_ambient_at_ms + settings.ambient_tick_cooldown_ms
         )
 
     @staticmethod
@@ -723,14 +762,11 @@ class ViewerRuntimeCoordinator:
             (
                 event
                 for event in reversed(delta_events)
-                if event.source_type
-                in {RoomEventSource.USER_TEXT, RoomEventSource.USER_VOICE}
+                if event.source_type in {RoomEventSource.USER_TEXT, RoomEventSource.USER_VOICE}
             ),
             None,
         )
-        trigger_frames = [
-            frame for frame in frames if frame.frame_id in trigger_frame_ids
-        ]
+        trigger_frames = [frame for frame in frames if frame.frame_id in trigger_frame_ids]
         latest_frame_hash = trigger_frames[-1].content_hash if trigger_frames else ""
         parts = [
             "" if latest_user_event is None else latest_user_event.source_type.value,
@@ -766,20 +802,14 @@ class ViewerRuntimeCoordinator:
         if len(targets) != 1:
             return None, None, len(targets) > 1
         kind, target = next(iter(targets))
-        return (
-            (target, None, False)
-            if kind == "viewer"
-            else (None, target, False)
-        )
+        return (target, None, False) if kind == "viewer" else (None, target, False)
 
     @staticmethod
     def _delta_events(observation: Observation) -> tuple[RoomEvent, ...]:
         if not observation.trigger_event_ids:
             return ()
         trigger_ids = set(observation.trigger_event_ids)
-        return tuple(
-            event for event in observation.room_events if event.event_id in trigger_ids
-        )
+        return tuple(event for event in observation.room_events if event.event_id in trigger_ids)
 
     @staticmethod
     def _event_revision(event: RoomEvent) -> int:
@@ -872,8 +902,7 @@ class ViewerRuntimeCoordinator:
             )
         resolved.sort(key=lambda item: (item.captured_at_ms, item.frame_id))
         return tuple(
-            item.model_copy(update={"frame_index": index})
-            for index, item in enumerate(resolved)
+            item.model_copy(update={"frame_index": index}) for index, item in enumerate(resolved)
         )
 
     async def _read_memory_slice(
@@ -1008,9 +1037,11 @@ class ViewerRuntimeCoordinator:
                         observation.session_id,
                         error,
                     )
-                # Each wave calls the summary model at most once. On failure,
-                # retain the latest events and let a future wave compact again.
-                state.covered_event_ids.update(event.event_id for event in older)
+                else:
+                    state.covered_event_ids.update(event.event_id for event in older)
+                # Each wave calls the summary model at most once. Keep only the
+                # latest events in this wave, but retry uncommitted older events
+                # on a future wave when summary generation failed.
                 recent = list(newer)
         return tuple(recent), state.summary
 

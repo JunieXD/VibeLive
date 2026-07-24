@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { BackendConnectionState, ColorTheme } from '../../shared/contracts'
 import { AppShell, type AppShellStatusItem } from './app/AppShell'
 import { AudienceWorkspace } from './AudienceWorkspace'
@@ -21,6 +21,7 @@ import { useOverlaySettings } from './hooks/useOverlaySettings'
 import { useVisualPipeline } from './hooks/useVisualPipeline'
 import { useSharedBrain } from './hooks/useSharedBrain'
 import { useLiveAudience } from './hooks/useLiveAudience'
+import { routeBackendTranscript } from './transcript-routing'
 import {
   selectActiveView,
   selectDispatchSession,
@@ -56,6 +57,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     modelConfig.status?.modelApiKeyStored === true &&
     modelConfig.status?.asrApiKeyStored === true
   const activityFeed = useActivityFeed()
+  const [microphonePartial, setMicrophonePartial] = useState('')
+  const [systemAudioPartial, setSystemAudioPartial] = useState('')
   const audience = useAudienceWorkspacePersistence({
     onSystemActivity: activityFeed.appendSystemActivity
   })
@@ -137,6 +140,31 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
   )
   const overlay = useOverlaySettings()
 
+  useEffect(
+    () => window.advx.onBackendTranscript((event) => {
+      const route = routeBackendTranscript(event)
+      const setPartial =
+        route.source === 'microphone' ? setMicrophonePartial : setSystemAudioPartial
+      if (route.kind === 'partial') {
+        setPartial(route.text)
+        return
+      }
+      setPartial('')
+      activityFeed.appendTranscriptActivity(
+        route.source,
+        route.text,
+        route.activityId
+      )
+    }),
+    [activityFeed.appendTranscriptActivity]
+  )
+
+  useEffect(() => {
+    if (session.status === 'running' || session.status === 'paused') return
+    setMicrophonePartial('')
+    setSystemAudioPartial('')
+  }, [session.status])
+
   useEffect(() => {
     const status = backend.status
     if (status?.connection !== 'connected') return
@@ -178,7 +206,21 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     {
       id: 'microphone',
       label: `麦克风 ${media.microphoneStatus}`,
-      tone: media.microphoneReady ? 'online' : 'offline'
+      tone: media.microphoneTransportError
+        ? 'warning'
+        : media.microphoneReady
+          ? 'online'
+          : 'offline'
+    },
+    {
+      id: 'system-audio',
+      label: `系统声音 ${media.systemAudioStatus}`,
+      tone:
+        media.systemAudioTransportError || media.systemAudioError
+          ? 'warning'
+          : media.systemAudioReady
+            ? 'online'
+            : 'offline'
     },
     {
       id: 'visual',
@@ -307,6 +349,12 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               captureStatus: media.captureStatus,
               cameraStatus: media.cameraStatus,
               microphoneLevel: media.microphoneLevel,
+              microphoneStatus: media.microphoneStatus,
+              systemAudioLevel: media.systemAudioLevel,
+              systemAudioReady: media.systemAudioReady,
+              systemAudioStatus: media.systemAudioStatus,
+              microphonePartial,
+              systemAudioPartial,
               asrReady: backendReady,
               asrStatus: backendReady
                 ? '已就绪'
@@ -325,6 +373,10 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               selectedMicrophoneId: media.selectedMicrophoneId,
               microphoneReady: media.microphoneReady,
               microphonePermission: media.microphonePermission,
+              systemAudioEnabled: media.systemAudioEnabled,
+              systemAudioSupported: media.systemAudioSupported,
+              systemAudioReady: media.systemAudioReady,
+              systemAudioStatus: media.systemAudioStatus,
               cameras: media.cameras,
               cameraStream: media.cameraStream,
               cameraEnabled: media.cameraEnabled,
@@ -334,6 +386,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               mediaTransitioning: media.mediaTransitioning,
               onChangeMicrophone: media.changeMicrophone,
               onRequestMicrophoneAccess: media.requestMicrophoneAccess,
+              onToggleSystemAudio: media.toggleSystemAudio,
               onChangeCamera: media.changeCamera,
               onToggleCamera: media.toggleCamera
             }}
@@ -360,6 +413,9 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
           <RoomInteractionView
             session={session}
             audienceSessionActive={media.audienceSessionActive}
+            providerConfigured={
+              providerProfileAvailable || (backend.status?.providersConfigured ?? false)
+            }
             audienceCount={
               media.audienceSessionActive ? liveAudience.audience?.active_count ?? null : 0
             }
@@ -425,6 +481,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             memoryModel={modelConfig.memoryModel}
             visualSummaryModel={modelConfig.visualSummaryModel}
             apiKey={modelConfig.apiKey}
+            asrBaseUrl={modelConfig.asrBaseUrl}
+            asrModel={modelConfig.asrModel}
             asrApiKey={modelConfig.asrApiKey}
             modelConfigStatus={modelConfig.status}
             modelConfigLoading={modelConfig.loading}
@@ -441,6 +499,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             onMemoryModelChange={modelConfig.setMemoryModel}
             onVisualSummaryModelChange={modelConfig.setVisualSummaryModel}
             onApiKeyChange={modelConfig.setApiKey}
+            onAsrBaseUrlChange={modelConfig.setAsrBaseUrl}
+            onAsrModelChange={modelConfig.setAsrModel}
             onAsrApiKeyChange={modelConfig.setAsrApiKey}
             onSaveModelConfig={() => void modelConfig.save()}
             onOverlaySettingsChange={overlay.updateSettings}

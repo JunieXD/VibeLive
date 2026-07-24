@@ -1,6 +1,8 @@
 import {
   ArrowLeft,
   KeyRound,
+  MessageSquareText,
+  MonitorUp,
   PanelBottom,
   PanelTop,
   SlidersHorizontal,
@@ -22,6 +24,8 @@ export type SettingsViewProps = {
   memoryModel: string
   visualSummaryModel: string
   apiKey: string
+  asrBaseUrl: string
+  asrModel: string
   asrApiKey: string
   modelConfigStatus: ModelConfigStatus | null
   modelConfigLoading: boolean
@@ -38,6 +42,8 @@ export type SettingsViewProps = {
   onMemoryModelChange: (value: string) => void
   onVisualSummaryModelChange: (value: string) => void
   onApiKeyChange: (value: string) => void
+  onAsrBaseUrlChange: (value: string) => void
+  onAsrModelChange: (value: string) => void
   onAsrApiKeyChange: (value: string) => void
   onSaveModelConfig: () => void
   onOverlaySettingsChange: (settings: OverlaySettings) => void
@@ -51,6 +57,8 @@ const controlClassName =
   'min-h-9 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50'
 const actionButtonClassName =
   'inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--panel-raise)] px-3 text-xs font-bold text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
+const displayModeButtonClassName =
+  'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border bg-[var(--panel-raise)] px-3 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
 const sliderClassName = 'w-full cursor-pointer accent-[var(--accent)]'
 
 type SliderFieldProps = {
@@ -146,6 +154,8 @@ export function SettingsView({
   memoryModel,
   visualSummaryModel,
   apiKey,
+  asrBaseUrl,
+  asrModel,
   asrApiKey,
   modelConfigStatus,
   modelConfigLoading,
@@ -162,6 +172,8 @@ export function SettingsView({
   onMemoryModelChange,
   onVisualSummaryModelChange,
   onApiKeyChange,
+  onAsrBaseUrlChange,
+  onAsrModelChange,
   onAsrApiKeyChange,
   onSaveModelConfig,
   onOverlaySettingsChange,
@@ -261,6 +273,24 @@ export function SettingsView({
               }
             />
           </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className={labelClassName}>
+              ASR 服务地址
+              <input
+                className={controlClassName}
+                value={asrBaseUrl}
+                onChange={(event) => onAsrBaseUrlChange(event.target.value)}
+              />
+            </label>
+            <label className={labelClassName}>
+              ASR 模型
+              <input
+                className={controlClassName}
+                value={asrModel}
+                onChange={(event) => onAsrModelChange(event.target.value)}
+              />
+            </label>
+          </div>
           <label className={labelClassName}>
             <span className="flex items-center justify-between gap-3">
               StepFun ASR API Key
@@ -309,7 +339,7 @@ export function SettingsView({
         <header className="mb-5 flex items-start justify-between gap-4">
           <div>
             <p className="mb-1 text-[10px] font-bold uppercase text-[var(--text-faint)]">弹幕显示</p>
-            <h2 className="m-0 text-base font-semibold text-[var(--text)]">弹幕覆盖层</h2>
+            <h2 className="m-0 text-base font-semibold text-[var(--text)]">弹幕窗口</h2>
           </div>
           <SlidersHorizontal className="text-[var(--accent)]" size={24} aria-hidden="true" />
         </header>
@@ -320,155 +350,228 @@ export function SettingsView({
           </div>
         ) : (
           <div className="grid gap-4">
-            <div className={labelClassName}>
-              弹幕目标
-              <SelectDropdown
-                ariaLabel="弹幕目标"
-                triggerClassName={controlClassName}
-                value={overlaySettings.targetDisplayId}
-                options={overlayTargets.map((target) => ({
-                  value: target.id,
-                  label: `${target.isPrimary ? '主屏 · ' : ''}${target.name} · ${target.bounds.width} × ${target.bounds.height}`
-                }))}
-                onChange={(targetDisplayId) =>
-                  onOverlaySettingsChange({
-                    ...overlaySettings,
-                    targetDisplayId
-                  })
-                }
-              />
-            </div>
-
-            <div className={labelClassName}>
-              字体
-              <SelectDropdown
-                ariaLabel="弹幕字体"
-                triggerClassName={controlClassName}
-                value={overlaySettings.fontFamily}
-                options={[
-                  { value: 'bilibili', label: 'B站默认' },
-                  { value: 'yahei', label: '微软雅黑' },
-                  { value: 'system', label: '系统字体' }
-                ]}
-                onChange={(fontFamily) =>
-                  onOverlaySettingsChange({
-                    ...overlaySettings,
-                    fontFamily
-                  })
-                }
-              />
-            </div>
-
-            <div className="grid gap-4 border-y border-[var(--border)] py-4">
-              <SliderField
-                label="字号"
-                value={overlaySettings.fontSizePx}
-                suffix="px"
-                min={14}
-                max={36}
-                onChange={(fontSizePx) =>
-                  onOverlaySettingsChange({ ...overlaySettings, fontSizePx })
-                }
-              />
-              <SliderField
-                label="描边粗细"
-                value={overlaySettings.outlineWidthPx}
-                suffix="px"
-                min={0}
-                max={3}
-                step={0.5}
-                onChange={(outlineWidthPx) =>
-                  onOverlaySettingsChange({ ...overlaySettings, outlineWidthPx })
-                }
-              />
-              <SliderField
-                label="移动速度"
-                value={overlaySettings.speed}
-                min={20}
-                max={100}
-                onChange={(speed) => onOverlaySettingsChange({ ...overlaySettings, speed })}
-              />
-              <SliderField
-                label="透明度"
-                value={overlaySettings.opacity}
-                suffix="%"
-                min={30}
-                max={100}
-                onChange={(opacity) => onOverlaySettingsChange({ ...overlaySettings, opacity })}
-              />
-              <SliderField
-                label="密度"
-                value={overlaySettings.density}
-                min={1}
-                max={10}
-                onChange={(density) => onOverlaySettingsChange({ ...overlaySettings, density })}
-              />
-              <SliderField
-                label="显示区域顶部"
-                value={overlaySettings.region.topPercent}
-                suffix="%"
-                min={0}
-                max={overlaySettings.region.bottomPercent - 20}
-                onChange={(topPercent) =>
-                  onOverlaySettingsChange({
-                    ...overlaySettings,
-                    region: { ...overlaySettings.region, topPercent }
-                  })
-                }
-              />
-              <SliderField
-                label="显示区域底部"
-                value={overlaySettings.region.bottomPercent}
-                suffix="%"
-                min={overlaySettings.region.topPercent + 20}
-                max={100}
-                onChange={(bottomPercent) =>
-                  onOverlaySettingsChange({
-                    ...overlaySettings,
-                    region: { ...overlaySettings.region, bottomPercent }
-                  })
-                }
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs font-semibold text-[var(--text-dim)]">弹幕预览</span>
-              <div className="flex flex-wrap gap-2">
+            <fieldset className="m-0 grid gap-2 border-0 p-0">
+              <legend className="mb-2 text-xs font-semibold text-[var(--text-dim)]">
+                显示方式
+              </legend>
+              <div className="grid grid-cols-2 gap-2" role="group" aria-label="弹幕显示方式">
                 <button
-                  className={actionButtonClassName}
                   type="button"
-                  title="预览滚动弹幕"
-                  onClick={() => onPreviewBarrage('scroll')}
+                  className={`${displayModeButtonClassName} ${
+                    overlaySettings.displayMode === 'overlay'
+                      ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
+                      : 'border-[var(--border-strong)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--text)]'
+                  }`}
+                  aria-pressed={overlaySettings.displayMode === 'overlay'}
+                  onClick={() =>
+                    onOverlaySettingsChange({
+                      ...overlaySettings,
+                      displayMode: 'overlay'
+                    })
+                  }
                 >
-                  <ArrowLeft size={15} aria-hidden="true" />
-                  滚动
+                  <MonitorUp size={16} aria-hidden="true" />
+                  屏幕弹幕
                 </button>
                 <button
-                  className={actionButtonClassName}
                   type="button"
-                  title="预览顶端固定弹幕"
-                  onClick={() => onPreviewBarrage('top')}
+                  className={`${displayModeButtonClassName} ${
+                    overlaySettings.displayMode === 'floating'
+                      ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
+                      : 'border-[var(--border-strong)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--text)]'
+                  }`}
+                  aria-pressed={overlaySettings.displayMode === 'floating'}
+                  onClick={() =>
+                    onOverlaySettingsChange({
+                      ...overlaySettings,
+                      displayMode: 'floating'
+                    })
+                  }
                 >
-                  <PanelTop size={15} aria-hidden="true" />
-                  顶端
-                </button>
-                <button
-                  className={actionButtonClassName}
-                  type="button"
-                  title="预览底端固定弹幕"
-                  onClick={() => onPreviewBarrage('bottom')}
-                >
-                  <PanelBottom size={15} aria-hidden="true" />
-                  底端
+                  <MessageSquareText size={16} aria-hidden="true" />
+                  互动悬浮窗
                 </button>
               </div>
-            </div>
+            </fieldset>
 
-            <ToggleField
-              label="粗体"
-              checked={overlaySettings.bold}
-              onChange={(bold) => onOverlaySettingsChange({ ...overlaySettings, bold })}
-            />
+            {overlaySettings.displayMode === 'overlay' ? (
+              <>
+                <div className={labelClassName}>
+                  弹幕目标
+                  <SelectDropdown
+                    ariaLabel="弹幕目标"
+                    triggerClassName={controlClassName}
+                    value={overlaySettings.targetDisplayId}
+                    options={overlayTargets.map((target) => ({
+                      value: target.id,
+                      label: `${target.isPrimary ? '主屏 · ' : ''}${target.name} · ${target.bounds.width} × ${target.bounds.height}`
+                    }))}
+                    onChange={(targetDisplayId) =>
+                      onOverlaySettingsChange({
+                        ...overlaySettings,
+                        targetDisplayId
+                      })
+                    }
+                  />
+                </div>
+
+                <div className={labelClassName}>
+                  字体
+                  <SelectDropdown
+                    ariaLabel="弹幕字体"
+                    triggerClassName={controlClassName}
+                    value={overlaySettings.fontFamily}
+                    options={[
+                      { value: 'bilibili', label: 'B站默认' },
+                      { value: 'yahei', label: '微软雅黑' },
+                      { value: 'system', label: '系统字体' }
+                    ]}
+                    onChange={(fontFamily) =>
+                      onOverlaySettingsChange({
+                        ...overlaySettings,
+                        fontFamily
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="grid gap-4 border-y border-[var(--border)] py-4">
+                  <SliderField
+                    label="字号"
+                    value={overlaySettings.fontSizePx}
+                    suffix="px"
+                    min={14}
+                    max={36}
+                    onChange={(fontSizePx) =>
+                      onOverlaySettingsChange({ ...overlaySettings, fontSizePx })
+                    }
+                  />
+                  <SliderField
+                    label="描边粗细"
+                    value={overlaySettings.outlineWidthPx}
+                    suffix="px"
+                    min={0}
+                    max={3}
+                    step={0.5}
+                    onChange={(outlineWidthPx) =>
+                      onOverlaySettingsChange({ ...overlaySettings, outlineWidthPx })
+                    }
+                  />
+                  <SliderField
+                    label="移动速度"
+                    value={overlaySettings.speed}
+                    min={20}
+                    max={100}
+                    onChange={(speed) =>
+                      onOverlaySettingsChange({ ...overlaySettings, speed })
+                    }
+                  />
+                  <SliderField
+                    label="透明度"
+                    value={overlaySettings.opacity}
+                    suffix="%"
+                    min={30}
+                    max={100}
+                    onChange={(opacity) =>
+                      onOverlaySettingsChange({ ...overlaySettings, opacity })
+                    }
+                  />
+                  <SliderField
+                    label="密度"
+                    value={overlaySettings.density}
+                    min={1}
+                    max={10}
+                    onChange={(density) =>
+                      onOverlaySettingsChange({ ...overlaySettings, density })
+                    }
+                  />
+                  <SliderField
+                    label="显示区域顶部"
+                    value={overlaySettings.region.topPercent}
+                    suffix="%"
+                    min={0}
+                    max={overlaySettings.region.bottomPercent - 20}
+                    onChange={(topPercent) =>
+                      onOverlaySettingsChange({
+                        ...overlaySettings,
+                        region: { ...overlaySettings.region, topPercent }
+                      })
+                    }
+                  />
+                  <SliderField
+                    label="显示区域底部"
+                    value={overlaySettings.region.bottomPercent}
+                    suffix="%"
+                    min={overlaySettings.region.topPercent + 20}
+                    max={100}
+                    onChange={(bottomPercent) =>
+                      onOverlaySettingsChange({
+                        ...overlaySettings,
+                        region: { ...overlaySettings.region, bottomPercent }
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-[var(--text-dim)]">
+                    弹幕预览
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className={actionButtonClassName}
+                      type="button"
+                      title="预览滚动弹幕"
+                      onClick={() => onPreviewBarrage('scroll')}
+                    >
+                      <ArrowLeft size={15} aria-hidden="true" />
+                      滚动
+                    </button>
+                    <button
+                      className={actionButtonClassName}
+                      type="button"
+                      title="预览顶端固定弹幕"
+                      onClick={() => onPreviewBarrage('top')}
+                    >
+                      <PanelTop size={15} aria-hidden="true" />
+                      顶端
+                    </button>
+                    <button
+                      className={actionButtonClassName}
+                      type="button"
+                      title="预览底端固定弹幕"
+                      onClick={() => onPreviewBarrage('bottom')}
+                    >
+                      <PanelBottom size={15} aria-hidden="true" />
+                      底端
+                    </button>
+                  </div>
+                </div>
+
+                <ToggleField
+                  label="粗体"
+                  checked={overlaySettings.bold}
+                  onChange={(bold) =>
+                    onOverlaySettingsChange({ ...overlaySettings, bold })
+                  }
+                />
+              </>
+            ) : (
+              <div className="flex min-h-11 items-center justify-between gap-3 border-y border-[var(--border)] py-3">
+                <span className="text-xs font-semibold text-[var(--text-dim)]">
+                  互动窗预览
+                </span>
+                <button
+                  className={actionButtonClassName}
+                  type="button"
+                  title="打开互动悬浮窗预览"
+                  onClick={() => onPreviewBarrage('scroll')}
+                >
+                  <MessageSquareText size={15} aria-hidden="true" />
+                  打开预览
+                </button>
+              </div>
+            )}
           </div>
         )}
       </section>

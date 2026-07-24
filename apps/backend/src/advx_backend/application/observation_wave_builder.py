@@ -36,7 +36,7 @@ def select_frame_bundle(
     if settings.frame_selection_strategy is FrameSelectionStrategy.EVENLY_SPACED:
         return _evenly_spaced(candidates, count)
 
-    return _smart_timeline(candidates, count, settings)
+    return _similar_frame_midpoints(candidates, count, settings)
 
 
 def _evenly_spaced(
@@ -52,54 +52,23 @@ def _evenly_spaced(
     return tuple(candidates[index] for index in indexes)
 
 
-def _change_score(frame: FrameBundleItem) -> float:
-    return frame.change_score
-
-
-def _smart_timeline(
+def _similar_frame_midpoints(
     candidates: tuple[FrameBundleItem, ...],
     count: int,
     settings: FrameBundleSettings,
 ) -> tuple[FrameBundleItem, ...]:
-    """Keep a chronological visual story while removing near-duplicate frames."""
+    """Collapse each consecutive run of similar frames to its latest frame."""
 
-    if count >= len(candidates):
-        return candidates
-
-    change_threshold = 1 - settings.frame_similarity_threshold
-    anchors: list[FrameBundleItem] = [candidates[0]]
-    changes: list[FrameBundleItem] = []
-    last_anchor_at_ms = candidates[0].captured_at_ms
+    groups: list[list[FrameBundleItem]] = [[candidates[0]]]
     for frame in candidates[1:]:
-        if frame.captured_at_ms - last_anchor_at_ms >= settings.frame_anchor_interval_ms:
-            anchors.append(frame)
-            last_anchor_at_ms = frame.captured_at_ms
-        if _change_score(frame) > change_threshold:
-            changes.append(frame)
+        similarity = 1 - frame.change_score
+        if similarity >= settings.frame_similarity_threshold:
+            groups[-1].append(frame)
+        else:
+            groups.append([frame])
 
-    chosen: dict[str, FrameBundleItem] = {frame.frame_id: frame for frame in anchors}
-    remaining = count - len(chosen)
-    if remaining > 0:
-        for frame in sorted(
-            changes,
-            key=lambda item: (-_change_score(item), -item.captured_at_ms, item.frame_id),
-        ):
-            if frame.frame_id in chosen:
-                continue
-            chosen[frame.frame_id] = frame
-            if len(chosen) >= count:
-                break
-
-    if len(chosen) < count:
-        for frame in _evenly_spaced(candidates, count):
-            chosen.setdefault(frame.frame_id, frame)
-            if len(chosen) >= count:
-                break
-
-    selected = sorted(chosen.values(), key=lambda item: (item.captured_at_ms, item.frame_id))
-    if len(selected) > count:
-        selected = list(_evenly_spaced(tuple(selected), count))
-    return tuple(selected)
+    selected = tuple(group[-1] for group in groups)
+    return _evenly_spaced(selected, count)
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,19 +18,22 @@ import {
   type LegacyLocalMeme,
   type Persona
 } from "../../shared/audience";
-import type {
-  BackendRuntimeStatus,
-  BarrageEvent,
-  ColorTheme,
-  DesktopSource,
-  MediaAccessSnapshot,
-  MediaAccessStatus,
-  ModelConfig,
-  ModelConfigStatus,
-  OverlaySettings,
-  RuntimeRoomIdentity,
-  SaveAudienceWorkspaceResult,
-  SaveModelConfigResult
+import {
+  DEFAULT_ASR_BASE_URL,
+  DEFAULT_ASR_MODEL,
+  type AudioSource,
+  type BackendRuntimeStatus,
+  type BarrageEvent,
+  type ColorTheme,
+  type DesktopSource,
+  type MediaAccessSnapshot,
+  type MediaAccessStatus,
+  type ModelConfig,
+  type ModelConfigStatus,
+  type OverlaySettings,
+  type RuntimeRoomIdentity,
+  type SaveAudienceWorkspaceResult,
+  type SaveModelConfigResult
 } from "../../shared/contracts";
 import {
   compileCanonicalRuntimeSpec,
@@ -46,6 +49,7 @@ import {
   saveRuntimeSessionId
 } from "../backend/runtime-session-state";
 import {
+  asrProviderChanged,
   configureProviderForSession,
   createRuntimeProviderCandidate,
   mergeProviderProfileSnapshots,
@@ -66,12 +70,18 @@ import {
   setOverlaySettings
 } from "../overlay-settings";
 import {
-  applyOverlaySettings,
-  clearOverlay,
-  hideOverlay,
-  pushBarrage,
-  showOverlay
-} from "../windows/overlay";
+  applyBarrageOutputSettings,
+  clearBarrageOutputs,
+  hideBarrageOutputs,
+  pushBarrageToOutputs,
+  setBarrageOutputVisibilityListener,
+  showBarrageOutputs
+} from "../windows/barrage-outputs";
+import {
+  isFloatingChatSender,
+  markFloatingChatRendererReady,
+  minimizeFloatingChat
+} from "../windows/floating-chat";
 import { applyControlWindowTheme } from "../windows/control";
 
 let selectedSourceId: string | null = null;
@@ -132,8 +142,7 @@ async function saveModelConfig(
     randomUUID()
   );
   const runtimeApplyRequired = sessionActive && modelProviderChanged(normalized, stored);
-  const nextSessionRequired =
-    sessionActive && (stored === null || normalized.asrApiKey !== stored.asrApiKey);
+  const nextSessionRequired = sessionActive && asrProviderChanged(normalized, stored);
 
   const configDirectory = app.getPath("userData");
   await mkdir(configDirectory, { recursive: true });
@@ -154,6 +163,8 @@ async function saveModelConfig(
     storedConfig.viewerModel = normalized.viewerModel;
     storedConfig.memoryModel = normalized.memoryModel;
     storedConfig.visualSummaryModel = normalized.visualSummaryModel;
+    storedConfig.asrBaseUrl = normalized.asrBaseUrl;
+    storedConfig.asrModel = normalized.asrModel;
   }
 
   await writeFile(
@@ -195,6 +206,14 @@ function parseModelConfigRecord(config: Record<string, unknown>): ModelConfig | 
     visualSummaryModel:
       typeof config.visualSummaryModel === "string" ? config.visualSummaryModel : "",
     apiKey: config.apiKey,
+    asrBaseUrl:
+      typeof config.asrBaseUrl === "string" && config.asrBaseUrl.trim()
+        ? config.asrBaseUrl
+        : DEFAULT_ASR_BASE_URL,
+    asrModel:
+      typeof config.asrModel === "string" && config.asrModel.trim()
+        ? config.asrModel
+        : DEFAULT_ASR_MODEL,
     asrApiKey: config.asrApiKey
   };
 }
@@ -261,6 +280,14 @@ async function loadStoredModelConfigStore(): Promise<ModelConfigStore | null> {
       memoryModel: "",
       visualSummaryModel: "",
       apiKey: safeStorage.decryptString(Buffer.from(encryptedModelApiKey, "base64")),
+      asrBaseUrl:
+        typeof parsed.asrBaseUrl === "string" && parsed.asrBaseUrl.trim()
+          ? parsed.asrBaseUrl
+          : DEFAULT_ASR_BASE_URL,
+      asrModel:
+        typeof parsed.asrModel === "string" && parsed.asrModel.trim()
+          ? parsed.asrModel
+          : DEFAULT_ASR_MODEL,
       asrApiKey: safeStorage.decryptString(Buffer.from(parsed.encryptedAsrApiKey, "base64"))
     };
     return { current, profiles: [current] };
@@ -293,6 +320,8 @@ async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
       viewerModel: null,
       memoryModel: null,
       visualSummaryModel: null,
+      asrBaseUrl: null,
+      asrModel: null,
       modelApiKeyStored: false,
       asrApiKeyStored: false
     };
@@ -304,6 +333,8 @@ async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
     viewerModel: config.viewerModel || null,
     memoryModel: config.memoryModel || null,
     visualSummaryModel: config.visualSummaryModel || null,
+    asrBaseUrl: config.asrBaseUrl,
+    asrModel: config.asrModel,
     modelApiKeyStored: true,
     asrApiKeyStored: true
   };
@@ -603,8 +634,13 @@ function getMediaAccessStatus(): MediaAccessSnapshot {
   return {
     microphone: systemPreferences.getMediaAccessStatus("microphone"),
     camera: systemPreferences.getMediaAccessStatus("camera"),
-    screen: systemPreferences.getMediaAccessStatus("screen")
+    screen: systemPreferences.getMediaAccessStatus("screen"),
+    systemAudioSupported: process.platform === "win32"
   };
+}
+
+function isAudioSource(value: unknown): value is AudioSource {
+  return value === "microphone" || value === "system_audio";
 }
 
 async function requestMicrophonePermission(): Promise<MediaAccessStatus> {
@@ -621,7 +657,10 @@ async function requestCameraPermission(): Promise<MediaAccessStatus> {
   return systemPreferences.getMediaAccessStatus("camera");
 }
 
-export function configureMediaAccess(getControlWindow: () => BrowserWindow | null): void {
+export function configureMediaAccess(
+  getControlWindow: () => BrowserWindow | null,
+  platform: NodeJS.Platform = process.platform
+): void {
   const isControlWebContents = (webContents: Electron.WebContents | null): boolean =>
     webContents !== null && webContents.id === getControlWindow()?.webContents.id;
 
@@ -669,11 +708,11 @@ export function configureMediaAccess(getControlWindow: () => BrowserWindow | nul
 
   session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
     try {
-      const controlFrame = getControlWindow()?.webContents.mainFrame;
+      const controlWindow = getControlWindow();
+      const controlFrame = controlWindow?.webContents.mainFrame;
       if (
-        !hasDisplayCaptureAuthorization(getControlWindow()?.webContents.id ?? -1) ||
+        !hasDisplayCaptureAuthorization(controlWindow?.webContents.id ?? -1) ||
         !request.videoRequested ||
-        request.audioRequested ||
         request.frame?.frameTreeNodeId !== controlFrame?.frameTreeNodeId
       ) {
         displayCaptureAuthorization = null;
@@ -684,8 +723,18 @@ export function configureMediaAccess(getControlWindow: () => BrowserWindow | nul
       displayCaptureAuthorization = null;
       const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
       const source = sources.find((candidate) => candidate.id === selectedSourceId);
-      callback(source ? { video: source } : {});
+      if (!source) {
+        callback({});
+        return;
+      }
+      callback({
+        video: source,
+        ...(request.audioRequested && platform === "win32"
+          ? { audio: "loopback" as const }
+          : {})
+      });
     } catch {
+      displayCaptureAuthorization = null;
       callback({});
     }
   });
@@ -696,7 +745,7 @@ function applyOverlayWindowState(
   settings: OverlaySettings
 ): void {
   const controlWindow = getControlWindow();
-  applyOverlaySettings(settings);
+  applyBarrageOutputSettings(settings);
 
   if (controlWindow && !controlWindow.isDestroyed()) {
     controlWindow.setAlwaysOnTop(false);
@@ -725,6 +774,26 @@ export function registerDesktopIpc(
       throw new Error("This API is only available to the control window.");
     }
   };
+  const assertFloatingChatSender = (event: Electron.IpcMainInvokeEvent): void => {
+    if (!isFloatingChatSender(event.sender.id)) {
+      throw new Error("This API is only available to the floating chat window.");
+    }
+  };
+  const assertTextSender = (event: Electron.IpcMainInvokeEvent): void => {
+    if (
+      event.sender.id !== getControlWindow()?.webContents.id &&
+      !isFloatingChatSender(event.sender.id)
+    ) {
+      throw new Error("This API is only available to an ADVX interaction window.");
+    }
+  };
+
+  setBarrageOutputVisibilityListener((visible) => {
+    const controlWindow = getControlWindow();
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("overlay:visibility-changed", visible);
+    }
+  });
 
   backendClient.onStatus((status) => {
     const controlWindow = getControlWindow();
@@ -742,6 +811,12 @@ export function registerDesktopIpc(
     const controlWindow = getControlWindow();
     if (controlWindow && !controlWindow.isDestroyed()) {
       controlWindow.webContents.send("backend:viewer-event", event);
+    }
+  });
+  backendClient.onTranscript((event) => {
+    const controlWindow = getControlWindow();
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("backend:transcript", event);
     }
   });
 
@@ -778,17 +853,51 @@ export function registerDesktopIpc(
       cameraCaptureAuthorization = null;
     }
   });
-  ipcMain.handle("overlay:list-targets", listOverlayTargets);
-  ipcMain.handle("overlay:get-settings", getOverlaySettings);
-  ipcMain.handle("overlay:set-settings", async (_event, settings: OverlaySettings) => {
+  ipcMain.handle("overlay:list-targets", (event) => {
+    assertControlSender(event);
+    return listOverlayTargets();
+  });
+  ipcMain.handle("overlay:get-settings", (event) => {
+    assertControlSender(event);
+    return getOverlaySettings();
+  });
+  ipcMain.handle("overlay:set-settings", async (event, settings: OverlaySettings) => {
+    assertControlSender(event);
     const savedSettings = await setOverlaySettings(settings);
     applyOverlayWindowState(getControlWindow, savedSettings);
     return savedSettings;
   });
-  ipcMain.handle("overlay:show", showOverlay);
-  ipcMain.handle("overlay:hide", hideOverlay);
-  ipcMain.handle("overlay:clear", clearOverlay);
-  ipcMain.handle("overlay:push", (_event, event: BarrageEvent) => pushBarrage(event));
+  ipcMain.handle("overlay:show", (event) => {
+    assertControlSender(event);
+    return showBarrageOutputs();
+  });
+  ipcMain.handle("overlay:hide", (event) => {
+    assertControlSender(event);
+    hideBarrageOutputs();
+  });
+  ipcMain.handle("overlay:clear", (event) => {
+    assertControlSender(event);
+    clearBarrageOutputs();
+  });
+  ipcMain.handle("overlay:push", (event, barrage: BarrageEvent) => {
+    assertControlSender(event);
+    return pushBarrageToOutputs(barrage);
+  });
+  ipcMain.handle("floating-chat:minimize", (event) => {
+    assertFloatingChatSender(event);
+    minimizeFloatingChat();
+  });
+  ipcMain.handle("floating-chat:hide", (event) => {
+    assertFloatingChatSender(event);
+    hideBarrageOutputs();
+  });
+  ipcMain.handle("floating-chat:clear", (event) => {
+    assertFloatingChatSender(event);
+    clearBarrageOutputs();
+  });
+  ipcMain.on("floating-chat:ready", (event) => {
+    markFloatingChatRendererReady(event.sender.id);
+  });
   ipcMain.handle("config:save-model", (event, config: ModelConfig) => {
     assertControlSender(event);
     return saveModelConfig(config, backendClient);
@@ -890,7 +999,7 @@ export function registerDesktopIpc(
     return stopped;
   });
   ipcMain.handle("backend:submit-text", (event, text: string, target?: TextSubmitTarget) => {
-    assertControlSender(event);
+    assertTextSender(event);
     if (typeof text !== "string" || !text.trim() || text.length > 4_000) {
       throw new Error("文字输入无效。");
     }
@@ -903,17 +1012,28 @@ export function registerDesktopIpc(
     "backend:submit-audio",
     (
       event,
-      input: { inputId: string; capturedAtMs: number; body: Uint8Array }
+      input: {
+        inputId: string;
+        capturedAtMs: number;
+        body: Uint8Array;
+        source: AudioSource;
+      }
     ) => {
       assertControlSender(event);
+      if (!isAudioSource(input.source)) throw new Error("音频来源无效。");
       return backendClient.submitAudioSegment(input);
     }
   );
-  ipcMain.on("backend:voice-activity", (event, occurredAtMs: number) => {
-    assertControlSender(event);
-    if (!Number.isInteger(occurredAtMs) || occurredAtMs < 0) return;
-    backendClient.notifyVoiceActivity(occurredAtMs);
-  });
+  ipcMain.on(
+    "backend:voice-activity",
+    (event, source: AudioSource, occurredAtMs: number) => {
+      assertControlSender(event);
+      if (!Number.isInteger(occurredAtMs) || occurredAtMs < 0 || !isAudioSource(source)) {
+        return;
+      }
+      backendClient.notifyVoiceActivity(source, occurredAtMs);
+    }
+  );
   ipcMain.handle(
     "backend:submit-frame",
     (

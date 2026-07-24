@@ -29,6 +29,8 @@ export type DesktopSource = {
 
 export type BarrageMode = 'scroll' | 'top' | 'bottom'
 
+export type BarrageDisplayMode = 'overlay' | 'floating'
+
 export type ColorTheme = 'light' | 'dark'
 
 export type BarrageEvent = {
@@ -58,6 +60,9 @@ export type BarrageEvidenceRef = {
   frameIndex: number | null
 }
 
+export const DEFAULT_ASR_BASE_URL = 'https://api.stepfun.com/v1'
+export const DEFAULT_ASR_MODEL = 'stepaudio-2.5-asr'
+
 export type ModelConfig = {
   baseUrl: string
   providerProfileId: string
@@ -66,6 +71,8 @@ export type ModelConfig = {
   memoryModel: string
   visualSummaryModel: string
   apiKey: string
+  asrBaseUrl: string
+  asrModel: string
   asrApiKey: string
 }
 
@@ -76,6 +83,8 @@ export type ModelConfigStatus = {
   viewerModel: string | null
   memoryModel: string | null
   visualSummaryModel: string | null
+  asrBaseUrl: string | null
+  asrModel: string | null
   modelApiKeyStored: boolean
   asrApiKeyStored: boolean
 }
@@ -104,6 +113,17 @@ export type BackendSessionSnapshot = {
   startedAtMs: number | null
   updatedAtMs: number
   revision: number
+}
+
+export type SessionLifecycleLogEvent = {
+  reason:
+    | 'backend-start-failed'
+    | 'backend-stop-failed'
+    | 'backend-stop-requested'
+    | 'emergency-stop'
+    | 'media-failure'
+  mediaKind?: 'camera' | 'display' | 'microphone'
+  error?: string
 }
 
 export type BackendRuntimeStatus = {
@@ -191,10 +211,26 @@ export type BackendViewerEvent = {
   viewer: BackendViewerSnapshot
 }
 
+export type AudioSource = components["schemas"]["AudioSource"]
+
+export type BackendTranscriptEvent = {
+  source: AudioSource
+  text: string
+  final: boolean
+  startedAtMs: number
+  endedAtMs: number
+  utteranceId: string | null
+  revision: number
+}
+
 export type RealtimeMediaInput = {
   inputId: string
   capturedAtMs: number
   body: Uint8Array
+}
+
+export type RealtimeAudioInput = RealtimeMediaInput & {
+  source: AudioSource
 }
 
 export type RealtimeFrameInput = RealtimeMediaInput & {
@@ -220,6 +256,7 @@ export type MediaAccessSnapshot = {
   microphone: MediaAccessStatus
   camera: MediaAccessStatus
   screen: MediaAccessStatus
+  systemAudioSupported: boolean
 }
 
 export type OverlayTarget = {
@@ -243,6 +280,7 @@ export type OverlayRegion = {
 export type OverlayFontFamily = 'bilibili' | 'yahei' | 'system'
 
 export type OverlaySettings = {
+  displayMode: BarrageDisplayMode
   targetDisplayId: number
   fontSizePx: number
   fontFamily: OverlayFontFamily
@@ -265,10 +303,10 @@ export type ControlApi = {
   listOverlayTargets: () => Promise<OverlayTarget[]>
   getOverlaySettings: () => Promise<OverlaySettings>
   setOverlaySettings: (settings: OverlaySettings) => Promise<OverlaySettings>
-  showOverlay: () => Promise<void>
+  showOverlay: () => Promise<boolean>
   hideOverlay: () => Promise<void>
   clearOverlay: () => Promise<void>
-  pushBarrage: (event: BarrageEvent) => Promise<void>
+  pushBarrage: (event: BarrageEvent) => Promise<boolean>
   saveModelConfig: (config: ModelConfig) => Promise<SaveModelConfigResult>
   getModelConfigStatus: () => Promise<ModelConfigStatus>
   getBackendStatus: () => Promise<BackendRuntimeStatus>
@@ -280,6 +318,7 @@ export type ControlApi = {
   pauseBackendSession: () => Promise<BackendSessionSnapshot>
   resumeBackendSession: () => Promise<BackendSessionSnapshot>
   stopBackendSession: () => Promise<BackendSessionSnapshot>
+  reportSessionLifecycle: (event: SessionLifecycleLogEvent) => void
   queryAudienceRuntime: (sessionId: string) => Promise<RuntimeQuerySnapshot>
   queryLiveAudience: (sessionId: string) => Promise<BackendAudienceSnapshot>
   muteViewer: (
@@ -317,8 +356,8 @@ export type ControlApi = {
   ) => Promise<DebugTraceQueryResult>
   queryAiCalls: (query: AiCallQuery) => Promise<AiCallQueryResponse>
   submitUserText: (text: string, target?: TextSubmitTarget) => Promise<void>
-  submitAudioSegment: (input: RealtimeMediaInput) => Promise<void>
-  notifyVoiceActivity: (occurredAtMs: number) => void
+  submitAudioSegment: (input: RealtimeAudioInput) => Promise<void>
+  notifyVoiceActivity: (source: AudioSource, occurredAtMs: number) => void
   submitVisualFrame: (input: RealtimeFrameInput) => Promise<void>
   listRoomMemories: (roomId: string) => Promise<RoomLongTermMemory[]>
   getRoomMemoryHead: (roomId: string) => Promise<RoomMemoryHead>
@@ -374,13 +413,24 @@ export type ControlApi = {
   onCloseRequested: (listener: () => void) => () => void
   onEmergencyStop: (listener: () => void) => () => void
   onOverlaySettingsChanged: (listener: (settings: OverlaySettings) => void) => () => void
+  onOverlayVisibilityChanged: (listener: (visible: boolean) => void) => () => void
   onBackendStatus: (listener: (status: BackendRuntimeStatus) => void) => () => void
   onBackendBarrage: (listener: (event: BackendBarrageEvent) => void) => () => void
   onBackendViewerEvent: (listener: (event: BackendViewerEvent) => void) => () => void
+  onBackendTranscript: (listener: (event: BackendTranscriptEvent) => void) => () => void
 }
 
 export type OverlayApi = {
   onBarrage: (listener: (event: BarrageEvent) => void) => () => void
   onClear: (listener: () => void) => () => void
   onSettingsChanged: (listener: (settings: OverlaySettings) => void) => () => void
+}
+
+export type FloatingChatApi = {
+  onBarrage: (listener: (event: BarrageEvent) => void) => () => void
+  onClear: (listener: () => void) => () => void
+  minimize: () => Promise<void>
+  hide: () => Promise<void>
+  clear: () => Promise<void>
+  submitText: (text: string) => Promise<void>
 }

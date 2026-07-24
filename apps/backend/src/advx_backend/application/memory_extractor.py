@@ -18,13 +18,16 @@ from advx_backend.application.ports.memory import MemoryEvidence, RoomMemoryCand
 from advx_backend.contracts.debug import AiCallRole
 from advx_backend.domain.memory import RoomMemoryType
 from advx_backend.providers.model.openai_compatible import (
+    JSON_MODE_RESPONSE_FORMAT,
     OpenAICompatibleConfig,
     OpenAICompatibleHttpError,
     OpenAICompatibleProvider,
     OpenAICompatibleProviderError,
     OpenAICompatibleTimeoutError,
     OpenAICompatibleTransportError,
+    default_reasoning_options,
 )
+from advx_backend.providers.model.provider_rate_gate import ProviderRateGate
 from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeConfig,
     ViewerRuntimeProtocolError,
@@ -73,59 +76,17 @@ class _MemoryExtractionOutput(BaseModel):
     candidates: list[_MemoryOutputModel] = Field(default_factory=list, max_length=32)
 
 
-_MEMORY_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["candidates"],
-    "properties": {
-        "candidates": {
-            "type": "array",
-            "maxItems": 32,
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": [
-                    "memory_type",
-                    "content",
-                    "evidence_event_ids",
-                    "tags",
-                    "importance",
-                    "confidence",
-                ],
-                "properties": {
-                    "memory_type": {
-                        "type": "string",
-                        "enum": [
-                            "user_preference",
-                            "real_world_fact",
-                            "room_lore",
-                            "shared_experience",
-                        ],
-                    },
-                    "content": {"type": "string", "minLength": 1, "maxLength": 4_000},
-                    "evidence_event_ids": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 128,
-                        "items": {"type": "string", "minLength": 1, "maxLength": 128},
-                    },
-                    "tags": {
-                        "type": "array",
-                        "maxItems": 32,
-                        "items": {"type": "string", "minLength": 1, "maxLength": 128},
-                    },
-                    "importance": {"type": "number", "minimum": 0, "maximum": 1},
-                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                },
-            },
-        }
-    },
-}
+_MEMORY_JSON_EXAMPLE: Final = (
+    '{"candidates":[{"memory_type":"room_lore","content":"观众喜欢逆风翻盘",'
+    '"evidence_event_ids":["event-id"],"tags":["游戏"],'
+    '"importance":0.7,"confidence":0.8}]}'
+)
 _MEMORY_SYSTEM_PROMPT: Final = (
     "Extract zero or more durable room memory candidates from public events only. "
     "Evidence IDs must come from the supplied events. Do not infer missing evidence. "
     "User preferences and real-world facts still require downstream non-AI evidence validation. "
-    "Return only the required JSON object."
+    "Return exactly one JSON object, with no Markdown or prose. "
+    f"Use this shape: {_MEMORY_JSON_EXAMPLE}"
 )
 
 
@@ -151,6 +112,7 @@ class OpenAICompatibleMemoryExtractor:
         client: httpx.AsyncClient | None = None,
         max_concurrency: int = 1,
         ai_call_sink: AiCallSink | None = None,
+        rate_gate: ProviderRateGate | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least one")
@@ -159,6 +121,7 @@ class OpenAICompatibleMemoryExtractor:
         self._owns_client = client is None
         self._provider = self._role_provider()
         self._ai_call_sink = ai_call_sink
+        self._rate_gate = rate_gate or ProviderRateGate()
         self._slots = asyncio.Semaphore(max_concurrency)
         self._close_lock = asyncio.Lock()
         self._closed = False
@@ -211,15 +174,14 @@ class OpenAICompatibleMemoryExtractor:
             "stream": False,
             "n": 1,
             "max_tokens": 4_096,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "room_memory_candidates",
-                    "strict": True,
-                    "schema": _MEMORY_SCHEMA,
-                },
-            },
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
         }
+        payload.update(
+            default_reasoning_options(
+                self.config.base_url,
+                self.config.provider.memory_model,
+            )
+        )
         correlation_source = json.dumps(
             {
                 "session_id": session_id,
@@ -254,50 +216,58 @@ class OpenAICompatibleMemoryExtractor:
                 raise ViewerRuntimeProviderBlockedError(
                     "Model provider credentials are not configured"
                 )
-            lifecycle.sent(build_openai_request_summary(payload))
             async with self._slots:
-                try:
-                    response = await self._provider._send(
-                        "POST",
-                        self._provider._chat_completions_endpoint(),
-                        payload=payload,
-                    )
-                except OpenAICompatibleProviderError as error:
-                    if (
-                        isinstance(error, OpenAICompatibleHttpError)
-                        and error.response is not None
-                    ):
-                        lifecycle.received(
-                            build_http_response_summary(error.response)
+                async with self._rate_gate.lease() as rate_limit_generation:
+                    lifecycle.sent(build_openai_request_summary(payload))
+                    try:
+                        response = await self._provider._send(
+                            "POST",
+                            self._provider._chat_completions_endpoint(),
+                            payload=payload,
                         )
-                    status_code = (
-                        error.status_code
-                        if isinstance(error, OpenAICompatibleHttpError)
-                        else None
-                    )
-                    raise ViewerRuntimeProviderError(
-                        str(error),
-                        status_code=status_code,
-                        retryable=(
-                            isinstance(
-                                error,
-                                (
-                                    OpenAICompatibleTimeoutError,
-                                    OpenAICompatibleTransportError,
-                                ),
+                    except OpenAICompatibleProviderError as error:
+                        if (
+                            isinstance(error, OpenAICompatibleHttpError)
+                            and error.response is not None
+                        ):
+                            lifecycle.received(
+                                build_http_response_summary(error.response)
                             )
-                            or status_code == 429
-                            or (
-                                isinstance(status_code, int)
-                                and 500 <= status_code <= 599
-                            )
-                        ),
-                        retry_after_seconds=(
-                            error.retry_after_seconds
+                        status_code = (
+                            error.status_code
                             if isinstance(error, OpenAICompatibleHttpError)
                             else None
-                        ),
-                    ) from None
+                        )
+                        normalized = ViewerRuntimeProviderError(
+                            str(error),
+                            status_code=status_code,
+                            retryable=(
+                                isinstance(
+                                    error,
+                                    (
+                                        OpenAICompatibleTimeoutError,
+                                        OpenAICompatibleTransportError,
+                                    ),
+                                )
+                                or status_code == 429
+                                or (
+                                    isinstance(status_code, int)
+                                    and 500 <= status_code <= 599
+                                )
+                            ),
+                            retry_after_seconds=(
+                                error.retry_after_seconds
+                                if isinstance(error, OpenAICompatibleHttpError)
+                                else None
+                            ),
+                        )
+                        if status_code == 429:
+                            await self._rate_gate.defer_for_rate_limit(
+                                normalized.retry_after_seconds
+                            )
+                        raise normalized from None
+                    else:
+                        await self._rate_gate.record_success(rate_limit_generation)
             lifecycle.received(build_http_response_summary(response))
             output = self._structured_output(response)
             try:

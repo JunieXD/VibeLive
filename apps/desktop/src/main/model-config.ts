@@ -1,6 +1,8 @@
-import type {
-  ModelConfig,
-  RuntimeModelProviderCandidate
+import {
+  DEFAULT_ASR_BASE_URL,
+  DEFAULT_ASR_MODEL,
+  type ModelConfig,
+  type RuntimeModelProviderCandidate
 } from "../shared/contracts";
 
 export type ResolvedModelProvider = {
@@ -32,11 +34,20 @@ export function resolveModelConfig(
     memoryModel: input.memoryModel.trim(),
     visualSummaryModel: input.visualSummaryModel.trim(),
     apiKey: input.apiKey.trim() || stored?.apiKey || "",
+    asrBaseUrl: (input.asrBaseUrl ?? stored?.asrBaseUrl ?? DEFAULT_ASR_BASE_URL).trim(),
+    asrModel: (input.asrModel ?? stored?.asrModel ?? DEFAULT_ASR_MODEL).trim(),
     asrApiKey: input.asrApiKey.trim() || stored?.asrApiKey || ""
   };
 
-  if (!resolved.baseUrl || !resolved.model || !resolved.apiKey || !resolved.asrApiKey) {
-    throw new Error("模型地址、模型名称、模型密钥和语音识别密钥均为必填项。");
+  if (
+    !resolved.baseUrl ||
+    !resolved.model ||
+    !resolved.apiKey ||
+    !resolved.asrBaseUrl ||
+    !resolved.asrModel ||
+    !resolved.asrApiKey
+  ) {
+    throw new Error("模型与语音识别的地址、模型名称和密钥均为必填项。");
   }
   return resolved;
 }
@@ -78,6 +89,18 @@ export function modelProviderChanged(
     config.memoryModel !== stored.memoryModel ||
     config.visualSummaryModel !== stored.visualSummaryModel ||
     config.apiKey !== stored.apiKey
+  );
+}
+
+export function asrProviderChanged(
+  config: ModelConfig,
+  stored: ModelConfig | null
+): boolean {
+  return (
+    stored === null ||
+    config.asrBaseUrl !== stored.asrBaseUrl ||
+    config.asrModel !== stored.asrModel ||
+    config.asrApiKey !== stored.asrApiKey
   );
 }
 

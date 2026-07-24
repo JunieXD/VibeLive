@@ -39,6 +39,17 @@ try {
     await page.locator('.composer input').getAttribute('placeholder'),
     '配置供应商后可与 AI 观众互动'
   )
+  await page.getByRole('button', { name: '房间互动', exact: true }).click()
+  assert.equal(
+    await page.getByLabel('发送房间消息', { exact: true }).getAttribute('placeholder'),
+    '配置供应商后可与 AI 观众互动'
+  )
+  assert.equal(
+    (await page.locator('body').innerText()).includes('Provider'),
+    false,
+    'English Provider copy is still visible in the interaction view.'
+  )
+  await page.getByRole('button', { name: '直播控制台', exact: true }).click()
 
   const layout = await page.evaluate(() => {
     const bounds = (selector) => {
@@ -68,7 +79,21 @@ try {
       mixerPanel: bounds('.mixer-panel'),
       mixerScroll: bounds('.mixer-scroll'),
       mixerScrollTop,
-      mixerRows: document.querySelectorAll('.mixer-row').length
+      mixerRows: document.querySelectorAll('.mixer-row').length,
+      commandButtons: [...document.querySelectorAll('.command-button')].map((button) => ({
+        clientWidth: button.clientWidth,
+        scrollWidth: button.scrollWidth,
+        clientHeight: button.clientHeight,
+        scrollHeight: button.scrollHeight
+      })),
+      deviceButtons: [...document.querySelectorAll('.device-control .ghost-button')].map(
+        (button) => ({
+          clientWidth: button.clientWidth,
+          scrollWidth: button.scrollWidth,
+          clientHeight: button.clientHeight,
+          scrollHeight: button.scrollHeight
+        })
+      )
     }
   })
 
@@ -90,12 +115,75 @@ try {
       layout.mixerScroll.clientHeight > 0,
     'The mixer card is clipped.'
   )
-  assert.equal(layout.mixerRows, 7)
+  assert.equal(layout.mixerRows, 8)
+  assert.equal(layout.commandButtons.length, 3)
+  assert.ok(
+    layout.commandButtons.every(
+      (button) =>
+        button.scrollWidth <= button.clientWidth + 1 &&
+        button.scrollHeight <= button.clientHeight + 1
+    ),
+    'A live command button wraps or clips its label at 1120x720.'
+  )
+  assert.equal(layout.deviceButtons.length, 3)
+  assert.ok(
+    layout.deviceButtons.every(
+      (button) =>
+        button.scrollWidth <= button.clientWidth + 1 &&
+        button.scrollHeight <= button.clientHeight + 1
+    ),
+    'A live device button wraps or clips its label at 1120x720.'
+  )
   assert.ok(
     layout.mixerScroll.scrollHeight > layout.mixerScroll.clientHeight &&
       layout.mixerScrollTop > 0,
     'The mixer card does not expose its scrollable status rows.'
   )
+
+  const commandTooltipCases = [
+    ['暂停', '暂停 AI 观察和麦克风，画面预览会继续保留。'],
+    ['清屏', '清空房间互动记录，以及屏幕弹幕或悬浮互动窗中的内容。'],
+    ['显示', '按设置打开屏幕弹幕或悬浮互动窗。']
+  ]
+  for (const [buttonName, tooltipText] of commandTooltipCases) {
+    await page.getByRole('button', { name: buttonName, exact: true }).hover()
+    const tooltip = page.getByRole('tooltip').filter({ hasText: tooltipText })
+    await tooltip.waitFor()
+    assert.equal((await tooltip.innerText()).trim(), tooltipText)
+    const tooltipBounds = await tooltip.evaluate((element) => {
+      const stage = document.querySelector('.stage-panel')
+      if (!(stage instanceof HTMLElement)) return null
+      const tooltipRect = element.getBoundingClientRect()
+      const stageRect = stage.getBoundingClientRect()
+      return {
+        tooltip: {
+          top: tooltipRect.top,
+          right: tooltipRect.right,
+          bottom: tooltipRect.bottom,
+          left: tooltipRect.left
+        },
+        stage: {
+          top: stageRect.top,
+          right: stageRect.right,
+          bottom: stageRect.bottom,
+          left: stageRect.left
+        }
+      }
+    })
+    assert.ok(tooltipBounds, `Tooltip bounds were unavailable for ${buttonName}.`)
+    assert.ok(
+      tooltipBounds.tooltip.left >= tooltipBounds.stage.left &&
+        tooltipBounds.tooltip.right <= tooltipBounds.stage.right &&
+        tooltipBounds.tooltip.top >= tooltipBounds.stage.top &&
+        tooltipBounds.tooltip.bottom <= tooltipBounds.stage.bottom,
+      `Tooltip escaped the live stage for ${buttonName}.`
+    )
+  }
+  await page.screenshot({
+    path: resolve(artifactDirectory, 'live-ui-polish-command-tooltip-dark.png')
+  })
+  await page.mouse.move(4, 4)
+  await page.waitForTimeout(150)
 
   await page.screenshot({
     path: resolve(artifactDirectory, 'live-ui-polish-1120-dark.png')
@@ -167,9 +255,10 @@ try {
       layout,
       menuBounds,
       screenshots: [
-        resolve(artifactDirectory, 'live-ui-polish-1120-dark.png'),
-        resolve(artifactDirectory, 'live-ui-polish-dropdown-dark.png'),
-        resolve(artifactDirectory, 'live-ui-polish-dropdown-light.png')
+      resolve(artifactDirectory, 'live-ui-polish-1120-dark.png'),
+      resolve(artifactDirectory, 'live-ui-polish-command-tooltip-dark.png'),
+      resolve(artifactDirectory, 'live-ui-polish-dropdown-dark.png'),
+      resolve(artifactDirectory, 'live-ui-polish-dropdown-light.png')
       ]
     })
   )

@@ -1,14 +1,11 @@
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import NoReturn, Protocol
 
-from advx_backend.application.ports.asr import AsrProvider, AudioChunk
 from advx_backend.contracts.configuration import (
     ProviderConfigurationRequest,
     RuntimeModelProviderCandidate,
 )
 from advx_backend.contracts.viewer_runtime import CanonicalRuntimeSpec
-from advx_backend.providers.asr import StepFunAsrConfig, StepFunAsrProvider
 from advx_backend.providers.model.base import (
     CapabilityProbeCheck,
     CapabilityProbeResult,
@@ -29,6 +26,12 @@ CapabilityCallback = Callable[
 
 
 class ModelCapabilityProvider(Protocol):
+    async def probe_startup_capabilities(
+        self,
+        *,
+        role_models: dict[str, str],
+    ) -> CapabilityProbeResult: ...
+
     async def probe_capabilities(
         self,
         *,
@@ -39,7 +42,6 @@ class ModelCapabilityProvider(Protocol):
 
 
 ModelProviderFactory = Callable[[OpenAICompatibleConfig], ModelCapabilityProvider]
-AsrProviderFactory = Callable[[StepFunAsrConfig], AsrProvider]
 
 
 class RuntimeCapabilityProbeError(RuntimeError):
@@ -65,57 +67,6 @@ class RuntimeCapabilityProbeBlockedError(RuntimeCapabilityProbeError):
     """Raised when credentials, fixtures, or upstream availability block the probe."""
 
 
-def create_stepfun_final_audio_probe(
-    *,
-    provider_factory: AsrProviderFactory = StepFunAsrProvider,
-) -> CapabilityCallback:
-    """Build a real final-ASR transport probe from a bounded synthetic PCM segment."""
-
-    async def probe(
-        spec: CanonicalRuntimeSpec,
-        configuration: ProviderConfigurationRequest | RuntimeModelProviderCandidate,
-    ) -> CapabilityProbeCheck:
-        del spec
-        if not isinstance(configuration, ProviderConfigurationRequest):
-            raise TypeError("the final-ASR probe requires the full provider configuration")
-        provider = provider_factory(
-            StepFunAsrConfig(
-                api_key=configuration.asr_api_key,
-                request_timeout_seconds=30.0,
-            )
-        )
-        try:
-            await provider.start()
-            await provider.push_audio(
-                AudioChunk(
-                    session_id="capability-probe",
-                    started_at_ms=0,
-                    ended_at_ms=1_000,
-                    sample_rate=16_000,
-                    channels=1,
-                    sample_width_bits=16,
-                    pcm=b"\x00\x00" * 16_000,
-                )
-            )
-            await provider.commit()
-
-            async def wait_for_final() -> None:
-                async for segment in provider.results():
-                    if segment.final:
-                        return
-                raise RuntimeError("ASR stream ended without a final segment")
-
-            await asyncio.wait_for(wait_for_final(), timeout=35.0)
-            return CapabilityProbeCheck(
-                capability="asr_final_audio",
-                status=CapabilityProbeStatus.PASSED,
-            )
-        finally:
-            await provider.stop()
-
-    return probe
-
-
 class ProductionRuntimeCapabilityProbe:
     """Validate a canonical runtime against the one active provider profile."""
 
@@ -124,12 +75,10 @@ class ProductionRuntimeCapabilityProbe:
         *,
         configuration_provider: Callable[[], ProviderConfigurationRequest | None],
         frame_probe: CapabilityCallback | None = None,
-        asr_probe: CapabilityCallback | None = None,
         model_provider_factory: ModelProviderFactory | None = None,
     ) -> None:
         self._configuration_provider = configuration_provider
         self._frame_probe = frame_probe
-        self._asr_probe = asr_probe
         self._model_provider_factory = model_provider_factory or self._default_provider
 
     async def probe(self, spec: CanonicalRuntimeSpec) -> None:
@@ -143,23 +92,21 @@ class ProductionRuntimeCapabilityProbe:
                 )
             )
         assert configuration is not None
-        await self._probe(spec, configuration, include_asr=True)
+        await self._probe(spec, configuration)
 
     async def probe_candidate(
         self,
         spec: CanonicalRuntimeSpec,
         configuration: RuntimeModelProviderCandidate,
     ) -> None:
-        """Probe a model-only candidate without repeating the active ASR probe."""
+        """Probe a model-only candidate before applying its runtime configuration."""
 
-        await self._probe(spec, configuration, include_asr=False)
+        await self._probe(spec, configuration)
 
     async def _probe(
         self,
         spec: CanonicalRuntimeSpec,
         configuration: ProviderConfigurationRequest | RuntimeModelProviderCandidate,
-        *,
-        include_asr: bool,
     ) -> None:
         if not configuration.model_api_key.strip():
             self._raise(
@@ -169,18 +116,6 @@ class ProductionRuntimeCapabilityProbe:
                     error_code="credentials_not_configured",
                 )
             )
-        if include_asr and (
-            not isinstance(configuration, ProviderConfigurationRequest)
-            or not configuration.asr_api_key.strip()
-        ):
-            self._raise(
-                CapabilityProbeCheck(
-                    capability="active_asr_credentials",
-                    status=CapabilityProbeStatus.BLOCKED,
-                    error_code="asr_credentials_not_configured",
-                )
-            )
-
         expected_models = {
             "viewer": spec.provider.viewer_model,
             "memory": spec.provider.memory_model,
@@ -214,7 +149,7 @@ class ProductionRuntimeCapabilityProbe:
             )
         try:
             try:
-                result = await provider.probe_capabilities(role_models=expected_models)
+                result = await provider.probe_startup_capabilities(role_models=expected_models)
             except Exception:
                 self._raise(
                     CapabilityProbeCheck(
@@ -246,7 +181,6 @@ class ProductionRuntimeCapabilityProbe:
                     error_code="model_probe_failed",
                 )
             )
-        checks.extend(self._model_availability_checks(result, expected_models))
         if self._frame_probe is not None:
             checks.append(
                 await self._run_callback(
@@ -254,13 +188,6 @@ class ProductionRuntimeCapabilityProbe:
                     self._frame_probe,
                     spec,
                     configuration,
-                )
-            )
-        if include_asr:
-            checks.append(
-                await self._asr_check(
-                    spec=spec,
-                    configuration=configuration,
                 )
             )
         failures = tuple(
@@ -274,25 +201,6 @@ class ProductionRuntimeCapabilityProbe:
         )
         if failures:
             self._raise(*failures)
-
-    async def _asr_check(
-        self,
-        *,
-        spec: CanonicalRuntimeSpec,
-        configuration: ProviderConfigurationRequest | RuntimeModelProviderCandidate,
-    ) -> CapabilityProbeCheck:
-        if self._asr_probe is None:
-            return CapabilityProbeCheck(
-                capability="asr_final_audio",
-                status=CapabilityProbeStatus.BLOCKED,
-                error_code="final_audio_fixture_required",
-            )
-        return await self._run_callback(
-            "asr_final_audio",
-            self._asr_probe,
-            spec,
-            configuration,
-        )
 
     @staticmethod
     async def _run_callback(
@@ -349,31 +257,6 @@ class ProductionRuntimeCapabilityProbe:
         return tuple(checks)
 
     @staticmethod
-    def _model_availability_checks(
-        result: CapabilityProbeResult,
-        expected_models: dict[str, str],
-    ) -> tuple[CapabilityProbeCheck, ...]:
-        if not any(
-            check.capability == "model_discovery" and check.status is CapabilityProbeStatus.PASSED
-            for check in result.checks
-        ):
-            return ()
-        discovered = set(result.discovered_model_ids)
-        return tuple(
-            CapabilityProbeCheck(
-                capability=f"{role}_model_available",
-                status=(
-                    CapabilityProbeStatus.PASSED
-                    if model_id in discovered
-                    else CapabilityProbeStatus.FAILED
-                ),
-                model_id=model_id,
-                error_code=None if model_id in discovered else "model_not_discovered",
-            )
-            for role, model_id in expected_models.items()
-        )
-
-    @staticmethod
     def _default_provider(config: OpenAICompatibleConfig) -> OpenAICompatibleProvider:
         return OpenAICompatibleProvider(config)
 
@@ -397,5 +280,4 @@ __all__ = [
     "ProductionRuntimeCapabilityProbe",
     "RuntimeCapabilityProbeBlockedError",
     "RuntimeCapabilityProbeError",
-    "create_stepfun_final_audio_probe",
 ]

@@ -20,6 +20,7 @@ from advx_backend.contracts.debug import (
     ObservationWaveTrace,
 )
 from advx_backend.contracts.protocol import PROTOCOL_VERSION_HEADER
+from advx_backend.domain.observation_wave import MAX_FRAME_BUNDLE_SIZE
 from advx_backend.infrastructure.logging.ai_call_store import AiCallStore
 from advx_backend.infrastructure.logging.trace_store import (
     TraceStore,
@@ -235,6 +236,7 @@ def test_trace_store_migrates_legacy_trace_fields(tmp_path: Path) -> None:
             "created_at_ms": 10,
             "expires_at_ms": 20,
             "decision_source": "director",
+            "evidence_frame_indexes": list(range(MAX_FRAME_BUNDLE_SIZE + 3)),
         },
         "viewer_instance_id": "viewer-1",
         "viewer_sequence": 1,
@@ -271,6 +273,9 @@ def test_trace_store_migrates_legacy_trace_fields(tmp_path: Path) -> None:
     assert "director_status" not in persisted[0]
     assert persisted[1]["decision"]["decision_id"] == "decision-1"
     assert persisted[1]["decision"]["decision_source"] == "legacy_director"
+    assert persisted[1]["decision"]["evidence_frame_indexes"] == list(
+        range(MAX_FRAME_BUNDLE_SIZE)
+    )
     assert "director_budget" not in persisted[1]
     assert "director_decision" not in persisted[1]
 

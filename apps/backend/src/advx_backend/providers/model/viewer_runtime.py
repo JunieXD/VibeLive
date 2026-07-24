@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field, is_dataclass
@@ -31,13 +32,16 @@ from advx_backend.domain.observation_wave import (
     ViewerVisualInputMode,
 )
 from advx_backend.providers.model.openai_compatible import (
+    JSON_MODE_RESPONSE_FORMAT,
     OpenAICompatibleConfig,
     OpenAICompatibleHttpError,
     OpenAICompatibleProvider,
     OpenAICompatibleProviderError,
     OpenAICompatibleTimeoutError,
     OpenAICompatibleTransportError,
+    default_reasoning_options,
 )
+from advx_backend.providers.model.provider_rate_gate import ProviderRateGate
 from advx_backend.providers.model.style_guidance import style_guidance_for
 
 
@@ -94,113 +98,20 @@ class OpenAICompatibleViewerRuntimeConfig:
     request_timeout_seconds: float = 30.0
 
 
-_EVIDENCE_REF_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["source", "event_id", "frame_index"],
-    "properties": {
-        "source": {"type": "string", "enum": ["event", "frame"]},
-        "event_id": {
-            "anyOf": [
-                {"type": "string", "minLength": 1, "maxLength": 128},
-                {"type": "null"},
-            ]
-        },
-        "frame_index": {
-            "anyOf": [
-                {"type": "integer", "minimum": 0},
-                {"type": "null"},
-            ]
-        },
-    },
-}
-_VIEWER_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "generation_request_id",
-        "viewer_instance_id",
-        "viewer_sequence",
-        "action",
-        "intent",
-        "target",
-        "text",
-        "reaction_type",
-        "evidence_refs",
-    ],
-    "properties": {
-        "generation_request_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "viewer_instance_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "viewer_sequence": {"type": "integer", "minimum": 1},
-        "action": {"type": "string", "enum": ["barrage", "silence"]},
-        "intent": {
-            "type": "string",
-            "enum": [
-                "react_to_host",
-                "react_to_scene",
-                "reply_to_viewer",
-                "ask_question",
-                "agree",
-                "disagree",
-                "encourage",
-                "joke",
-                "continue_thread",
-                "room_meta",
-                "silence",
-            ],
-        },
-        "target": {
-            "anyOf": [
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["kind", "viewer_instance_id", "event_id"],
-                    "properties": {
-                        "kind": {
-                            "type": "string",
-                            "enum": ["host", "scene", "room", "viewer", "event"],
-                        },
-                        "viewer_instance_id": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}]
-                        },
-                        "event_id": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}]
-                        },
-                    },
-                },
-                {"type": "null"},
-            ]
-        },
-        "text": {
-            "anyOf": [
-                {"type": "string", "minLength": 1, "maxLength": 4000},
-                {"type": "null"},
-            ]
-        },
-        "reaction_type": {"type": "string", "minLength": 1, "maxLength": 64},
-        "evidence_refs": {
-            "type": "array",
-            "maxItems": 128,
-            "items": _EVIDENCE_REF_SCHEMA,
-        },
-    },
-}
-_VISUAL_SUMMARY_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["summary"],
-    "properties": {
-        "summary": {"type": "string", "minLength": 1, "maxLength": 8_000},
-    },
-}
-_HISTORY_SUMMARY_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["summary"],
-    "properties": {
-        "summary": {"type": "string", "minLength": 1, "maxLength": 6000},
-    },
-}
+_VIEWER_BARRAGE_JSON_EXAMPLE: Final = (
+    '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
+    '"viewer_sequence":1,"action":"barrage","intent":"react_to_host",'
+    '"target":null,"text":"这波漂亮","reaction_type":"comment",'
+    '"decision_reason":"主播的提问符合当前人设",'
+    '"evidence_refs":[{"source":"event","event_id":"event-id"}]}'
+)
+_VIEWER_SILENCE_JSON_EXAMPLE: Final = (
+    '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
+    '"viewer_sequence":1,"action":"silence","intent":"silence",'
+    '"target":null,"text":null,"reaction_type":"silence",'
+    '"decision_reason":"普通问候未触发当前人设","evidence_refs":[]}'
+)
+_SUMMARY_JSON_EXAMPLE: Final = '{"summary":"画面中的关键变化"}'
 _VIEWER_SYSTEM_PROMPT: Final = (
     "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
     "is only a behavioral tendency and is not your name or a system role. Produce zero or one "
@@ -209,19 +120,34 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "public background, not proof that you personally attended an earlier stream. Use only "
     "evidence references present in the input. When mode_context.style_profile is supplied, "
     "treat its aggregate length, cadence, directives, and persona lens as binding style "
-    "guidance, but never treat it as scene evidence or reconstruct source corpus text. The "
-    "style profile may override the default preference for a natural Chinese message of "
-    "20 characters or fewer. Return only the required JSON object."
+    "guidance, but never treat it as scene evidence or reconstruct source corpus text. "
+    "evidence_refs must be a JSON array of objects, "
+    "never bare IDs or numbers. Use [] when no citation is needed. An event reference is "
+    '{"source":"event","event_id":"allowed-event-id"}; a frame reference is '
+    '{"source":"frame","frame_index":0}. Use only allowed event IDs and zero-based frame '
+    "indexes from the input. Include decision_reason for every result: one concise Chinese "
+    "sentence of 40 characters or fewer stating the visible persona or evidence basis for the "
+    "barrage or silence decision. Do not include hidden reasoning, probabilities, or chain of "
+    "thought. "
+    "For a host, scene, or room target, viewer_instance_id and event_id must both be null. "
+    "For a viewer target, provide viewer_instance_id only; for an event target, provide event_id "
+    "only. Use null, never an empty string, for every absent target ID. Never use an empty "
+    "string for text. Unless a supplied style profile overrides this default, prefer a natural "
+    "Chinese message of 20 characters or fewer. Return "
+    "exactly one JSON object, with no Markdown or prose. "
+    f"For a barrage use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE} "
+    f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE}"
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
     "Summarize only visible, decision-relevant changes across the ordered frame bundle. "
-    "Do not invent events or identities. Return only the required JSON object."
+    "Do not invent events or identities. Return exactly one JSON object, with no Markdown "
+    f"or prose. Use this shape: {_SUMMARY_JSON_EXAMPLE}"
 )
 _HISTORY_SUMMARY_SYSTEM_PROMPT: Final = (
     "Compress the supplied earlier live-room history into a factual chronological "
     "summary. Preserve names, direct questions, unresolved requests, important game "
-    "events, agreements, disagreements, and running context. Do not invent details. "
-    "Return only the required JSON object."
+    "events, agreements, disagreements, and running context. Do not invent details. Return "
+    f"exactly one JSON object, with no Markdown or prose. Use this shape: {_SUMMARY_JSON_EXAMPLE}"
 )
 _ROLE_OUTPUT_TOKEN_BUDGET: Final = 4_096
 
@@ -236,12 +162,14 @@ class OpenAICompatibleViewerRuntimeProvider:
         client: httpx.AsyncClient | None = None,
         frame_resolver: FrameResolver | None = None,
         ai_call_sink: AiCallSink | None = None,
+        rate_gate: ProviderRateGate | None = None,
     ) -> None:
         self.config = config
         self._client = client if client is not None else httpx.AsyncClient()
         self._owns_client = client is None
         self._frame_resolver = frame_resolver
         self._ai_call_sink = ai_call_sink
+        self._rate_gate = rate_gate or ProviderRateGate()
         self._viewer = self._role_provider(config.provider.viewer_model)
         self._visual_summary = self._role_provider(config.provider.visual_summary_model)
         self._close_lock = asyncio.Lock()
@@ -264,16 +192,20 @@ class OpenAICompatibleViewerRuntimeProvider:
         try:
             self._ensure_available(self._viewer)
             content = await self._viewer_content(request)
-            payload = self._structured_payload(
+            payload = self._json_payload(
                 model_id=self.config.provider.viewer_model,
                 system_prompt=_VIEWER_SYSTEM_PROMPT,
                 content=content,
-                schema_name="viewer_generation_response",
-                schema=_VIEWER_SCHEMA,
             )
-            lifecycle.sent(build_openai_request_summary(payload))
-            response = await self._send(self._viewer, payload, lifecycle=lifecycle)
-            lifecycle.received(build_http_response_summary(response))
+            response = await self._send_rate_limited(
+                self._viewer,
+                payload,
+                lifecycle=lifecycle,
+                capture_model_output=True,
+            )
+            lifecycle.received(
+                build_http_response_summary(response, include_model_output=True)
+            )
             output = self._structured_output(response)
             output.update(
                 {
@@ -282,6 +214,7 @@ class OpenAICompatibleViewerRuntimeProvider:
                     "viewer_sequence": request.viewer_sequence,
                 }
             )
+            self._canonicalize_target(output)
             self._canonicalize_evidence_refs(output)
             try:
                 result = ViewerGenerationResponse.model_validate(output)
@@ -332,15 +265,12 @@ class OpenAICompatibleViewerRuntimeProvider:
                 raise ViewerRuntimeProviderBlockedError(
                     "Visual summary requires a resolvable FrameBundle"
                 )
-            payload = self._structured_payload(
+            payload = self._json_payload(
                 model_id=self.config.provider.visual_summary_model,
                 system_prompt=_VISUAL_SUMMARY_SYSTEM_PROMPT,
                 content=content,
-                schema_name="visual_summary",
-                schema=_VISUAL_SUMMARY_SCHEMA,
             )
-            lifecycle.sent(build_openai_request_summary(payload))
-            response = await self._send(
+            response = await self._send_rate_limited(
                 self._visual_summary,
                 payload,
                 lifecycle=lifecycle,
@@ -382,19 +312,44 @@ class OpenAICompatibleViewerRuntimeProvider:
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        payload = self._structured_payload(
+        lifecycle = self._call_lifecycle(
+            role=AiCallRole.HISTORY_SUMMARY,
+            correlation_id=(
+                "history-"
+                f"{hashlib.sha256(context.encode('utf-8')).hexdigest()[:32]}"
+            ),
             model_id=self.config.provider.viewer_model,
-            system_prompt=_HISTORY_SUMMARY_SYSTEM_PROMPT,
-            content=context,
-            schema_name="conversation_history_summary",
-            schema=_HISTORY_SUMMARY_SCHEMA,
+            scope=AiCallScope(
+                session_id=session_id,
+                audience_epoch=audience_epoch,
+            ),
         )
-        response = await self._send(self._viewer, payload)
-        output = self._structured_output(response)
-        summary = output.get("summary")
-        if not isinstance(summary, str) or not summary.strip():
-            raise ViewerRuntimeProtocolError("History summary response was blank")
-        return summary.strip()[:6_000]
+        try:
+            self._ensure_available(self._viewer)
+            payload = self._json_payload(
+                model_id=self.config.provider.viewer_model,
+                system_prompt=_HISTORY_SUMMARY_SYSTEM_PROMPT,
+                content=context,
+            )
+            response = await self._send_rate_limited(
+                self._viewer,
+                payload,
+                lifecycle=lifecycle,
+            )
+            lifecycle.received(build_http_response_summary(response))
+            output = self._structured_output(response)
+            summary = output.get("summary")
+            if not isinstance(summary, str) or not summary.strip():
+                raise ViewerRuntimeProtocolError("History summary response was blank")
+            normalized_summary = summary.strip()[:6_000]
+            lifecycle.succeeded({"summary": normalized_summary})
+            return normalized_summary
+        except asyncio.CancelledError:
+            lifecycle.cancelled()
+            raise
+        except Exception as error:
+            lifecycle.failed(error)
+            raise
 
     async def aclose(self) -> None:
         async with self._close_lock:
@@ -439,12 +394,40 @@ class OpenAICompatibleViewerRuntimeProvider:
             scope=scope,
         )
 
+    async def _send_rate_limited(
+        self,
+        provider: OpenAICompatibleProvider | None,
+        payload: dict[str, object],
+        *,
+        lifecycle: AiCallLifecycle,
+        capture_model_output: bool = False,
+    ) -> httpx.Response:
+        async with self._rate_gate.lease() as rate_limit_generation:
+            lifecycle.sent(build_openai_request_summary(payload))
+            try:
+                response = await self._send(
+                    provider,
+                    payload,
+                    lifecycle=lifecycle,
+                    capture_model_output=capture_model_output,
+                )
+            except ViewerRuntimeProviderError as error:
+                if error.status_code == 429:
+                    await self._rate_gate.defer_for_rate_limit(
+                        error.retry_after_seconds
+                    )
+                raise
+            else:
+                await self._rate_gate.record_success(rate_limit_generation)
+        return response
+
     async def _send(
         self,
         provider: OpenAICompatibleProvider | None,
         payload: dict[str, object],
         *,
         lifecycle: AiCallLifecycle,
+        capture_model_output: bool = False,
     ) -> httpx.Response:
         self._ensure_available(provider)
         assert provider is not None
@@ -461,7 +444,12 @@ class OpenAICompatibleViewerRuntimeProvider:
                 isinstance(error, OpenAICompatibleHttpError)
                 and error.response is not None
             ):
-                lifecycle.received(build_http_response_summary(error.response))
+                lifecycle.received(
+                    build_http_response_summary(
+                        error.response,
+                        include_model_output=capture_model_output,
+                    )
+                )
             status_code = (
                 error.status_code
                 if isinstance(error, OpenAICompatibleHttpError)
@@ -584,16 +572,14 @@ class OpenAICompatibleViewerRuntimeProvider:
             )
         return parts
 
-    @staticmethod
-    def _structured_payload(
+    def _json_payload(
+        self,
         *,
         model_id: str,
         system_prompt: str,
         content: str | list[dict[str, object]],
-        schema_name: str,
-        schema: dict[str, object],
     ) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -602,15 +588,10 @@ class OpenAICompatibleViewerRuntimeProvider:
             "stream": False,
             "n": 1,
             "max_tokens": _ROLE_OUTPUT_TOKEN_BUDGET,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema_name,
-                    "strict": True,
-                    "schema": schema,
-                },
-            },
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
         }
+        payload.update(default_reasoning_options(self.config.base_url, model_id))
+        return payload
 
     @staticmethod
     def _structured_output(response: httpx.Response) -> dict[str, object]:
@@ -664,6 +645,15 @@ class OpenAICompatibleViewerRuntimeProvider:
             )
         }
         return ",".join(sorted(codes))[:512] or "unknown_validation_error"
+
+    @staticmethod
+    def _canonicalize_target(output: dict[str, object]) -> None:
+        target = output.get("target")
+        if not isinstance(target, dict):
+            return
+        for identifier in ("viewer_instance_id", "event_id"):
+            if target.get(identifier) == "":
+                target[identifier] = None
 
     @staticmethod
     def _canonicalize_evidence_refs(output: dict[str, object]) -> None:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getLiveMessagePlaceholder } from './LiveStage'
+import { getLiveMessagePlaceholder } from './liveCopy'
 
 describe('getLiveMessagePlaceholder', () => {
   it('prompts a configured idle session to start streaming instead of configuring again', () => {

@@ -25,26 +25,8 @@ import {
   type VisualSettings
 } from '../../visual'
 import { pipPositionLabels, pipSizeLabels, visualModeLabels } from './liveConstants'
+import { getLiveMessagePlaceholder } from './liveCopy'
 import type { LiveStageProps } from './liveTypes'
-
-export function getLiveMessagePlaceholder({
-  audienceSessionActive,
-  sessionStatus,
-  providerConfigured
-}: {
-  audienceSessionActive: boolean
-  sessionStatus: LiveStageProps['session']['status']
-  providerConfigured: boolean
-}): string {
-  if (!audienceSessionActive) {
-    return providerConfigured
-      ? '开始直播后可与 AI 观众互动'
-      : '配置供应商后可与 AI 观众互动'
-  }
-  return sessionStatus === 'running'
-    ? '说点什么，AI 观众会回应你'
-    : '开始直播后可发送'
-}
 
 export function LiveStage(props: LiveStageProps): React.JSX.Element {
   const {
@@ -366,39 +348,70 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
             )}
           </div>
         </details>
-        <button
-          className="command-button"
-          type="button"
-          disabled={
-            mediaTransitioning ||
-            (session.status !== 'running' && session.status !== 'paused')
-          }
-          onClick={() => void onTogglePause()}
-          title={session.status === 'paused' ? '恢复观察' : '暂停观察'}
-        >
-          {session.status === 'paused' ? <Play size={16} /> : <Pause size={16} />}
-          {session.status === 'paused' ? '恢复' : '暂停'}
-        </button>
-        <button
-          className="command-button"
-          type="button"
-          disabled={!overlayVisible && barrageTotal === 0}
-          onClick={() => void onClearBarrage()}
-          title="清空弹幕"
-        >
-          <Trash2 size={16} />
-          清屏
-        </button>
-        <button
-          className="command-button"
-          type="button"
-          disabled={!isSessionActive}
-          onClick={() => void onToggleOverlay()}
-          title={overlayVisible ? '隐藏弹幕覆盖层' : '显示弹幕覆盖层'}
-        >
-          {overlayVisible ? <EyeOff size={16} /> : <Eye size={16} />}
-          {overlayVisible ? '隐藏' : '显示'}
-        </button>
+        <span className="command-control">
+          <button
+            className="command-button"
+            type="button"
+            disabled={
+              mediaTransitioning ||
+              (session.status !== 'running' && session.status !== 'paused')
+            }
+            onClick={() => void onTogglePause()}
+            aria-describedby="pause-command-tooltip"
+          >
+            {session.status === 'paused' ? <Play size={16} /> : <Pause size={16} />}
+            {session.status === 'paused' ? '恢复' : '暂停'}
+          </button>
+          <span
+            className="command-tooltip"
+            id="pause-command-tooltip"
+            role="tooltip"
+          >
+            {session.status === 'paused'
+              ? '恢复 AI 观察和麦克风采集。'
+              : '暂停 AI 观察和麦克风，画面预览会继续保留。'}
+          </span>
+        </span>
+        <span className="command-control">
+          <button
+            className="command-button"
+            type="button"
+            disabled={!overlayVisible && barrageTotal === 0}
+            onClick={() => void onClearBarrage()}
+            aria-describedby="clear-command-tooltip"
+          >
+            <Trash2 size={16} />
+            清屏
+          </button>
+          <span
+            className="command-tooltip"
+            id="clear-command-tooltip"
+            role="tooltip"
+          >
+            清空房间互动记录，以及屏幕弹幕或悬浮互动窗中的内容。
+          </span>
+        </span>
+        <span className="command-control">
+          <button
+            className="command-button"
+            type="button"
+            disabled={!isSessionActive}
+            onClick={() => void onToggleOverlay()}
+            aria-describedby="visibility-command-tooltip"
+          >
+            {overlayVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+            {overlayVisible ? '隐藏' : '显示'}
+          </button>
+          <span
+            className="command-tooltip"
+            id="visibility-command-tooltip"
+            role="tooltip"
+          >
+            {overlayVisible
+              ? '隐藏当前弹幕输出，不会清空已有互动记录。'
+              : '按设置打开屏幕弹幕或悬浮互动窗。'}
+          </span>
+        </span>
         <span className="command-spacer" />
         <div className="command-meter" aria-label={`麦克风音量 ${microphoneLevel}%`}>
           <Mic size={14} />
@@ -451,7 +464,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
       </div>
       {audienceSessionActive && (
         <p className="provider-disclosure">
-          屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型供应商；原始音频仅发送给 StepFun ASR，生成模型仅接收最终转写。原始音频和连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。
+          屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型供应商；麦克风与系统原始音频仅发送给 StepFun ASR、不会持久化，生成模型只接收最终转写。连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。
         </p>
       )}
     </section>

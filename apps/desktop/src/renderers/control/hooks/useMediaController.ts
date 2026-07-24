@@ -23,6 +23,23 @@ export type LiveStartEligibility = {
   hasCamera: boolean
 }
 
+export function resolveAudioChannelStatus({
+  paused,
+  ready,
+  transportError,
+  idleStatus
+}: {
+  paused: boolean
+  ready: boolean
+  transportError: string | null
+  idleStatus: string
+}): string {
+  if (paused) return '已暂停'
+  if (transportError) return '传输异常'
+  if (ready) return '正常'
+  return idleStatus
+}
+
 export function canStartLive({
   sessionStatus,
   visualMode,
@@ -118,17 +135,33 @@ export function useMediaController({
         : devices.cameraEnabled
           ? '待启动'
           : '已关闭'
-  const microphoneStatus =
-    sessionStatus === 'paused'
-      ? '已暂停'
-      : devices.microphoneReady
-        ? '正常'
-        : devices.microphonePermission === 'denied' ||
-            devices.microphonePermission === 'restricted'
-          ? '权限受限'
-          : devices.selectedMicrophoneId
-            ? '待检测'
-            : '待授权'
+  const microphoneStatus = resolveAudioChannelStatus({
+    paused: sessionStatus === 'paused',
+    ready: devices.microphoneReady,
+    transportError: devices.microphoneTransportError,
+    idleStatus:
+      devices.microphonePermission === 'denied' ||
+      devices.microphonePermission === 'restricted'
+        ? '权限受限'
+        : devices.selectedMicrophoneId
+          ? '待检测'
+          : '待授权'
+  })
+  const systemAudioStatus =
+    !devices.systemAudioSupported
+      ? '当前平台不可用'
+      : !devices.systemAudioEnabled
+        ? '已关闭'
+        : resolveAudioChannelStatus({
+            paused: sessionStatus === 'paused',
+            ready: devices.systemAudioReady,
+            transportError: devices.systemAudioTransportError,
+            idleStatus: devices.systemAudioError
+              ? '降级运行'
+              : isSessionActive
+                ? '等待采集'
+                : '开播时采集'
+          })
   const pipPreviewStyle = useMemo(() => {
     const rectangle = getPipRectangle(
       1600,
@@ -165,6 +198,13 @@ export function useMediaController({
     microphoneLevel: devices.microphoneLevel,
     microphoneReady: devices.microphoneReady,
     microphonePermission: devices.microphonePermission,
+    microphoneTransportError: devices.microphoneTransportError,
+    systemAudioEnabled: devices.systemAudioEnabled,
+    systemAudioSupported: devices.systemAudioSupported,
+    systemAudioLevel: devices.systemAudioLevel,
+    systemAudioReady: devices.systemAudioReady,
+    systemAudioError: devices.systemAudioError,
+    systemAudioTransportError: devices.systemAudioTransportError,
     screenPermission: devices.screenPermission,
     mediaTransitioning: devices.operation.transitioning,
     overlayVisible: session.overlayVisible,
@@ -176,6 +216,7 @@ export function useMediaController({
     captureStatus,
     cameraStatus,
     microphoneStatus,
+    systemAudioStatus,
     pipPreviewStyle,
     videoRef: devices.videoRef,
     cameraVideoRef: devices.cameraVideoRef,
@@ -191,6 +232,7 @@ export function useMediaController({
     changeCamera: devices.changeCamera,
     changeVisualMode: devices.changeVisualMode,
     changeMicrophone: devices.changeMicrophone,
+    toggleSystemAudio: devices.toggleSystemAudio,
     startSession: session.startSession,
     stopSession: session.stopSession,
     toggleGoLive: session.toggleGoLive,

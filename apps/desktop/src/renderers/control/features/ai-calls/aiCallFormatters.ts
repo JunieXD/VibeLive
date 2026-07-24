@@ -4,6 +4,7 @@ export const aiCallRoleLabels = {
   legacy_director: '旧版导演记录',
   viewer: '观众',
   visual_summary: '视觉摘要',
+  history_summary: '历史摘要',
   memory: '记忆',
   asr: '语音识别'
 } as const

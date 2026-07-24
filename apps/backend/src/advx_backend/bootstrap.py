@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from advx_backend.application.generation_service import GenerationService
 from advx_backend.application.ingest_gateway import IngestGateway
 from advx_backend.application.ingest_service import IngestService
 from advx_backend.application.memory_extractor import RoomMemoryExtractor
-from advx_backend.application.ports.asr import AsrProvider
+from advx_backend.application.ports.asr import AsrProvider, AudioSource
 from advx_backend.application.ports.generation import (
     AudienceSelector,
     AudienceSnapshotProvider,
@@ -36,10 +37,7 @@ from advx_backend.application.room_event_persistence import (
     PersistentRuntimeRoomEventStore,
 )
 from advx_backend.application.room_service import RoomService
-from advx_backend.application.runtime_capability_probe import (
-    ProductionRuntimeCapabilityProbe,
-    create_stepfun_final_audio_probe,
-)
+from advx_backend.application.runtime_capability_probe import ProductionRuntimeCapabilityProbe
 from advx_backend.application.runtime_config_service import RuntimeCapabilityProbe
 from advx_backend.application.runtime_provider import (
     RuntimeProviderController,
@@ -71,7 +69,7 @@ from advx_backend.application.viewer_runtime_coordinator import (
 )
 from advx_backend.contracts.configuration import ProviderConfigurationRequest
 from advx_backend.domain.barrage import BarragePolicy
-from advx_backend.infrastructure.logging import AiCallStore, TraceStore
+from advx_backend.infrastructure.logging import AiCallStore, TraceStore, configure_logging
 from advx_backend.infrastructure.persistence.sqlite import (
     DatabaseConfig,
     SQLiteDatabase,
@@ -80,7 +78,7 @@ from advx_backend.infrastructure.persistence.sqlite import (
 )
 from advx_backend.infrastructure.security.local_token import create_local_token
 from advx_backend.infrastructure.system import SystemClock, UuidIdGenerator
-from advx_backend.providers.asr import StepFunAsrConfig, StepFunAsrProvider
+from advx_backend.providers.asr import AsrProviderMux, StepFunAsrConfig, StepFunAsrProvider
 from advx_backend.providers.model import OpenAICompatibleProvider
 
 BACKEND_VERSION = "0.1.0"
@@ -90,6 +88,8 @@ DATA_DIRECTORY_ENV = "ADVX_DATA_DIR"
 MODEL_BASE_URL_ENV = "ADVX_MODEL_BASE_URL"
 MODEL_NAME_ENV = "ADVX_MODEL_NAME"
 MODEL_API_KEY_ENV = "ADVX_MODEL_API_KEY"
+ASR_BASE_URL_ENV = "ADVX_ASR_BASE_URL"
+ASR_MODEL_ENV = "ADVX_ASR_MODEL"
 ASR_API_KEY_ENV = "ADVX_ASR_API_KEY"
 DEFAULT_DATA_DIRECTORY = Path.cwd() / ".advx-data"
 
@@ -122,7 +122,7 @@ class ExternalProviderConfig:
     model_name: str
     model_api_key: str = field(repr=False)
     asr_api_key: str = field(repr=False)
-    asr_base_url: str = "https://api.stepfun.com/step_plan/v1"
+    asr_base_url: str = "https://api.stepfun.com/v1"
     asr_model: str = "stepaudio-2.5-asr"
 
     def __post_init__(self) -> None:
@@ -205,7 +205,7 @@ class BackendRuntime:
         init=False,
         repr=False,
     )
-    _owned_asr_provider: StepFunAsrProvider | None = field(
+    _owned_asr_provider: AsrProvider | None = field(
         default=None,
         init=False,
         repr=False,
@@ -217,9 +217,7 @@ class BackendRuntime:
             return
         try:
             await self.database.start()
-            await self.session_record_store.recover_interrupted(
-                ended_at_ms=self.clock.now_ms()
-            )
+            await self.session_record_store.recover_interrupted(ended_at_ms=self.clock.now_ms())
         except Exception as error:
             # Keep the control plane alive for machine-readable health and recovery.
             logger.exception("SQLite startup failed; runtime is persistence-degraded")
@@ -360,6 +358,7 @@ class BackendRuntime:
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
             voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
             ambient_enabled=self.ambient_enabled,
+            transcript_publisher=self.realtime_broker,
         )
         self.session_resources.add_resource(ingest_service)
         self.ingest_gateway.configure(ingest_service)
@@ -376,6 +375,8 @@ class BackendRuntime:
             model_base_url=config.model_base_url,
             model_name=config.model_name,
             model_api_key=config.model_api_key,
+            asr_base_url=config.asr_base_url,
+            asr_model=config.asr_model,
             asr_api_key=config.asr_api_key,
         )
         return self._configure_viewer_runtime_pipeline(
@@ -393,6 +394,8 @@ class BackendRuntime:
                 model_base_url=request.model_base_url,
                 model_name=request.model_name,
                 model_api_key=request.model_api_key,
+                asr_base_url=request.asr_base_url,
+                asr_model=request.asr_model,
                 asr_api_key=request.asr_api_key,
             ),
         )
@@ -404,7 +407,7 @@ class BackendRuntime:
         external_config: ExternalProviderConfig,
         viewer_provider_override: object | None = None,
         memory_extractor_override: RoomMemoryExtractor | None = None,
-        asr_provider_override: AsrProvider | None = None,
+        asr_provider_override: Mapping[AudioSource, AsrProvider] | None = None,
     ) -> IngestService:
         configured = self.provider_configuration_store.current()
         if configured is not None:
@@ -426,22 +429,26 @@ class BackendRuntime:
         )
         viewer_provider = self.provider_router
         memory_extractor = self.provider_router
-        owned_asr_provider = (
-            StepFunAsrProvider(
-                StepFunAsrConfig(
-                    api_key=external_config.asr_api_key,
-                    base_url=external_config.asr_base_url,
-                    model=external_config.asr_model,
-                ),
-                ai_call_sink=self.debug_service,
+        owned_asr_provider = None
+        if asr_provider_override is None:
+            asr_config = StepFunAsrConfig(
+                api_key=external_config.asr_api_key,
+                base_url=external_config.asr_base_url,
+                model=external_config.asr_model,
             )
-            if asr_provider_override is None
-            else None
-        )
+            owned_asr_provider = AsrProviderMux(
+                {
+                    source: StepFunAsrProvider(
+                        asr_config,
+                        ai_call_sink=self.debug_service,
+                    )
+                    for source in AudioSource
+                }
+            )
         asr_provider = (
             owned_asr_provider
             if asr_provider_override is None
-            else asr_provider_override
+            else AsrProviderMux(asr_provider_override)
         )
         viewer_runtime = ViewerRuntime(
             provider=viewer_provider,
@@ -462,9 +469,7 @@ class BackendRuntime:
             trace_recorder=self.debug_service,
             behavior_state_sink=self.viewer_audience_service,
         )
-        self.viewer_audience_service.bind_cancel_viewer(
-            viewer_runtime.cancel_viewer
-        )
+        self.viewer_audience_service.bind_cancel_viewer(viewer_runtime.cancel_viewer)
         coordinator = ViewerRuntimeCoordinator(
             runtime_state=self.runtime_state,
             viewer_runtime=viewer_runtime,
@@ -488,6 +493,7 @@ class BackendRuntime:
             session_tasks=self.session_service,
             clock=self.clock,
             merge_window_provider=self.observation_merge_window_ms,
+            failure_reporter=coordinator.record_reaction_failure,
         )
         ingest_service = IngestService(
             room_service=self.room_service,
@@ -500,6 +506,7 @@ class BackendRuntime:
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
             voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
             ambient_enabled=self.ambient_enabled,
+            transcript_publisher=self.realtime_broker,
         )
         self.session_resources.add_resource(viewer_runtime)
         self.session_resources.add_resource(coordinator)
@@ -519,7 +526,7 @@ class BackendRuntime:
         request: ProviderConfigurationRequest,
         viewer_provider: object,
         memory_extractor: RoomMemoryExtractor,
-        asr_provider: AsrProvider,
+        asr_providers: Mapping[AudioSource, AsrProvider],
     ) -> IngestService:
         """Configure the production graph with isolated deterministic adapters."""
 
@@ -529,11 +536,13 @@ class BackendRuntime:
                 model_base_url=request.model_base_url,
                 model_name=request.model_name,
                 model_api_key=request.model_api_key,
+                asr_base_url=request.asr_base_url,
+                asr_model=request.asr_model,
                 asr_api_key=request.asr_api_key,
             ),
             viewer_provider_override=viewer_provider,
             memory_extractor_override=memory_extractor,
-            asr_provider_override=asr_provider,
+            asr_provider_override=asr_providers,
         )
 
     @property
@@ -670,7 +679,6 @@ def build_runtime(
         capability_probe=(
             ProductionRuntimeCapabilityProbe(
                 configuration_provider=provider_configuration_store.current,
-                asr_probe=create_stepfun_final_audio_probe(),
             )
             if runtime_capability_probe is None
             else runtime_capability_probe
@@ -724,9 +732,16 @@ def build_runtime(
 
 
 def build_runtime_from_environment() -> BackendRuntime:
+    data_directory = os.environ.get(DATA_DIRECTORY_ENV)
+    resolved_data_directory = (
+        Path(DEFAULT_DATA_DIRECTORY if data_directory is None else data_directory)
+        .expanduser()
+        .resolve()
+    )
+    configure_logging(log_directory=resolved_data_directory / "logs")
     runtime = build_runtime(
         local_token=os.environ.get(LOCAL_TOKEN_ENV),
-        data_directory=os.environ.get(DATA_DIRECTORY_ENV),
+        data_directory=resolved_data_directory,
     )
     provider_values = {
         "model_base_url": os.environ.get(MODEL_BASE_URL_ENV),
@@ -744,6 +759,9 @@ def build_runtime_from_environment() -> BackendRuntime:
                 model_base_url=provider_values["model_base_url"] or "",
                 model_name=provider_values["model_name"] or "",
                 model_api_key=provider_values["model_api_key"] or "",
+                asr_base_url=os.environ.get(ASR_BASE_URL_ENV)
+                or "https://api.stepfun.com/v1",
+                asr_model=os.environ.get(ASR_MODEL_ENV) or "stepaudio-2.5-asr",
                 asr_api_key=provider_values["asr_api_key"] or "",
             )
         )

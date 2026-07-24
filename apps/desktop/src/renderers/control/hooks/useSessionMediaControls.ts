@@ -54,7 +54,7 @@ export function useSessionMediaControls({
   audienceAvailable,
   onAudienceSessionActiveChange
 }: UseSessionMediaControlsOptions) {
-  const [overlayVisible, setOverlayVisible] = useState(true)
+  const [overlayVisible, setOverlayVisible] = useState(false)
   const devicesRef = useRef(devices)
   const onSystemActivityRef = useRef(onSystemActivity)
   const onSessionStartedRef = useRef(onSessionStarted)
@@ -99,10 +99,15 @@ export function useSessionMediaControls({
     ])
     if (hideResult.status === 'fulfilled') setOverlayVisible(false)
     if (clearResult.status === 'fulfilled' && hideResult.status === 'fulfilled') return null
-    return '悬浮层未能完全关闭，请使用紧急停止快捷键后重试。'
+    return '弹幕窗口未能完全关闭，请使用紧急停止快捷键后重试。'
   }, [])
 
-  fatalMediaRef.current = (_kind, error) => {
+  fatalMediaRef.current = (kind, error) => {
+    window.advx.reportSessionLifecycle({
+      reason: 'media-failure',
+      mediaKind: kind,
+      error
+    })
     sessionStatusRef.current = 'error'
     void releaseOverlay()
     dispatchSession({ type: 'fail', error })
@@ -160,6 +165,17 @@ export function useSessionMediaControls({
       }
       if (!devices.operation.isCurrent(operationId)) return
 
+      if (devices.systemAudioEnabled && devices.systemAudioSupported) {
+        try {
+          await devices.startSystemAudio(operationId)
+        } catch (error) {
+          onSystemActivityRef.current(
+            `系统声音未能启用：${describeMediaError(error, 'display')} 麦克风和直播继续运行。`
+          )
+        }
+      }
+      if (!devices.operation.isCurrent(operationId)) return
+
       if (audienceAvailableRef.current) {
         startClientRequestIdRef.current ??= `desktop-${crypto.randomUUID()}`
         try {
@@ -179,12 +195,17 @@ export function useSessionMediaControls({
         } catch (error) {
           if (!devices.operation.isCurrent(operationId)) return
           startClientRequestIdRef.current = null
+          const errorMessage = describeBackendError(error, '连接异常。')
+          window.advx.reportSessionLifecycle({
+            reason: 'backend-start-failed',
+            error: errorMessage
+          })
           const cleanupFailed = await stopUnconfirmedBackendSession().then(
             () => false,
             () => true
           )
           onSystemActivityRef.current(
-            `AI 观众未能接入：${describeBackendError(error, '连接异常。')}${
+            `AI 观众未能接入：${errorMessage}${
               cleanupFailed ? ' 后端 Session 可能仍在运行，请结束直播后重试。' : ''
             } 继续进行仅画面直播。`
           )
@@ -202,12 +223,11 @@ export function useSessionMediaControls({
 
       if (backendSessionStarted) setAudienceSessionActive(true)
       try {
-        await window.advx.showOverlay()
-        setOverlayVisible(true)
+        setOverlayVisible(await window.advx.showOverlay())
       } catch (error) {
         setOverlayVisible(false)
         onSystemActivityRef.current(
-          `悬浮层未能显示：${describeBackendError(error, '连接异常。')} 直播将继续。`
+          `弹幕窗口未能显示：${describeBackendError(error, '连接异常。')} 直播将继续。`
         )
       }
       if (!devices.operation.isCurrent(operationId)) {
@@ -232,6 +252,7 @@ export function useSessionMediaControls({
       if (devices.microphoneStreamRef.current === microphoneStream) {
         await devices.stopMicrophone()
       }
+      await devices.stopSystemAudio().catch(() => undefined)
       if (backendSessionStarted) {
         await window.advx.stopBackendSession().catch(() => undefined)
         startClientRequestIdRef.current = null
@@ -262,13 +283,17 @@ export function useSessionMediaControls({
     syncBackendSession
   ])
 
-  const stopSession = useCallback(async (releaseVisualPreview = false): Promise<void> => {
+  const stopSession = useCallback(async (
+    releaseVisualPreview = false,
+    reason: 'backend-stop-requested' | 'emergency-stop' = 'backend-stop-requested'
+  ): Promise<void> => {
     const devices = devicesRef.current
     const operationId = devices.operation.begin(true)
     if (operationId === null) return
     let backendSessionActive = backendSessionActiveRef.current
     sessionStatusRef.current = 'stopping'
     dispatchSession({ type: 'stop' })
+    window.advx.reportSessionLifecycle({ reason })
     if (releaseVisualPreview) {
       devices.stopCapture()
       devices.stopCamera()
@@ -278,6 +303,13 @@ export function useSessionMediaControls({
     } catch (error) {
       onSystemActivityRef.current(
         `麦克风未能完全停止：${describeMediaError(error, 'microphone')}`
+      )
+    }
+    try {
+      await devices.stopSystemAudio()
+    } catch (error) {
+      onSystemActivityRef.current(
+        `系统声音未能完全停止：${describeMediaError(error, 'display')}`
       )
     }
     let stopError: string | null = null
@@ -291,7 +323,12 @@ export function useSessionMediaControls({
         syncBackendSession(backendSession)
       }
     } catch (error) {
-      stopError = `后端 Session 未能确认停止：${describeBackendError(error, '连接异常。')}`
+      const errorMessage = describeBackendError(error, '连接异常。')
+      window.advx.reportSessionLifecycle({
+        reason: 'backend-stop-failed',
+        error: errorMessage
+      })
+      stopError = `后端 Session 未能确认停止：${errorMessage}`
     }
     try {
       const overlayError = await releaseOverlay()
@@ -318,7 +355,14 @@ export function useSessionMediaControls({
     syncBackendSession
   ])
 
-  useEffect(() => window.advx.onEmergencyStop(() => void stopSession(true)), [stopSession])
+  useEffect(
+    () => window.advx.onEmergencyStop(() => void stopSession(true, 'emergency-stop')),
+    [stopSession]
+  )
+  useEffect(
+    () => window.advx.onOverlayVisibilityChanged(setOverlayVisible),
+    []
+  )
 
   const toggleGoLive = useCallback((): void => {
     const active = ['starting', 'running', 'paused', 'stopping'].includes(sessionStatus)
@@ -341,6 +385,13 @@ export function useSessionMediaControls({
       } catch (error) {
         onSystemActivityRef.current(
           `麦克风未能完全暂停：${describeMediaError(error, 'microphone')}`
+        )
+      }
+      try {
+        await devices.stopSystemAudio()
+      } catch (error) {
+        onSystemActivityRef.current(
+          `系统声音未能完全暂停：${describeMediaError(error, 'display')}`
         )
       }
       if (backendSessionActiveRef.current) {
@@ -397,6 +448,16 @@ export function useSessionMediaControls({
             microphoneStream = null
             onSystemActivityRef.current(
               `麦克风未能恢复：${describeMediaError(error, 'microphone')} 继续进行仅画面直播。`
+            )
+          }
+          if (!devices.operation.isCurrent(operationId)) return
+        }
+        if (devices.systemAudioEnabled && devices.systemAudioSupported) {
+          try {
+            await devices.startSystemAudio(operationId)
+          } catch (error) {
+            onSystemActivityRef.current(
+              `系统声音未能恢复：${describeMediaError(error, 'display')} 麦克风和直播继续运行。`
             )
           }
           if (!devices.operation.isCurrent(operationId)) return
@@ -461,8 +522,7 @@ export function useSessionMediaControls({
   ])
 
   const showOverlay = useCallback(async (): Promise<void> => {
-    await window.advx.showOverlay()
-    setOverlayVisible(true)
+    setOverlayVisible(await window.advx.showOverlay())
   }, [])
   const hideOverlay = useCallback(async (): Promise<void> => {
     await window.advx.hideOverlay()

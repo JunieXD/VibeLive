@@ -265,7 +265,7 @@ export function ModeToolbar({
                 compact
                 value={activeMode.visualSettings.frameSelectionStrategy}
                 options={[
-                  { value: 'change_peaks', label: '变化峰值' },
+                  { value: 'change_peaks', label: '相邻去重' },
                   { value: 'latest_n', label: '最新帧' },
                   { value: 'evenly_spaced', label: '均匀采样' }
                 ]}
@@ -284,13 +284,13 @@ export function ModeToolbar({
               <input
                 type="number"
                 min={1}
-                max={60}
+                max={15}
                 value={activeMode.visualSettings.frameBundleSize}
                 onChange={(event) =>
                   onPatchMode({
                     visualSettings: {
                       ...activeMode.visualSettings,
-                      frameBundleSize: clampNumber(event.target.value, 1, 60)
+                      frameBundleSize: clampNumber(event.target.value, 1, 15)
                     }
                   })
                 }

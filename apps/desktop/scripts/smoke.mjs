@@ -74,7 +74,7 @@ async function closeControlWindowAndWaitForExit(electronApp) {
       new Promise((_, reject) => {
         timeout = setTimeout(
           () => reject(new Error('Electron did not exit after its control window closed.')),
-          8_000
+          15_000
         )
       })
     ])
@@ -134,6 +134,8 @@ try {
   await page.getByLabel('服务地址', { exact: true }).fill('https://smoke.example/v1')
   await page.getByLabel('模型名称', { exact: true }).fill('smoke-model')
   await page.getByLabel('模型 API Key', { exact: true }).fill('smoke-model-key')
+  await page.getByLabel('ASR 服务地址', { exact: true }).fill('https://speech.smoke.example/v1')
+  await page.getByLabel('ASR 模型', { exact: true }).fill('smoke-asr-model')
   await page.getByLabel('StepFun ASR API Key', { exact: true }).fill('smoke-asr-key')
   await page.getByRole('button', { name: '保存连接', exact: true }).click()
   await page.getByText(/模型与语音识别配置已安全保存/).waitFor()
@@ -171,6 +173,16 @@ try {
     (await page.locator('body').innerText()).includes('Provider'),
     false,
     'English Provider copy is still visible after configuration.'
+  )
+  await page.getByRole('button', { name: '房间互动', exact: true }).click()
+  assert.equal(
+    await page.getByLabel('发送房间消息', { exact: true }).getAttribute('placeholder'),
+    '开始直播后可与 AI 观众互动'
+  )
+  assert.equal(
+    (await page.locator('body').innerText()).includes('Provider'),
+    false,
+    'English Provider copy is still visible in the configured interaction view.'
   )
 
   await page.getByRole('button', { name: /观众配置/ }).click()
@@ -305,7 +317,15 @@ try {
   assert.equal(await page.getByRole('button', { name: '手动新增梗' }).count(), 0)
 
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByRole('heading', { name: '弹幕覆盖层', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '弹幕窗口', exact: true }).waitFor()
+  assert.equal(
+    await page.getByLabel('ASR 服务地址', { exact: true }).inputValue(),
+    'https://speech.smoke.example/v1'
+  )
+  assert.equal(
+    await page.getByLabel('ASR 模型', { exact: true }).inputValue(),
+    'smoke-asr-model'
+  )
   await page.getByLabel('弹幕目标', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('点击穿透', { exact: true }).count(), 0)
   const controlAlwaysOnTop = await electronApp.evaluate(({ BrowserWindow }) => {
@@ -390,6 +410,7 @@ try {
 
   assert.deepEqual(
     {
+      displayMode: configuredSettings.displayMode,
       fontSizePx: configuredSettings.fontSizePx,
       fontFamily: configuredSettings.fontFamily,
       bold: configuredSettings.bold,
@@ -400,6 +421,7 @@ try {
       region: configuredSettings.region
     },
     {
+      displayMode: 'overlay',
       fontSizePx: 30,
       fontFamily: 'system',
       bold: false,
@@ -409,6 +431,80 @@ try {
       density: 3,
       region: { topPercent: 20, bottomPercent: 60 }
     }
+  )
+
+  await page.getByRole('button', { name: '互动悬浮窗', exact: true }).click()
+  await page.waitForTimeout(350)
+  assert.equal(
+    await page.evaluate(async () => (await window.advx.getOverlaySettings()).displayMode),
+    'floating'
+  )
+  await page.evaluate(async () => {
+    await window.advx.showOverlay()
+    for (let index = 0; index < 4; index += 1) {
+      await window.advx.pushBarrage({
+        barrageId: `floating-chat-${index}`,
+        audienceId: `floating-audience-${index % 3}`,
+        audienceName: index === 0 ? '羊-有毒的' : `互动观众 ${index + 1}`,
+        text: [
+          '这么帅',
+          '坐在牛客坐牢',
+          '开个签到题就不会了',
+          'wa 了3发了'
+        ][index],
+        color: index === 0 ? '#65c9e5' : '#78bfa4',
+        createdAt: Date.now() + index,
+        mode: 'scroll'
+      })
+    }
+  })
+
+  let floatingChatPage = electronApp
+    .windows()
+    .find((candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+    )
+  floatingChatPage ??= await electronApp.waitForEvent('window', {
+    predicate: (candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+  })
+  await floatingChatPage.getByText('wa 了3发了', { exact: true }).waitFor()
+  const floatingChatProof = await floatingChatPage.evaluate(() => ({
+    title: document.querySelector('.titlebar-brand strong')?.textContent?.trim(),
+    rows: document.querySelectorAll('.message-row').length,
+    audienceCount: document.querySelector('.interaction-summary span')?.textContent?.trim(),
+    overflow:
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    composerVisible:
+      document.querySelector('.composer') instanceof HTMLElement &&
+      document.querySelector('.composer')?.getBoundingClientRect().height > 0,
+    controls: document.querySelectorAll('.window-actions button').length
+  }))
+  assert.equal(floatingChatProof.title, '直播互动')
+  assert.equal(floatingChatProof.rows, 4)
+  assert.equal(floatingChatProof.audienceCount, '3')
+  assert.ok(floatingChatProof.overflow <= 1, 'Floating chat overflowed horizontally.')
+  assert.equal(floatingChatProof.composerVisible, true)
+  assert.equal(floatingChatProof.controls, 2)
+  await floatingChatPage.screenshot({
+    path: resolve(artifactDirectory, 'floating-chat-window.png')
+  })
+  await floatingChatPage.getByTitle('关闭互动窗').click()
+  await electronApp.evaluate(async ({ BrowserWindow }) => {
+    const floatingWindow = BrowserWindow.getAllWindows().find((window) =>
+      window.webContents.getURL().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+    )
+    if (!floatingWindow) throw new Error('Floating chat window was not created.')
+    for (let attempt = 0; attempt < 20 && floatingWindow.isVisible(); attempt += 1) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25))
+    }
+    if (floatingWindow.isVisible()) throw new Error('Floating chat window did not hide.')
+  })
+  await page.getByRole('button', { name: '屏幕弹幕', exact: true }).click()
+  await page.waitForTimeout(350)
+  assert.equal(
+    await page.evaluate(async () => (await window.advx.getOverlaySettings()).displayMode),
+    'overlay'
   )
 
   await page.screenshot({
@@ -1071,6 +1167,11 @@ try {
   ) {
     throw new Error(`Unexpected live audience edit policy: ${JSON.stringify(liveEditPolicy)}`)
   }
+  const personaEditorDialog = page.getByRole('dialog', { name: /编辑/ })
+  await personaEditorDialog
+    .getByRole('button', { name: '关闭人格编辑', exact: true })
+    .click()
+  await personaEditorDialog.waitFor({ state: 'detached' })
   await page.getByRole('button', { name: '直播控制台', exact: true }).click()
 
   await page.getByRole('button', { name: '暂停', exact: true }).click()
@@ -1202,8 +1303,8 @@ try {
   await page.reload()
   await page.getByRole('heading', { name: '直播控制台', exact: true }).waitFor()
   if (
-    (await page.getByLabel('画中画位置').inputValue()) !== 'top-left' ||
-    (await page.getByLabel('画中画尺寸').inputValue()) !== 'large' ||
+    (await page.getByLabel('画中画位置').getAttribute('data-value')) !== 'top-left' ||
+    (await page.getByLabel('画中画尺寸').getAttribute('data-value')) !== 'large' ||
     !(await page.getByLabel('镜像').isChecked())
   ) {
     throw new Error('Versioned visual settings were not restored after reload.')
@@ -1289,6 +1390,96 @@ try {
   assert.deepEqual(restoredSettings, configuredSettings, 'Overlay settings were not persisted.')
   proof.restoredSettings = restoredSettings
 
+  await restartedPage.evaluate(() => window.advx.showOverlay())
+  let restartedOverlayPage = electronApp
+    .windows()
+    .find((candidate) => candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html'))
+  restartedOverlayPage ??= await electronApp.waitForEvent('window', {
+    predicate: (candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html')
+  })
+  await restartedOverlayPage.locator('.overlay-root').waitFor()
+  await restartedOverlayPage.waitForFunction(() => {
+    const root = document.querySelector('.overlay-root')
+    if (!(root instanceof HTMLElement)) return false
+    return getComputedStyle(root).getPropertyValue('--overlay-font-size').trim() === '30px'
+  })
+  const restoredRenderedSettings = await restartedOverlayPage.evaluate(() => {
+    const root = document.querySelector('.overlay-root')
+    if (!(root instanceof HTMLElement)) return null
+    const style = getComputedStyle(root)
+    return {
+      fontSize: style.getPropertyValue('--overlay-font-size').trim(),
+      fontFamily: style.getPropertyValue('--overlay-font-family').trim(),
+      fontWeight: style.getPropertyValue('--overlay-font-weight').trim(),
+      outline: style.getPropertyValue('--overlay-outline-shadow').trim(),
+      speed: style.getPropertyValue('--overlay-speed').trim(),
+      opacity: style.getPropertyValue('--overlay-opacity').trim(),
+      density: style.getPropertyValue('--overlay-density').trim(),
+      regionTop: style.getPropertyValue('--overlay-region-top').trim(),
+      regionBottom: style.getPropertyValue('--overlay-region-bottom').trim()
+    }
+  })
+  assert.ok(restoredRenderedSettings, 'Restarted Overlay styles were not readable.')
+  assert.equal(restoredRenderedSettings.fontSize, '30px')
+  assert.match(restoredRenderedSettings.fontFamily, /Segoe UI/)
+  assert.equal(restoredRenderedSettings.fontWeight, '400')
+  assert.match(restoredRenderedSettings.outline, /2px/)
+  assert.equal(restoredRenderedSettings.speed, '100')
+  assert.equal(restoredRenderedSettings.opacity, '0.55')
+  assert.equal(restoredRenderedSettings.density, '3')
+  assert.equal(restoredRenderedSettings.regionTop, '20%')
+  assert.equal(restoredRenderedSettings.regionBottom, '60%')
+  proof.restoredRenderedSettings = restoredRenderedSettings
+
+  await restartedPage.evaluate(() =>
+    window.advx.pushBarrage({
+      barrageId: 'restart-settings-proof',
+      audienceId: 'restart-proof-audience',
+      audienceName: '重启验证观众',
+      text: '重启后配置已应用',
+      color: '#ffffff',
+      mode: 'scroll',
+      createdAt: Date.now()
+    })
+  )
+  const restoredBarrage = restartedOverlayPage.getByText('重启后配置已应用', {
+    exact: true
+  })
+  await restoredBarrage.waitFor()
+  const restoredRenderedBarrage = await restoredBarrage.evaluate((element) => {
+    const root = document.querySelector('.overlay-root')
+    if (!(root instanceof HTMLElement)) return null
+    const style = getComputedStyle(element)
+    const rect = element.getBoundingClientRect()
+    return {
+      fontSize: style.fontSize,
+      fontFamily: style.fontFamily,
+      fontWeight: style.fontWeight,
+      opacity: style.opacity,
+      textShadow: style.textShadow,
+      animationDuration: style.animationDuration,
+      top: rect.top,
+      bottom: rect.bottom,
+      rootHeight: root.getBoundingClientRect().height
+    }
+  })
+  assert.ok(restoredRenderedBarrage, 'Restarted barrage styles were not readable.')
+  assert.equal(restoredRenderedBarrage.fontSize, '30px')
+  assert.match(restoredRenderedBarrage.fontFamily, /Segoe UI/)
+  assert.equal(restoredRenderedBarrage.fontWeight, '400')
+  assert.equal(restoredRenderedBarrage.opacity, '0.55')
+  assert.match(restoredRenderedBarrage.textShadow, /2px/)
+  assert.equal(restoredRenderedBarrage.animationDuration, '5s')
+  assert.ok(
+    restoredRenderedBarrage.top >= restoredRenderedBarrage.rootHeight * 0.2 - 1 &&
+      restoredRenderedBarrage.bottom <= restoredRenderedBarrage.rootHeight * 0.6 + 1,
+    'Restarted barrage escaped the restored display region.'
+  )
+  proof.restoredRenderedBarrage = restoredRenderedBarrage
+  await restartedPage.evaluate(() => window.advx.clearOverlay())
+  await restoredBarrage.waitFor({ state: 'detached' })
+
   const defaultPreviewSettings = {
     ...defaultOverlaySettings,
     targetDisplayId: restoredSettings.targetDisplayId
@@ -1302,7 +1493,7 @@ try {
   await restartedPage.getByRole('button', { name: '设置', exact: true }).click()
   await restartedPage.getByLabel('弹幕字体', { exact: true }).waitFor()
   assert.equal(
-    await restartedPage.getByLabel('弹幕字体', { exact: true }).inputValue(),
+    await restartedPage.getByLabel('弹幕字体', { exact: true }).getAttribute('data-value'),
     'bilibili'
   )
   assert.equal(await restartedPage.getByLabel('粗体', { exact: true }).isChecked(), true)
@@ -1312,13 +1503,6 @@ try {
   )
 
   await restartedPage.getByRole('button', { name: '滚动', exact: true }).click()
-  let restartedOverlayPage = electronApp
-    .windows()
-    .find((candidate) => candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html'))
-  restartedOverlayPage ??= await electronApp.waitForEvent('window', {
-    predicate: (candidate) =>
-      candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html')
-  })
   await restartedOverlayPage.locator('.overlay-barrage--scroll').waitFor()
   await restartedPage.getByRole('button', { name: '顶端', exact: true }).click()
   await restartedPage.getByRole('button', { name: '底端', exact: true }).click()
@@ -1334,13 +1518,18 @@ try {
 
   await restartedPage.evaluate(() => window.advx.clearOverlay())
   await restartedOverlayPage.locator('.overlay-barrage').first().waitFor({ state: 'detached' })
+  await restartedPage.evaluate(async () => {
+    const settings = await window.advx.getOverlaySettings()
+    await window.advx.setOverlaySettings({ ...settings, density: 7 })
+  })
   const mockBarrageEvents = [
     ['mock-scroll-1', '这波操作有点东西', 'scroll'],
     ['mock-scroll-2', '前方高能，请注意', 'scroll'],
     ['mock-scroll-3', '画面很清楚，继续冲', 'scroll'],
     ['mock-top-1', '顶端固定：本场最佳', 'top'],
     ['mock-top-2', '顶端固定：名场面预定', 'top'],
-    ['mock-bottom-1', '底端固定：感谢观看', 'bottom']
+    ['mock-bottom-1', '底端固定：感谢观看', 'bottom'],
+    ['mock-bottom-2', '底端固定：下次再见', 'bottom']
   ].map(([barrageId, text, mode], index) => ({
     barrageId,
     audienceId: `mock-audience-${index}`,
@@ -1357,7 +1546,7 @@ try {
     }
   }, mockBarrageEvents)
   await restartedOverlayPage.waitForFunction(
-    () => document.querySelectorAll('.overlay-barrage').length === 6
+    () => document.querySelectorAll('.overlay-barrage').length === 7
   )
   await restartedOverlayPage.waitForTimeout(1_200)
   const modeMock = await restartedOverlayPage.evaluate(() => {
@@ -1394,17 +1583,24 @@ try {
         top: topStyle.animationDuration,
         bottom: bottomStyle.animationDuration
       },
-      fixedRects: [top, bottom].map((item) => {
-        const rect = item.getBoundingClientRect()
-        return { top: rect.top, bottom: rect.bottom }
-      }),
+      fixedRects: Object.fromEntries(
+        ['top', 'bottom'].map((mode) => [
+          mode,
+          [...document.querySelectorAll(`.overlay-barrage--${mode}`)]
+            .map((item) => {
+              const rect = item.getBoundingClientRect()
+              return { top: rect.top, bottom: rect.bottom }
+            })
+            .sort((left, right) => left.top - right.top)
+        ])
+      ),
       rootHeight: rootRect.height,
       identityNodeCount: document.querySelectorAll('.overlay-name, .ai-watermark, img').length
     }
   })
   assert.ok(modeMock, 'Three-mode mock styles were not readable.')
-  assert.equal(modeMock.count, 6)
-  assert.deepEqual(modeMock.modes, { scroll: 3, top: 2, bottom: 1 })
+  assert.equal(modeMock.count, 7)
+  assert.deepEqual(modeMock.modes, { scroll: 3, top: 2, bottom: 2 })
   assert.equal(modeMock.fontSize, '25px')
   assert.match(modeMock.fontFamily, /SimHei/)
   assert.ok(['700', 'bold'].includes(modeMock.fontWeight))
@@ -1416,8 +1612,15 @@ try {
     bottom: '4s'
   })
   assert.equal(modeMock.identityNodeCount, 0)
+  for (const rects of Object.values(modeMock.fixedRects)) {
+    assert.equal(rects.length, 2)
+    assert.ok(
+      Math.abs(rects[1].top - rects[0].bottom - 6) <= 1,
+      'Adjacent fixed barrages did not keep the compact six-pixel gap.'
+    )
+  }
   assert.ok(
-    modeMock.fixedRects.every(
+    Object.values(modeMock.fixedRects).flat().every(
       (rect) => rect.top >= -1 && rect.bottom <= modeMock.rootHeight * 0.5 + 1
     ),
     'A fixed barrage escaped the default top-half display region.'
@@ -1444,6 +1647,7 @@ try {
   )
   console.log(`Settings screenshot: ${resolve(artifactDirectory, 'overlay-settings.png')}`)
   console.log(`Overlay screenshot: ${resolve(artifactDirectory, 'overlay-renderer.png')}`)
+  console.log(`Floating chat: ${resolve(artifactDirectory, 'floating-chat-window.png')}`)
   console.log(`Three-mode mock: ${resolve(artifactDirectory, 'overlay-modes-mock.png')}`)
   console.log(`Proof: ${resolve(artifactDirectory, 'overlay-smoke-proof.json')}`)
 } finally {

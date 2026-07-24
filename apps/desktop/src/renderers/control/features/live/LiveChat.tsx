@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { leadingGrapheme } from '../../components/viewerAvatarUtils'
 import type { LiveChatProps } from './liveTypes'
 
 export function LiveChat({
@@ -26,7 +27,7 @@ export function LiveChat({
               className="chat-avatar"
               style={item.color ? { backgroundColor: item.color } : undefined}
             >
-              {item.author.charAt(0)}
+              {leadingGrapheme(item.author)}
             </span>
             <div className="chat-content">
               <span

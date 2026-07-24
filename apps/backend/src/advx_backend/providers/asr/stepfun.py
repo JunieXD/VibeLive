@@ -3,7 +3,8 @@ import base64
 import contextlib
 import hashlib
 import json
-from collections.abc import AsyncIterator
+import math
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -16,8 +17,9 @@ from advx_backend.application.ai_call_logging import (
     build_audio_request_summary,
     build_http_response_summary,
 )
-from advx_backend.application.ports.asr import AudioChunk, TranscriptSegment
+from advx_backend.application.ports.asr import AudioChunk, AudioSource, TranscriptSegment
 from advx_backend.contracts.debug import AiCallRole
+from advx_backend.providers.retry_after import parse_retry_after_seconds
 
 
 class StepFunAsrError(RuntimeError):
@@ -29,27 +31,69 @@ class StepFunAsrError(RuntimeError):
         *,
         status_code: int | None = None,
         retryable: bool = False,
+        retry_after_seconds: float | None = None,
+        utterance_id: str | None = None,
     ) -> None:
         self.status_code = status_code
         self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
+        self.utterance_id = utterance_id
         super().__init__(message)
 
 
 @dataclass(frozen=True)
 class StepFunAsrConfig:
     api_key: str = field(repr=False)
-    base_url: str = "https://api.stepfun.com/step_plan/v1"
+    base_url: str = "https://api.stepfun.com/v1"
     model: str = "stepaudio-2.5-asr"
     language: str = "zh"
     enable_itn: bool = True
     enable_timestamp: bool = True
     request_timeout_seconds: float = 30.0
+    max_retries: int = 1
+    retry_backoff_seconds: float = 1.0
+    max_retry_backoff_seconds: float = 5.0
 
     def __post_init__(self) -> None:
         if not self.api_key:
             raise ValueError("StepFun API key is required")
         if self.request_timeout_seconds <= 0:
             raise ValueError("request timeout must be greater than zero")
+        if (
+            not isinstance(self.max_retries, int)
+            or isinstance(self.max_retries, bool)
+            or self.max_retries < 0
+        ):
+            raise ValueError("max_retries must be a non-negative integer")
+        self._validate_seconds(
+            self.retry_backoff_seconds,
+            name="retry_backoff_seconds",
+            allow_zero=True,
+        )
+        self._validate_seconds(
+            self.max_retry_backoff_seconds,
+            name="max_retry_backoff_seconds",
+        )
+        if self.max_retry_backoff_seconds < self.retry_backoff_seconds:
+            raise ValueError(
+                "max_retry_backoff_seconds must not be less than retry_backoff_seconds"
+            )
+
+    @staticmethod
+    def _validate_seconds(
+        value: float,
+        *,
+        name: str,
+        allow_zero: bool = False,
+    ) -> None:
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            or (value < 0 if allow_zero else value <= 0)
+        ):
+            qualifier = "non-negative" if allow_zero else "positive"
+            raise ValueError(f"{name} must be a finite {qualifier} number")
 
 
 @dataclass(frozen=True)
@@ -61,6 +105,7 @@ class _AudioSegment:
     channels: int
     sample_width_bits: int
     pcm: bytes
+    source: AudioSource = AudioSource.MICROPHONE
 
 
 class _EndOfResults:
@@ -72,7 +117,7 @@ _ResultItem = TranscriptSegment | Exception | _EndOfResults
 
 
 class StepFunAsrProvider:
-    """Step Plan HTTP + SSE ASR adapter.
+    """StepFun HTTP + SSE ASR adapter.
 
     Audio chunks are buffered until ``commit`` marks an utterance boundary.
     Committed segments are processed in order so room events cannot be reordered
@@ -85,10 +130,12 @@ class StepFunAsrProvider:
         *,
         client: httpx.AsyncClient | None = None,
         ai_call_sink: AiCallSink | None = None,
+        sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.config = config
         self._client = client
         self._ai_call_sink = ai_call_sink
+        self._sleeper = sleeper
         self._owns_client = client is None
         self._segments: asyncio.Queue[_AudioSegment] = asyncio.Queue()
         self._results: asyncio.Queue[_ResultItem] = asyncio.Queue()
@@ -114,6 +161,8 @@ class StepFunAsrProvider:
             first = self._buffer[0]
             if chunk.session_id != first.session_id:
                 raise ValueError("cannot mix sessions in one ASR segment")
+            if chunk.source is not first.source:
+                raise ValueError("cannot mix audio sources in one ASR segment")
             if (
                 chunk.sample_rate,
                 chunk.channels,
@@ -128,15 +177,18 @@ class StepFunAsrProvider:
                 raise ValueError("audio chunks must be ordered by capture time")
         self._buffer.append(chunk)
 
-    async def commit(self) -> None:
+    async def commit(self, source: AudioSource = AudioSource.MICROPHONE) -> None:
         self._ensure_started()
         if not self._buffer:
             return
 
         first = self._buffer[0]
+        if first.source is not source:
+            raise ValueError("ASR commit source does not match buffered audio")
         last = self._buffer[-1]
         segment = _AudioSegment(
             session_id=first.session_id,
+            source=first.source,
             started_at_ms=first.started_at_ms,
             ended_at_ms=last.ended_at_ms,
             sample_rate=first.sample_rate,
@@ -178,7 +230,7 @@ class StepFunAsrProvider:
         while True:
             segment = await self._segments.get()
             try:
-                async for result in self._transcribe(segment):
+                async for result in self._transcribe_with_retry(segment):
                     await self._results.put(result)
             except asyncio.CancelledError:
                 raise
@@ -187,6 +239,31 @@ class StepFunAsrProvider:
                 await self._results.put(error)
             finally:
                 self._segments.task_done()
+
+    async def _transcribe_with_retry(
+        self,
+        segment: _AudioSegment,
+    ) -> AsyncIterator[TranscriptSegment]:
+        for attempt in range(self.config.max_retries + 1):
+            emitted = False
+            try:
+                async for result in self._transcribe(segment):
+                    emitted = True
+                    yield result
+                return
+            except asyncio.CancelledError:
+                raise
+            except StepFunAsrError as error:
+                can_retry = (
+                    error.retryable
+                    and not emitted
+                    and attempt < self.config.max_retries
+                )
+                if not can_retry:
+                    raise
+                delay = self._retry_delay_seconds(error, attempt)
+                if delay:
+                    await self._sleeper(delay)
 
     async def _transcribe(self, segment: _AudioSegment) -> AsyncIterator[TranscriptSegment]:
         assert self._client is not None
@@ -219,7 +296,8 @@ class StepFunAsrProvider:
         wire_body = httpx.Request("POST", url, json=payload).content
         pcm_digest = hashlib.sha256(segment.pcm).hexdigest()
         utterance_id = (
-            f"asr-{segment.started_at_ms}-{segment.ended_at_ms}-{pcm_digest[:16]}"
+            f"asr-{segment.source.value}-{segment.started_at_ms}-"
+            f"{segment.ended_at_ms}-{pcm_digest[:16]}"
         )
         lifecycle = AiCallLifecycle(
             sink=self._ai_call_sink,
@@ -283,6 +361,7 @@ class StepFunAsrProvider:
                                 )
                             yield TranscriptSegment(
                                 session_id=segment.session_id,
+                                source=segment.source,
                                 text=text,
                                 started_at_ms=self._event_time(
                                     event,
@@ -305,6 +384,7 @@ class StepFunAsrProvider:
                             raise StepFunAsrError("StepFun ASR returned a done event without text")
                         yield TranscriptSegment(
                             session_id=segment.session_id,
+                            source=segment.source,
                             text=text,
                             started_at_ms=segment.started_at_ms,
                             ended_at_ms=segment.ended_at_ms,
@@ -339,6 +419,10 @@ class StepFunAsrProvider:
                     status_code in {408, 429}
                     or 500 <= status_code <= 599
                 ),
+                retry_after_seconds=parse_retry_after_seconds(
+                    exc.response.headers.get("Retry-After")
+                ),
+                utterance_id=utterance_id,
             )
             lifecycle.failed(error)
             raise error from exc
@@ -346,12 +430,44 @@ class StepFunAsrProvider:
             error = StepFunAsrError(
                 "StepFun ASR transport failed",
                 retryable=True,
+                utterance_id=utterance_id,
             )
             lifecycle.failed(error)
             raise error from exc
+        except StepFunAsrError as error:
+            contextual = (
+                error
+                if error.utterance_id is not None
+                else StepFunAsrError(
+                    str(error),
+                    status_code=error.status_code,
+                    retryable=error.retryable,
+                    retry_after_seconds=error.retry_after_seconds,
+                    utterance_id=utterance_id,
+                )
+            )
+            lifecycle.failed(contextual)
+            if contextual is error:
+                raise
+            raise contextual from error
         except Exception as error:
             lifecycle.failed(error)
             raise
+
+    def _retry_delay_seconds(
+        self,
+        error: StepFunAsrError,
+        attempt: int,
+    ) -> float:
+        if error.retry_after_seconds is not None:
+            return min(
+                error.retry_after_seconds,
+                self.config.max_retry_backoff_seconds,
+            )
+        return min(
+            self.config.retry_backoff_seconds * (2**attempt),
+            self.config.max_retry_backoff_seconds,
+        )
 
     @staticmethod
     def _parse_sse_line(line: str) -> dict[str, object] | None:

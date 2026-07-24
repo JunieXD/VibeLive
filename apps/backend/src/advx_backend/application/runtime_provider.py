@@ -22,6 +22,7 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerGenerationResponse,
 )
 from advx_backend.domain.observation_wave import FrameBundle, ObservationWave
+from advx_backend.providers.model.provider_rate_gate import ProviderRateGate
 from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeConfig,
     OpenAICompatibleViewerRuntimeProvider,
@@ -153,6 +154,7 @@ class RuntimeProviderController:
         self._frame_resolver = frame_resolver
         self._configuration_committer = configuration_committer
         self._ai_call_sink = ai_call_sink
+        self._model_rate_gate = ProviderRateGate()
         self._active: RuntimeProviderGeneration | None = None
 
     def install_initial(
@@ -204,6 +206,7 @@ class RuntimeProviderController:
                 config,
                 frame_resolver=self._frame_resolver,
                 ai_call_sink=self._ai_call_sink,
+                rate_gate=self._model_rate_gate,
             )
             if viewer_provider is None
             else viewer_provider
@@ -212,6 +215,7 @@ class RuntimeProviderController:
             OpenAICompatibleMemoryExtractor(
                 config,
                 ai_call_sink=self._ai_call_sink,
+                rate_gate=self._model_rate_gate,
             )
             if memory_extractor is None
             else memory_extractor
@@ -248,6 +252,8 @@ class RuntimeProviderController:
             )
         return ProviderConfigurationRequest(
             **request.model_dump(),
+            asr_base_url=active.configuration.asr_base_url,
+            asr_model=active.configuration.asr_model,
             asr_api_key=active.configuration.asr_api_key,
         )
 

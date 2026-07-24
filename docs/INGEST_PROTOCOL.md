@@ -33,9 +33,11 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 | 方向 | `type` | 必填字段 | 含义 |
 | --- | --- | --- | --- |
 | client -> backend | `client.text.submit` | `session_id`, `input_id`, `created_at_ms`, `text` | 提交一条用户文字输入。 |
-| client -> backend | `client.audio.commit` | `session_id`, `input_id`, `committed_at_ms` | 提交同一 `input_id` 的单个音频 binary envelope，形成一个 ASR 段。 |
+| client -> backend | `client.audio.commit` | `session_id`, `input_id`, `source`, `committed_at_ms` | 提交同一来源、同一 `input_id` 的单个音频 binary envelope，形成一个 ASR 段。 |
+| client -> backend | `client.voice.activity` | `session_id`, `source`, `occurred_at_ms` | 对应来源恢复说话，用于延长该来源当前语音轮次。 |
 | backend -> client | `ingest.ack` | `session_id`, `input_id`, `input_kind`, `stage`, `accepted_at_ms` | `stage` 为 `received` 或 `committed`。 |
 | backend -> client | `ingest.rejected` | `code`, `message`，以及可选的 `session_id`、`input_id`、`input_kind` | 输入被拒绝，身份无法可靠解析时关联字段省略。 |
+| backend -> client | `asr.transcript` | `source`, `text`, `final`, `started_at_ms`, `ended_at_ms`, `utterance_id`, `revision` | 部分或最终 ASR 文本；最终文本已成功成为 Room Event。 |
 | backend -> client | `barrage.event` | `barrage` | Viewer 输出；包含 Room、Session、epoch、Observation、生成请求、Viewer 身份、意图、目标与 evidence refs。 |
 
 `input_kind` 的值为 `text`、`audio` 或 `frame`。`ingest.rejected.code` 为
@@ -50,33 +52,36 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 `ingest.rejected`，不会因为单个坏输入直接关闭连接。只有 WebSocket frame/消息本身违反
 协议规则时才进入上一节的 `protocol.error` 关闭语义。
 
-音频顺序为：发送一条 `audio` binary envelope，收到 `received` ACK 后发送
-`client.audio.commit`，再收到 `committed` ACK。一个 binary envelope 对应一个
-`input_id` 和一个有界 ASR 段。图片没有 commit 消息，接收成功后返回 `frame` 的
+音频顺序为：发送一条带 `microphone` 或 `system_audio` 来源的 `audio` binary
+envelope，收到 `received` ACK 后发送相同来源的 `client.audio.commit`，再收到
+`committed` ACK。一个 binary envelope 对应一个 `input_id` 和一个有界 ASR 段。
+两个来源分别维护 pending、时间顺序和 Provider 缓冲，因此可以并行；同一来源仍必须先
+commit 当前输入再提交下一个。图片没有 commit 消息，接收成功后返回 `frame` 的
 `received` ACK。
 
 ## 3. 二进制 Envelope
 
 每个 WebSocket binary frame 恰好包含一个 envelope。字段使用网络字节序（big-endian），
-可变长字符串使用 UTF-8，不包含 NUL。固定 header 是 24 字节，Python 编解码格式为
-`>4sBBHHQHI`。
+可变长字符串使用 UTF-8，不包含 NUL。当前 v2 固定 header 是 25 字节，Python 编解码格式
+为 `>4sBBBHHQHI`。
 
 | 偏移 | 字段 | 编码 | 说明 |
 | --- | --- | --- | --- |
 | 0 | magic | 4 bytes | ASCII `ADVX`。 |
-| 4 | version | `u8` | 当前为 `1`。 |
+| 4 | version | `u8` | 当前为 `2`。 |
 | 5 | media type | `u8` | `1` = audio，`2` = image。 |
-| 6 | session ID length | `u16` | `session_id` 的 UTF-8 字节数。 |
-| 8 | input ID length | `u16` | `input_id` 的 UTF-8 字节数。 |
-| 10 | captured at | `u64` | UTC Unix 毫秒。 |
-| 18 | format length | `u16` | `format` 的 UTF-8 字节数。 |
-| 20 | body length | `u32` | 正文的字节数。 |
-| 24 | variable data | bytes | `session_id`、`input_id`、`format`、正文，按此顺序连接。 |
+| 6 | audio source | `u8` | `0` = none，`1` = microphone，`2` = system_audio。图片必须为 `0`，音频不能为 `0`。 |
+| 7 | session ID length | `u16` | `session_id` 的 UTF-8 字节数。 |
+| 9 | input ID length | `u16` | `input_id` 的 UTF-8 字节数。 |
+| 11 | captured at | `u64` | UTC Unix 毫秒。 |
+| 19 | format length | `u16` | `format` 的 UTF-8 字节数。 |
+| 21 | body length | `u32` | 正文的字节数。 |
+| 25 | variable data | bytes | `session_id`、`input_id`、`format`、正文，按此顺序连接。 |
 
 总长度必须严格等于：
 
 ```text
-24 + session_id_length + input_id_length + format_length + body_length
+25 + session_id_length + input_id_length + format_length + body_length
 ```
 
 `format` 是实际 wire format 描述，不绑定 Provider。音频可使用
@@ -88,7 +93,11 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 | `session_id` / `input_id` / `format` | 各 128 UTF-8 bytes |
 | audio body | 1,048,576 bytes |
 | image body | 4,194,304 bytes |
-| 完整 binary envelope | 4,194,712 bytes |
+| 完整 v2 binary envelope | 4,194,713 bytes |
+
+后端继续接受 v1 的 24 字节 header（`>4sBBHHQHI`）用于兼容已发布客户端。v1 audio
+统一映射为 `microphone`，v1 image 映射为无来源；新客户端只发送 v2。未知版本仍返回
+`unsupported_binary_version`。
 
 长度、magic、版本、类型或 UTF-8 不合法时，不得尝试把正文交给 ASR 或 FrameStore。
 应用层将错误映射为 `ingest.rejected` 并保持连接；只有同时违反 WebSocket 协议规则时

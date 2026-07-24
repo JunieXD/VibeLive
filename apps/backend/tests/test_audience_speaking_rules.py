@@ -8,6 +8,7 @@ from advx_backend.application.observation_wave_builder import select_frame_bundl
 from advx_backend.application.ports.asr import TranscriptSegment
 from advx_backend.application.reaction_scheduler import (
     LatestWinsReactionScheduler,
+    ReactionPreparationError,
     ReactionSchedulerConfig,
 )
 from advx_backend.application.reaction_service import ReactionResult
@@ -20,9 +21,11 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerGenerationRequest,
     ViewerGenerationResponse,
 )
+from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation import Observation
 from advx_backend.domain.observation_wave import (
+    MAX_FRAME_BUNDLE_SIZE,
     FrameBundle,
     FrameBundleItem,
     FrameBundleSettings,
@@ -70,6 +73,38 @@ class _BlockingExecutor:
         self.started.append(observation.observation_id)
         await self.release.wait()
         return ReactionResult(published_events=(), validations=())
+
+
+class _PreparationFailureExecutor:
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def react(self, observation: Observation) -> ReactionResult:
+        del observation
+        self.attempts += 1
+        try:
+            raise ValueError("frame metadata temporarily unavailable")
+        except ValueError as error:
+            raise ReactionPreparationError("preparation failed") from error
+
+
+class _FlakyHistorySummarizer:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
+    ) -> str:
+        del session_id, audience_epoch, existing_summary
+        self.calls.append(older_history)
+        if len(self.calls) == 1:
+            raise RuntimeError("temporary history summary failure")
+        return "已压缩的历史"
 
 
 class _Ids:
@@ -181,6 +216,82 @@ async def test_new_input_starts_without_waiting_for_an_earlier_wave() -> None:
 
 
 @pytest.mark.asyncio
+async def test_preparation_failure_retries_once_and_is_reported() -> None:
+    executor = _PreparationFailureExecutor()
+    reported: list[tuple[str, str]] = []
+
+    async def report(observation: Observation, error: Exception) -> None:
+        reported.append((observation.observation_id, type(error.__cause__).__name__))
+
+    scheduler = LatestWinsReactionScheduler(
+        executor=executor,
+        session_tasks=_SessionTasks(),
+        clock=_Clock(),
+        config=ReactionSchedulerConfig(preparation_retry_backoff_ms=0),
+        failure_reporter=report,
+    )
+
+    result = await scheduler.submit(
+        Observation(session_id="session", observation_id="failed", created_at_ms=1_000)
+    )
+
+    assert await result is None
+    assert executor.attempts == 2
+    assert reported == [("failed", "ValueError")]
+
+
+@pytest.mark.asyncio
+async def test_failed_history_compaction_retries_older_events_on_next_wave() -> None:
+    summarizer = _FlakyHistorySummarizer()
+    coordinator = ViewerRuntimeCoordinator(
+        runtime_state=object(),
+        viewer_runtime=object(),
+        history_summarizer=summarizer,
+    )
+    events = tuple(
+        RoomEvent(
+            event_id=f"event-{index}",
+            session_id="session",
+            sequence=index,
+            source_type="user_text",
+            source_id="host",
+            created_at_ms=index,
+            text=f"{index}:{'x' * 5_000}",
+        )
+        for index in range(1, 7)
+    )
+    observation = Observation(
+        session_id="session",
+        observation_id="observation",
+        created_at_ms=1_000,
+        room_events=events,
+    )
+    committed = SimpleNamespace(audience_epoch=1)
+
+    first_recent, first_summary = await coordinator._compact_history(
+        observation,
+        committed,
+    )
+    state = coordinator._conversation_history["session"]
+
+    assert first_summary is None
+    assert len(first_recent) < len(events)
+    assert state.covered_event_ids == set()
+
+    second_recent, second_summary = await coordinator._compact_history(
+        observation,
+        committed,
+    )
+
+    assert summarizer.calls[0] == summarizer.calls[1]
+    assert second_recent == first_recent
+    assert second_summary == "已压缩的历史"
+    assert state.covered_event_ids == {
+        event.event_id for event in events if event not in first_recent
+    }
+
+
+@pytest.mark.asyncio
 async def test_final_voice_sentences_share_one_turn_after_the_last_silence() -> None:
     room = _VoiceRoom()
     context = _VoiceContextBuilder()
@@ -240,22 +351,76 @@ def _frame(index: int, *, change_score: float) -> FrameBundleItem:
     )
 
 
-def test_smart_frame_timeline_keeps_anchors_and_caps_at_sixty() -> None:
-    frames = tuple(
-        _frame(index, change_score=0.7 if index in {15, 45, 75, 105} else 0.01)
-        for index in range(120)
+def test_change_peaks_collapses_consecutive_similar_frames_to_their_latest_frames() -> None:
+    frames = (
+        _frame(0, change_score=0.0),
+        _frame(1, change_score=0.01),
+        _frame(2, change_score=0.01),
+        _frame(3, change_score=0.25),
+        _frame(4, change_score=0.01),
+        _frame(5, change_score=0.01),
     )
     selected = select_frame_bundle(
         frames=frames,
-        settings=FrameBundleSettings(frame_bundle_size=60, frame_window_ms=120_000),
-        now_ms=119_000,
+        settings=FrameBundleSettings(frame_bundle_size=15, frame_window_ms=120_000),
+        now_ms=5_000,
     )
 
-    selected_times = {frame.captured_at_ms for frame in selected}
-    assert len(selected) <= 60
-    assert selected == tuple(sorted(selected, key=lambda frame: frame.captured_at_ms))
-    assert {0, 5_000, 10_000, 15_000}.issubset(selected_times)
-    assert {15_000, 45_000, 75_000, 105_000}.issubset(selected_times)
+    assert [frame.frame_id for frame in selected] == ["frame-2", "frame-5"]
+
+
+def test_change_peaks_caps_distinct_frame_groups_without_refilling_similar_frames() -> None:
+    frames = tuple(
+        _frame(index, change_score=0.25 if index else 0.0)
+        for index in range(6)
+    )
+    selected = select_frame_bundle(
+        frames=frames,
+        settings=FrameBundleSettings(frame_bundle_size=3, frame_window_ms=120_000),
+        now_ms=5_000,
+    )
+
+    assert [frame.frame_id for frame in selected] == ["frame-0", "frame-2", "frame-5"]
+
+
+def test_autonomous_wave_accepts_evidence_for_every_frame_in_a_maximum_bundle() -> None:
+    frames = [_frame(index, change_score=0.5) for index in range(MAX_FRAME_BUNDLE_SIZE)]
+    wave = ObservationWave(
+        room_id="room",
+        session_id="session",
+        audience_epoch=1,
+        observation_id="observation",
+        created_at_ms=1_000,
+        deadline_at_ms=10_000,
+        triggers=[ObservationTrigger.USER_TEXT],
+        frame_bundle=FrameBundle(
+            bundle_id="bundle",
+            settings=FrameBundleSettings(frame_bundle_size=MAX_FRAME_BUNDLE_SIZE),
+            frames=frames,
+        ),
+    )
+    committed = SimpleNamespace(pool=SimpleNamespace(viewers=[]))
+    coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
+
+    assessment = coordinator._independent_assessment(wave, committed)
+    decision = coordinator._decide_speakers(wave=wave, committed=committed)
+    meme_candidate = MemeCandidate(
+        candidate_id="candidate",
+        room_id="room",
+        session_id="session",
+        audience_epoch=1,
+        observation_id="observation",
+        namespace_id="namespace",
+        text="meme",
+        evidence_event_ids=["event"],
+        evidence_frame_indexes=list(range(MAX_FRAME_BUNDLE_SIZE)),
+        created_at_ms=1_000,
+    )
+
+    expected_indexes = list(range(MAX_FRAME_BUNDLE_SIZE))
+    assert assessment.evidence_frame_indexes == expected_indexes
+    assert decision.evidence_frame_indexes == expected_indexes
+    assert meme_candidate.evidence_frame_indexes == expected_indexes
 
 
 @pytest.mark.asyncio
@@ -339,7 +504,7 @@ def _request() -> ViewerGenerationRequest:
         visual_input_mode=ViewerVisualInputMode.DIRECT_FRAMES,
         frame_bundle=FrameBundle(
             bundle_id="bundle",
-            settings=FrameBundleSettings(frame_bundle_size=60),
+            settings=FrameBundleSettings(frame_bundle_size=15),
             frames=[frame],
         ),
         viewer_private_state=ViewerPrivateState(),

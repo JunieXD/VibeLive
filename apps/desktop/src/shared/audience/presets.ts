@@ -211,7 +211,7 @@ function createMode(
 
 export const DEFAULT_VISUAL_SETTINGS: AudienceVisualSettings = {
   viewerVisualInputMode: 'direct_frames',
-  frameBundleSize: 60,
+  frameBundleSize: 15,
   frameWindowMs: 120_000,
   frameSelectionStrategy: 'change_peaks',
   frameMaxDimension: 1280,

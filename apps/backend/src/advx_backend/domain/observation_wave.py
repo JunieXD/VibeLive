@@ -2,6 +2,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+MAX_FRAME_BUNDLE_SIZE = 15
+
 
 class ObservationDomainModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -27,7 +29,11 @@ class ObservationTrigger(StrEnum):
 
 
 class FrameBundleSettings(ObservationDomainModel):
-    frame_bundle_size: int = Field(default=60, ge=1, le=60)
+    frame_bundle_size: int = Field(
+        default=MAX_FRAME_BUNDLE_SIZE,
+        ge=1,
+        le=MAX_FRAME_BUNDLE_SIZE,
+    )
     frame_window_ms: int = Field(default=120_000, ge=1)
     frame_selection_strategy: FrameSelectionStrategy = FrameSelectionStrategy.CHANGE_PEAKS
     frame_max_dimension: int = Field(default=1280, ge=64, le=8192)
@@ -51,7 +57,7 @@ class FrameBundleItem(ObservationDomainModel):
 class FrameBundle(ObservationDomainModel):
     bundle_id: str = Field(min_length=1, max_length=128)
     settings: FrameBundleSettings
-    frames: list[FrameBundleItem] = Field(min_length=1, max_length=60)
+    frames: list[FrameBundleItem] = Field(min_length=1, max_length=MAX_FRAME_BUNDLE_SIZE)
 
     @model_validator(mode="after")
     def validate_frames(self) -> "FrameBundle":

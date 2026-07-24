@@ -3,8 +3,6 @@ import base64
 import json
 import math
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from typing import Final, cast
 from urllib.parse import quote, urlsplit
 
@@ -23,6 +21,7 @@ from advx_backend.providers.model.base import (
     CapabilityProbeResult,
     CapabilityProbeStatus,
 )
+from advx_backend.providers.retry_after import parse_retry_after_seconds
 
 
 class OpenAICompatibleProviderError(RuntimeError):
@@ -111,33 +110,9 @@ class OpenAICompatibleConfig:
 _SYSTEM_PROMPT: Final = (
     "Generate concise audience barrage candidates for a live room. "
     "Use only audience_id values supplied in the input. "
-    "Return only the JSON object required by the response schema."
+    "Return exactly one JSON object, with no Markdown or prose. "
+    'Use this shape: {"candidates":[{"audience_id":"audience-id","text":"弹幕内容"}]}.'
 )
-_CANDIDATE_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["candidates"],
-    "properties": {
-        "candidates": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["audience_id", "text"],
-                "properties": {
-                    "audience_id": {"type": "string", "minLength": 1},
-                    "text": {"type": "string", "minLength": 1, "maxLength": 200},
-                },
-            },
-        },
-    },
-}
-_PROBE_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["ok"],
-    "properties": {"ok": {"type": "boolean", "const": True}},
-}
 _PROBE_IMAGE: Final = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAaklEQVR4nO3PAQ2AMADAsMtB"
@@ -147,6 +122,20 @@ _PROBE_IMAGE: Final = (
 )
 _BLOCKING_HTTP_STATUSES: Final = frozenset({401, 402, 403, 408, 429})
 _PROBE_OUTPUT_TOKEN_BUDGET: Final = 4_096
+_STEPFUN_API_HOST: Final = "api.stepfun.com"
+_STEPFUN_REASONING_MODEL: Final = "step-3.7-flash"
+JSON_MODE_RESPONSE_FORMAT: Final = {"type": "json_object"}
+
+
+def default_reasoning_options(base_url: str, model_id: str) -> dict[str, str]:
+    """Return supported low-latency defaults for known reasoning endpoints."""
+
+    if (
+        urlsplit(base_url).hostname == _STEPFUN_API_HOST
+        and model_id.strip() == _STEPFUN_REASONING_MODEL
+    ):
+        return {"reasoning_effort": "low"}
+    return {}
 
 
 class OpenAICompatibleProvider:
@@ -222,7 +211,7 @@ class OpenAICompatibleProvider:
         structured_checks = await asyncio.gather(
             *(
                 self._probe_chat(
-                    capability=f"{role}_structured_output",
+                    capability=f"{role}_json_output",
                     model_id=role_models[role],
                 )
                 for role in structured_roles
@@ -286,6 +275,23 @@ class OpenAICompatibleProvider:
             status=self._overall_status(checks),
             discovered_model_ids=discovered_model_ids,
             checks=checks,
+        )
+
+    async def probe_startup_capabilities(
+        self,
+        *,
+        role_models: dict[str, str],
+    ) -> CapabilityProbeResult:
+        """Verify the active Viewer model with one request before a live session starts."""
+
+        viewer_check = await self._probe_chat(
+            capability="viewer_json_output",
+            model_id=role_models["viewer"],
+        )
+        return CapabilityProbeResult(
+            status=viewer_check.status,
+            discovered_model_ids=(),
+            checks=(viewer_check,),
         )
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
@@ -378,7 +384,7 @@ class OpenAICompatibleProvider:
         if image_parts:
             content = [{"type": "text", "text": context_text}, *image_parts]
 
-        return {
+        payload: dict[str, object] = {
             "model": self.config.model,
             "messages": [
                 {"role": "system", "content": _SYSTEM_PROMPT},
@@ -386,15 +392,10 @@ class OpenAICompatibleProvider:
             ],
             "stream": False,
             "n": 1,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "barrage_candidates",
-                    "strict": True,
-                    "schema": _CANDIDATE_SCHEMA,
-                },
-            },
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
         }
+        payload.update(default_reasoning_options(self.config.base_url, self.config.model))
+        return payload
 
     async def _image_parts(
         self,
@@ -443,8 +444,31 @@ class OpenAICompatibleProvider:
         if payload is not None:
             headers["Content-Type"] = "application/json"
 
+        response = await self._request(method, url, headers=headers, payload=payload)
+
+        if self._should_fallback_from_json_mode(response, payload):
+            fallback_payload = dict(payload)
+            fallback_payload.pop("response_format", None)
+            response = await self._request(method, url, headers=headers, payload=fallback_payload)
+
+        if not response.is_success:
+            raise OpenAICompatibleHttpError(
+                response.status_code,
+                retry_after_seconds=self._retry_after_seconds(response.headers.get("Retry-After")),
+                response=response,
+            )
+        return response
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str],
+        payload: dict[str, object] | None,
+    ) -> httpx.Response:
         try:
-            response = await self._client.request(
+            return await self._client.request(
                 method,
                 url,
                 headers=headers,
@@ -456,34 +480,26 @@ class OpenAICompatibleProvider:
         except (httpx.HTTPError, RuntimeError):
             raise OpenAICompatibleTransportError("OpenAI-compatible transport failed") from None
 
-        if not response.is_success:
-            raise OpenAICompatibleHttpError(
-                response.status_code,
-                retry_after_seconds=self._retry_after_seconds(response.headers.get("Retry-After")),
-                response=response,
-            )
-        return response
+    @staticmethod
+    def _should_fallback_from_json_mode(
+        response: httpx.Response,
+        payload: dict[str, object] | None,
+    ) -> bool:
+        if response.status_code != 400 or payload is None:
+            return False
+        if payload.get("response_format") != JSON_MODE_RESPONSE_FORMAT:
+            return False
+        try:
+            detail = response.text.lower()
+        except (UnicodeDecodeError, httpx.HTTPError):
+            return False
+        return "response_format" in detail and (
+            "json_object" in detail or "json mode" in detail
+        )
 
     @staticmethod
     def _retry_after_seconds(value: str | None) -> float | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value:
-            return None
-        try:
-            seconds = float(value)
-        except ValueError:
-            try:
-                retry_at = parsedate_to_datetime(value)
-            except (TypeError, ValueError, IndexError, OverflowError):
-                return None
-            if retry_at.tzinfo is None:
-                retry_at = retry_at.replace(tzinfo=UTC)
-            seconds = (retry_at - datetime.now(UTC)).total_seconds()
-        if not math.isfinite(seconds) or seconds < 0:
-            return None
-        return seconds
+        return parse_retry_after_seconds(value)
 
     async def _probe_chat(
         self,
@@ -492,10 +508,17 @@ class OpenAICompatibleProvider:
         model_id: str,
         include_image: bool = False,
     ) -> CapabilityProbeCheck:
-        content: str | list[dict[str, object]] = 'Return {"ok":true}.'
+        content: str | list[dict[str, object]] = (
+            'Return exactly this JSON object and no Markdown or prose: {"ok":true}.'
+        )
         if include_image:
             content = [
-                {"type": "text", "text": 'Return {"ok":true}.'},
+                {
+                    "type": "text",
+                    "text": (
+                        'Return exactly this JSON object and no Markdown or prose: {"ok":true}.'
+                    ),
+                },
                 {"type": "image_url", "image_url": {"url": _PROBE_IMAGE}},
             ]
         payload = {
@@ -503,18 +526,12 @@ class OpenAICompatibleProvider:
             "messages": [{"role": "user", "content": content}],
             "stream": False,
             "n": 1,
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
             # Match the production role budget so reasoning-capable multimodal
             # models can finish before emitting the tiny structured response.
             "max_tokens": _PROBE_OUTPUT_TOKEN_BUDGET,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "capability_probe",
-                    "strict": True,
-                    "schema": _PROBE_SCHEMA,
-                },
-            },
         }
+        payload.update(default_reasoning_options(self.config.base_url, model_id))
         try:
             response = await self._send(
                 "POST",
@@ -612,6 +629,14 @@ class OpenAICompatibleProvider:
         choice = choices[0]
         if not isinstance(choice, dict):
             raise OpenAICompatibleProtocolError("response choice must be an object")
+        finish_reason = choice.get("finish_reason")
+        if finish_reason == "length":
+            raise OpenAICompatibleProtocolError(
+                "response exhausted its output token budget",
+                error_code="output_token_limit",
+            )
+        if finish_reason not in {None, "stop"}:
+            raise OpenAICompatibleProtocolError("response did not finish normally")
         message = choice.get("message")
         if not isinstance(message, dict):
             raise OpenAICompatibleProtocolError("response choice must contain a message object")

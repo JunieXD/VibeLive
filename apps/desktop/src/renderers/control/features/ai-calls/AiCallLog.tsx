@@ -77,6 +77,14 @@ function JsonBlock({ value }: { value: unknown }): React.JSX.Element {
   )
 }
 
+function viewerDecisionReason(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const response = value as Record<string, unknown>
+  if (response.action !== 'barrage' && response.action !== 'silence') return null
+  const reason = response.decision_reason
+  return typeof reason === 'string' && reason.trim() ? reason.trim() : '模型未提供'
+}
+
 function EmptyDetail(): React.JSX.Element {
   return (
     <div className="grid h-full min-h-64 place-items-center px-8 text-center">
@@ -91,6 +99,7 @@ function EmptyDetail(): React.JSX.Element {
 function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
   const correlations = collectCorrelationIds(trace)
   const timeline = trace.timeline ?? []
+  const decisionReason = viewerDecisionReason(trace.response?.parsed_output)
   const [copied, setCopied] = useState(false)
 
   async function copyTrace(): Promise<void> {
@@ -192,6 +201,23 @@ function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
           <Metric label="响应字节" value={trace.response?.body_bytes ?? '—'} />
           <Metric label="总 Token" value={trace.response?.total_tokens ?? '—'} />
         </div>
+        {decisionReason && (
+          <div className="border-b border-[var(--border)] px-4 py-3">
+            <span className="block text-[10px] font-bold uppercase text-[var(--text-faint)]">
+              决策原因
+            </span>
+            <p className="mb-0 mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-[var(--text)]">
+              {decisionReason}
+            </p>
+          </div>
+        )}
+        <h3 className="m-0 border-b border-[var(--border)] px-4 py-2 text-[11px] font-bold text-[var(--text-dim)]">
+          模型原始内容
+        </h3>
+        <JsonBlock value={trace.response?.model_output} />
+        <h3 className="m-0 border-y border-[var(--border)] px-4 py-2 text-[11px] font-bold text-[var(--text-dim)]">
+          解析结果
+        </h3>
         <JsonBlock value={trace.response?.parsed_output} />
       </section>
 

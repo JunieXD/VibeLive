@@ -386,6 +386,7 @@ def build_http_response_summary(
     response: httpx.Response,
     *,
     include_body_digest: bool = True,
+    include_model_output: bool = False,
 ) -> AiCallResponseSummary:
     body = response.content if include_body_digest else b""
     payload: object = None
@@ -399,12 +400,18 @@ def build_http_response_summary(
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
+    model_output: str | None = None
     if isinstance(payload, dict):
         choices = payload.get("choices")
         if isinstance(choices, list) and choices and isinstance(choices[0], dict):
             raw_finish_reason = choices[0].get("finish_reason")
             if isinstance(raw_finish_reason, str) and raw_finish_reason:
                 finish_reason = raw_finish_reason[:128]
+            if include_model_output:
+                message = choices[0].get("message")
+                content = message.get("content") if isinstance(message, dict) else None
+                if isinstance(content, str):
+                    model_output = content
         usage = payload.get("usage")
         if isinstance(usage, dict):
             input_tokens = _non_negative_int(usage.get("prompt_tokens", usage.get("input_tokens")))
@@ -421,6 +428,7 @@ def build_http_response_summary(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
+        model_output=model_output,
     )
 
 

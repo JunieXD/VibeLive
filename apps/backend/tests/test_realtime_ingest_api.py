@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from advx_backend.application.ingest_service import IngestSessionNotActiveError
+from advx_backend.application.ports.asr import AudioSource
 from advx_backend.application.ports.ingest import (
     AudioCommit,
     AudioInput,
@@ -17,6 +20,7 @@ from advx_backend.contracts.binary import (
     BinaryEnvelopeHeader,
     BinaryInputEnvelope,
     BinaryMediaType,
+    decode_binary_envelope,
     encode_binary_envelope,
 )
 from advx_backend.main import create_app
@@ -38,11 +42,15 @@ def envelope(
     input_id: str,
     format_value: str,
     body: bytes,
+    source: AudioSource | None = None,
+    version: int = 2,
 ) -> bytes:
     return encode_binary_envelope(
         BinaryInputEnvelope(
             header=BinaryEnvelopeHeader(
                 media_type=media_type,
+                source=source,
+                version=version,
                 session_id="session-1",
                 input_id=input_id,
                 captured_at_ms=100,
@@ -142,6 +150,92 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
     assert ingest.inputs[2].body == frame_body
     assert ingest.inputs[2].mime_type == "image/webp"
     assert ingest.inputs[2].change_score == 0.375
+
+
+def test_binary_v2_source_and_v1_compatibility() -> None:
+    system_audio = decode_binary_envelope(
+        envelope(
+            media_type=BinaryMediaType.AUDIO,
+            input_id="system-audio",
+            format_value="audio/pcm;rate=16000;channels=1;format=s16le",
+            body=b"\x00\x00",
+            source=AudioSource.SYSTEM_AUDIO,
+        )
+    )
+    legacy_audio = decode_binary_envelope(
+        envelope(
+            media_type=BinaryMediaType.AUDIO,
+            input_id="legacy-audio",
+            format_value="audio/pcm;rate=16000;channels=1;format=s16le",
+            body=b"\x00\x00",
+            version=1,
+        )
+    )
+    legacy_image = decode_binary_envelope(
+        envelope(
+            media_type=BinaryMediaType.IMAGE,
+            input_id="legacy-image",
+            format_value="image/webp",
+            body=b"image",
+            version=1,
+        )
+    )
+
+    assert system_audio.header.source is AudioSource.SYSTEM_AUDIO
+    assert legacy_audio.header.source is AudioSource.MICROPHONE
+    assert legacy_image.header.source is None
+
+
+def test_binary_v1_rejects_system_audio_source() -> None:
+    with pytest.raises(ValidationError, match="v1 only supports microphone"):
+        BinaryEnvelopeHeader(
+            version=1,
+            media_type=BinaryMediaType.AUDIO,
+            source=AudioSource.SYSTEM_AUDIO,
+            session_id="session-1",
+            input_id="system-audio",
+            captured_at_ms=100,
+            format="audio/pcm;rate=16000;channels=1;format=s16le",
+            body_length=2,
+        )
+
+
+def test_realtime_forwards_system_audio_source_to_ingest(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
+    ingest = RecordingIngestPort()
+    runtime.ingest_gateway.configure(ingest)
+    app = create_app(runtime=runtime)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.send_json(hello())
+            websocket.receive_json()
+            websocket.send_bytes(
+                envelope(
+                    media_type=BinaryMediaType.AUDIO,
+                    input_id="system-1",
+                    format_value="audio/pcm;rate=16000;channels=1;format=s16le",
+                    body=b"\x00\x00",
+                    source=AudioSource.SYSTEM_AUDIO,
+                )
+            )
+            websocket.receive_json()
+            websocket.send_json(
+                {
+                    "type": "client.audio.commit",
+                    "protocol_version": 3,
+                    "session_id": "session-1",
+                    "input_id": "system-1",
+                    "committed_at_ms": 101,
+                    "source": "system_audio",
+                }
+            )
+            websocket.receive_json()
+
+    assert isinstance(ingest.inputs[0], AudioInput)
+    assert ingest.inputs[0].source is AudioSource.SYSTEM_AUDIO
+    assert isinstance(ingest.inputs[1], AudioCommit)
+    assert ingest.inputs[1].source is AudioSource.SYSTEM_AUDIO
 
 
 def test_realtime_forwards_text_target(tmp_path: Path) -> None:

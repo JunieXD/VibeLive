@@ -109,7 +109,7 @@ class CanonicalRuntimeSpec(RuntimeContractModel):
         return self
 
     def canonical_json(self) -> str:
-        return _canonical_json(self.model_dump(mode="json"))
+        return _canonical_json(self.model_dump(mode="json", exclude_none=True))
 
     def config_hash(self) -> str:
         return hashlib.sha256(self.canonical_json().encode("utf-8")).hexdigest()
@@ -385,6 +385,7 @@ class ViewerGenerationResponse(RuntimeContractModel):
     target: ViewerReactionTarget | None = None
     text: str | None = Field(default=None, min_length=1, max_length=4_000)
     reaction_type: str = Field(min_length=1, max_length=64)
+    decision_reason: str | None = Field(default=None, min_length=1, max_length=160)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
 
     @model_validator(mode="after")
