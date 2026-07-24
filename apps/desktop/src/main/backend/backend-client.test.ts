@@ -173,6 +173,41 @@ describe("BackendClient runtime v2", () => {
     fetchMock.mockRestore();
   });
 
+  it("uses a probe timeout that covers every bounded upstream phase", async () => {
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockReturnValue(new AbortController().signal);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    const client = new BackendClient({ baseUrl: "http://127.0.0.1:9999", localToken: "token" });
+
+    try {
+      await client.probeProvider();
+      expect(timeoutSpy).toHaveBeenCalledWith(130_000);
+    } finally {
+      fetchMock.mockRestore();
+      timeoutSpy.mockRestore();
+    }
+  });
+
+  it("reports provider probe timeouts without claiming the backend is unavailable", async () => {
+    const timeoutError = new Error("The operation was aborted due to timeout");
+    timeoutError.name = "TimeoutError";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(timeoutError);
+    const client = new BackendClient({ baseUrl: "http://127.0.0.1:9999", localToken: "token" });
+
+    try {
+      await expect(client.probeProvider()).rejects.toMatchObject({
+        name: "BackendClientError",
+        code: "provider_probe_timeout",
+        message: "Provider 能力探测超时，请检查上游服务连接。"
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("keeps the last runtime session as an explicit recovery candidate after restart", () => {
     const client = new BackendClient({ localToken: "token" });
     const bridge = client as unknown as {

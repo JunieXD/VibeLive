@@ -37,6 +37,14 @@ const PROTOCOL_VERSION = 2;
 const PROTOCOL_HEADER = "X-ADVX-Protocol-Version";
 const INGEST_ACK_TIMEOUT_MS = 10_000;
 const CONNECT_TIMEOUT_MS = 8_000;
+// The probe has four sequential upstream phases, each bounded at 30 seconds.
+const PROVIDER_PROBE_TIMEOUT_MS = 130_000;
+
+type RequestOptions = {
+  timeoutMs?: number;
+  timeoutCode?: string;
+  timeoutMessage?: string;
+};
 
 type PendingIngest = {
   resolve: () => void;
@@ -305,7 +313,11 @@ export class BackendClient {
   }
 
   async probeProvider(): Promise<ProviderProbeResult> {
-    return this.request("/configuration/providers/probe", "POST");
+    return this.request("/configuration/providers/probe", "POST", undefined, {
+      timeoutMs: PROVIDER_PROBE_TIMEOUT_MS,
+      timeoutCode: "provider_probe_timeout",
+      timeoutMessage: "Provider 能力探测超时，请检查上游服务连接。"
+    });
   }
 
   async queryDebugTraces(
@@ -585,7 +597,12 @@ export class BackendClient {
     this.applySession(await this.request<SessionSnapshot>("/sessions/current", "GET"));
   }
 
-  private async request<T = unknown>(path: string, method: string, body?: object): Promise<T> {
+  private async request<T = unknown>(
+    path: string,
+    method: string,
+    body?: object,
+    options: RequestOptions = {}
+  ): Promise<T> {
     this.requireLocalToken();
     let response: Response;
     try {
@@ -597,9 +614,15 @@ export class BackendClient {
           ...(body ? { "Content-Type": "application/json" } : {})
         },
         body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(CONNECT_TIMEOUT_MS)
+        signal: AbortSignal.timeout(options.timeoutMs ?? CONNECT_TIMEOUT_MS)
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new BackendClientError(
+          options.timeoutCode ?? "backend_timeout",
+          options.timeoutMessage ?? "本地后端响应超时。"
+        );
+      }
       throw new BackendClientError("backend_unavailable", "本地后端暂时不可用。");
     }
     if (!response.ok) {
