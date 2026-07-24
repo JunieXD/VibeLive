@@ -41,10 +41,10 @@ def test_openapi_includes_http_and_realtime_contracts() -> None:
         if parameter["name"] == "X-ADVX-Protocol-Version"
     )
     assert version_header["required"] is True
-    assert version_header["schema"]["const"] == "2"
+    assert version_header["schema"]["const"] == "3"
     assert schema["x-advx-realtime"] == {
         "path": "/ws",
-        "protocolVersion": 2,
+        "protocolVersion": 3,
         "clientMessage": {
             "$ref": "#/components/schemas/ClientMessageEnvelope",
         },

@@ -37,10 +37,10 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerAction,
     ViewerGenerationResponse,
 )
-from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemoryType
 from advx_backend.domain.observation_wave import ViewerVisualInputMode
+from advx_backend.domain.scene_assessment import SceneAssessment
 from advx_backend.providers.model.viewer_runtime import ViewerRuntimeProtocolError
 
 _PNG_FRAME = (
@@ -186,30 +186,34 @@ class _RecordedViewerProvider:
         self.director_calls += 1
         director = self._ledger.consume("director")
         wave = request.wave
-        selected = list(request.viewer_ids[: min(1, request.maximum)])
-        requested = director.get("selected_viewer_ids")
-        if isinstance(requested, list):
-            valid = [item for item in requested if item in request.viewer_ids]
-            if valid:
-                selected = valid[: request.maximum]
         event_ids = list(wave.event_ids[:1])
         frame_indexes = (
             [0]
             if wave.frame_bundle is not None and wave.frame_bundle.frames
             else []
         )
-        decision = CrowdDecision(
-            decision_id=str(
+        assessment = SceneAssessment(
+            assessment_id=str(
                 director.get(
-                    "decision_id",
-                    f"recorded-decision-{self.director_calls}",
+                    "assessment_id",
+                    f"recorded-assessment-{self.director_calls}",
                 )
             ),
             room_id=wave.room_id,
             session_id=wave.session_id,
             audience_epoch=wave.audience_epoch,
             observation_id=wave.observation_id,
-            selected_viewer_ids=selected,
+            salience=float(director.get("salience", 0.9)),
+            novelty=float(director.get("novelty", 0.9)),
+            emotional_intensity=float(
+                director.get("emotional_intensity", 0.8)
+            ),
+            topics=[str(item) for item in director.get("topics", ["cs2"])],
+            emotional_tone=[
+                str(item)
+                for item in director.get("emotional_tone", ["excited"])
+            ],
+            replyable_event_ids=event_ids,
             reason_codes=[
                 str(item)
                 for item in director.get(
@@ -219,11 +223,15 @@ class _RecordedViewerProvider:
             ],
             evidence_event_ids=event_ids,
             evidence_frame_indexes=frame_indexes,
+            maximum_responses=min(
+                request.maximum,
+                int(director.get("maximum_responses", request.maximum)),
+            ),
             created_at_ms=wave.created_at_ms,
             expires_at_ms=wave.deadline_at_ms,
         )
         if not event_ids:
-            return decision
+            return assessment
         mode = next(
             item
             for item in request.runtime.canonical_runtime_spec.modes
@@ -232,7 +240,7 @@ class _RecordedViewerProvider:
         from advx_backend.application.director_service import DirectorOutcome
 
         return DirectorOutcome(
-            decision=decision,
+            assessment=assessment,
             meme_candidate=MemeCandidate(
                 candidate_id=f"recorded-meme-{self.director_calls}",
                 room_id=wave.room_id,
@@ -316,6 +324,8 @@ class _RecordedMemoryExtractor:
         if not events:
             return ()
         raw_candidates = output.get("candidates")
+        if raw_candidates == []:
+            return ()
         raw = (
             raw_candidates[0]
             if isinstance(raw_candidates, list) and raw_candidates

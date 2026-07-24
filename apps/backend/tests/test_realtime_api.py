@@ -20,7 +20,7 @@ from advx_backend.main import create_app
 LOCAL_TOKEN = "test-local-token"
 
 
-def hello(*, token: str = LOCAL_TOKEN, protocol_version: int = 2) -> dict[str, object]:
+def hello(*, token: str = LOCAL_TOKEN, protocol_version: int = 3) -> dict[str, object]:
     return {
         "type": "client.hello",
         "protocol_version": protocol_version,
@@ -31,12 +31,12 @@ def hello(*, token: str = LOCAL_TOKEN, protocol_version: int = 2) -> dict[str, o
 def request_headers() -> dict[str, str]:
     return {
         "Authorization": f"Bearer {LOCAL_TOKEN}",
-        PROTOCOL_VERSION_HEADER: "2",
+        PROTOCOL_VERSION_HEADER: "3",
     }
 
 
 def test_client_hello_does_not_reveal_local_token() -> None:
-    message = ClientHello(protocol_version=2, token=LOCAL_TOKEN)
+    message = ClientHello(protocol_version=3, token=LOCAL_TOKEN)
 
     assert LOCAL_TOKEN not in repr(message)
 
@@ -49,19 +49,19 @@ def test_realtime_handshake_stays_open_and_answers_ping(tmp_path: Path) -> None:
             websocket.send_json(hello())
             ready = websocket.receive_json()
             assert ready["type"] == "backend.ready"
-            assert ready["protocol_version"] == 2
+            assert ready["protocol_version"] == 3
             assert ready["session"]["state"] == "idle"
 
             websocket.send_json(
                 {
                     "type": "client.ping",
-                    "protocol_version": 2,
+                    "protocol_version": 3,
                     "request_id": "ping-1",
                 }
             )
             assert websocket.receive_json() == {
                 "type": "backend.pong",
-                "protocol_version": 2,
+                "protocol_version": 3,
                 "request_id": "ping-1",
             }
 
@@ -123,7 +123,7 @@ def test_realtime_rejects_messages_outside_the_schema(tmp_path: Path) -> None:
             websocket.send_json(
                 {
                     "type": "client.unknown",
-                    "protocol_version": 2,
+                    "protocol_version": 3,
                 }
             )
             error = websocket.receive_json()
@@ -151,10 +151,10 @@ def test_realtime_rejects_v1_after_a_successful_v2_handshake(tmp_path: Path) -> 
             error = websocket.receive_json()
             assert error == {
                 "type": "protocol.error",
-                "protocol_version": 2,
+                "protocol_version": 3,
                 "code": "version_mismatch",
                 "message": "The requested protocol version is not supported.",
-                "supported_version": 2,
+                "supported_version": 3,
             }
             with pytest.raises(WebSocketDisconnect) as disconnect:
                 websocket.receive_json()
@@ -218,7 +218,7 @@ def test_realtime_forwards_validated_barrage_events(tmp_path: Path) -> None:
 
     assert message == {
         "type": "barrage.event",
-        "protocol_version": 2,
+        "protocol_version": 3,
         "barrage": {
             "barrage_id": "barrage-1",
             "room_id": "room-1",
@@ -231,6 +231,8 @@ def test_realtime_forwards_validated_barrage_events(tmp_path: Path) -> None:
             "display_name": "Viewer One",
             "viewer_sequence": 1,
             "reaction_type": "reply",
+            "intent": "react_to_scene",
+            "target": None,
             "evidence_refs": [
                 {
                     "source": "event",

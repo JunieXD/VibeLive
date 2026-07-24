@@ -76,7 +76,7 @@ export function canonicalModeContent(mode: AudienceMode): string {
     name: mode.name,
     description: mode.description,
     built_in: mode.builtIn,
-    viewer_count: mode.viewerCount,
+    target_concurrent_viewers: mode.targetConcurrentViewers,
     persona_ids: [...mode.personaIds],
     persona_weights: Object.fromEntries(
       mode.personaIds.map((personaId) => [personaId, mode.personaWeights[personaId]])

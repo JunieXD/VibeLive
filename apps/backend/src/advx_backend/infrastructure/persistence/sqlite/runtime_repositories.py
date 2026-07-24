@@ -60,6 +60,26 @@ class ViewerInstance:
     created_epoch: int
     removed_epoch: int | None = None
     state: str = "active"
+    username: str = ""
+    avatar_seed: str = ""
+    color_seed: str = ""
+    locale: str = "zh-CN"
+    persona_content_hash: str = "0" * 64
+    presence_state: str = "active"
+    presence_revision: int = 1
+    moderation_revision: int = 1
+    behavior_revision: int = 1
+    joined_at_ms: int | None = None
+    last_left_at_ms: int | None = None
+    join_count: int = 0
+    muted_until_ms: int | None = None
+    mute_reason: str | None = None
+    kicked_at_ms: int | None = None
+    kick_reason: str | None = None
+    viewer_sequence: int = 0
+    behavior_state_json: str = "{}"
+    created_at_ms: int = 0
+    updated_at_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -152,6 +172,8 @@ class SQLiteSessionRuntimeRepository:
         canonical_spec_json: str,
         diff_summary_json: str,
         app_version: str,
+        session_seed: str,
+        target_concurrent_viewers: int,
         now_ms: int,
     ) -> tuple[SessionRecordRow, bool]:
         existing = await self.get_idempotent_start(
@@ -168,6 +190,11 @@ class SQLiteSessionRuntimeRepository:
                 audience_epoch=0,
                 active_config_hash=None,
                 recovery_json=canonical_json({}),
+                session_seed=session_seed,
+                next_creation_ordinal=target_concurrent_viewers + 1,
+                target_concurrent_viewers=target_concurrent_viewers,
+                population_revision=1,
+                controller_state_json=canonical_json({}),
                 client_request_id=client_request_id,
                 client_request_hash=request_hash,
                 started_at_ms=now_ms,
@@ -265,6 +292,10 @@ class SQLiteSessionRuntimeRepository:
         *,
         expected_base_revision: int,
         next_epoch: int,
+        expected_population_revision: int,
+        next_population_revision: int,
+        target_concurrent_viewers: int,
+        next_creation_ordinal: int,
         now_ms: int,
         recovery: Any | None = None,
     ) -> RuntimeRevision:
@@ -290,6 +321,12 @@ class SQLiteSessionRuntimeRepository:
         record_values: dict[str, Any] = {
             "state": "running",
             "audience_epoch": next_epoch,
+            "population_revision": next_population_revision,
+            "target_concurrent_viewers": target_concurrent_viewers,
+            "next_creation_ordinal": func.max(
+                SessionRecordRow.next_creation_ordinal,
+                next_creation_ordinal,
+            ),
             "active_config_hash": row.config_hash,
             "recovery_json": canonical_json({} if recovery is None else recovery),
         }
@@ -300,6 +337,7 @@ class SQLiteSessionRuntimeRepository:
             .where(
                 SessionRecordRow.session_id == session_id,
                 SessionRecordRow.audience_epoch < next_epoch,
+                SessionRecordRow.population_revision == expected_population_revision,
             )
             .values(**record_values)
         )
@@ -376,6 +414,26 @@ class SQLiteViewerInstanceRepository:
                     ordinal=item.ordinal,
                     display_name=item.display_name,
                     micro_variant_json=item.micro_variant_json,
+                    username=item.username,
+                    avatar_seed=item.avatar_seed,
+                    color_seed=item.color_seed,
+                    locale=item.locale,
+                    persona_content_hash=item.persona_content_hash,
+                    presence_state=item.presence_state,
+                    presence_revision=item.presence_revision,
+                    moderation_revision=item.moderation_revision,
+                    behavior_revision=item.behavior_revision,
+                    joined_at_ms=item.joined_at_ms,
+                    last_left_at_ms=item.last_left_at_ms,
+                    join_count=item.join_count,
+                    muted_until_ms=item.muted_until_ms,
+                    mute_reason=item.mute_reason,
+                    kicked_at_ms=item.kicked_at_ms,
+                    kick_reason=item.kick_reason,
+                    viewer_sequence=item.viewer_sequence,
+                    behavior_state_json=item.behavior_state_json,
+                    created_at_ms=item.created_at_ms,
+                    updated_at_ms=item.updated_at_ms,
                     created_epoch=item.created_epoch,
                     removed_epoch=item.removed_epoch,
                     state=item.state,
@@ -414,7 +472,11 @@ class SQLiteViewerInstanceRepository:
                 SessionViewerInstanceRow.viewer_instance_id == viewer_instance_id,
                 SessionViewerInstanceRow.state == "active",
             )
-            .values(state="removed", removed_epoch=removed_epoch)
+            .values(
+                state="removed",
+                presence_state="removed",
+                removed_epoch=removed_epoch,
+            )
         )
         if result.rowcount != 1:
             raise RuntimePersistenceConflictError("viewer instance is missing or already removed")
@@ -773,6 +835,26 @@ def _to_viewer(row: SessionViewerInstanceRow) -> ViewerInstance:
         created_epoch=row.created_epoch,
         removed_epoch=row.removed_epoch,
         state=row.state,
+        username=row.username,
+        avatar_seed=row.avatar_seed,
+        color_seed=row.color_seed,
+        locale=row.locale,
+        persona_content_hash=row.persona_content_hash,
+        presence_state=row.presence_state,
+        presence_revision=row.presence_revision,
+        moderation_revision=row.moderation_revision,
+        behavior_revision=row.behavior_revision,
+        joined_at_ms=row.joined_at_ms,
+        last_left_at_ms=row.last_left_at_ms,
+        join_count=row.join_count,
+        muted_until_ms=row.muted_until_ms,
+        mute_reason=row.mute_reason,
+        kicked_at_ms=row.kicked_at_ms,
+        kick_reason=row.kick_reason,
+        viewer_sequence=row.viewer_sequence,
+        behavior_state_json=row.behavior_state_json,
+        created_at_ms=row.created_at_ms,
+        updated_at_ms=row.updated_at_ms,
     )
 
 

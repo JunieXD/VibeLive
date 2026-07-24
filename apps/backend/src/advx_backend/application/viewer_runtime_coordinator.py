@@ -16,6 +16,7 @@ from advx_backend.application.director_service import (
 from advx_backend.application.observation_wave_builder import select_frame_bundle
 from advx_backend.application.ports.session import Clock
 from advx_backend.application.runtime_state import CommittedRuntime, RuntimeStateStore
+from advx_backend.application.viewer_behavior_service import ViewerBehaviorService
 from advx_backend.application.viewer_runtime import (
     ViewerDispatchSummary,
     ViewerRuntime,
@@ -36,7 +37,9 @@ from advx_backend.domain.observation_wave import (
     ObservationWave,
     ViewerVisualInputMode,
 )
+from advx_backend.domain.persona import PersonaTemplate
 from advx_backend.domain.room import RoomEvent, RoomEventSource
+from advx_backend.domain.scene_assessment import SceneAssessment
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,15 @@ class WaveDirector(Protocol):
         pool: object,
         runtime: object,
     ) -> DirectorOutcome: ...
+
+
+class ViewerPopulationController(Protocol):
+    async def reconcile_population(
+        self,
+        session_id: str,
+        *,
+        observation_id: str | None = None,
+    ) -> None: ...
 
 
 class FrameMetadataResolver(Protocol):
@@ -125,6 +137,7 @@ class FrozenWaveRuntime:
     working_memory: RoomWorkingMemory
     room_memory_slice: RoomMemorySlice
     director_budget: DirectorBudgetContext
+    scene_assessment: SceneAssessment | None = None
 
     @property
     def settings(self) -> object:
@@ -175,6 +188,8 @@ class ViewerRuntimeCoordinator:
         runtime_state: RuntimeStateStore,
         director: WaveDirector,
         viewer_runtime: ViewerRuntime,
+        viewer_behavior: ViewerBehaviorService | None = None,
+        population_controller: ViewerPopulationController | None = None,
         frame_metadata: FrameMetadataResolver | None = None,
         memory_reader: RoomMemorySliceReader | None = None,
         visual_summarizer: WaveVisualSummarizer | None = None,
@@ -197,6 +212,8 @@ class ViewerRuntimeCoordinator:
         self._runtime_state = runtime_state
         self._director = director
         self._viewer_runtime = viewer_runtime
+        self._viewer_behavior = viewer_behavior or ViewerBehaviorService()
+        self._population_controller = population_controller
         self._frame_metadata = frame_metadata
         self._memory_reader = memory_reader
         self._visual_summarizer = visual_summarizer
@@ -217,6 +234,15 @@ class ViewerRuntimeCoordinator:
             committed = await self._runtime_state.snapshot(observation.session_id)
         except KeyError:
             return ViewerCoordinatorResult(runtime_missing=True)
+        if self._population_controller is not None:
+            try:
+                await self._population_controller.reconcile_population(
+                    observation.session_id,
+                    observation_id=observation.observation_id,
+                )
+                committed = await self._runtime_state.snapshot(observation.session_id)
+            except Exception:
+                logger.exception("Viewer population reconciliation failed")
         await self._cancel_stale_background_tasks(
             observation.session_id,
             committed.audience_epoch,
@@ -332,28 +358,35 @@ class ViewerRuntimeCoordinator:
             )
             return ViewerCoordinatorResult(
                 wave=wave,
-                decision=outcome.decision,
                 meme_failed=True,
             )
+
+        decision = self._decide_speakers(
+            wave=wave,
+            committed=committed,
+            runtime=runtime,
+            outcome=outcome,
+        )
+        runtime = replace(runtime, scene_assessment=outcome.assessment)
 
         self._record_observation_trace(
             wave=wave,
             runtime=runtime,
             status=(
                 ObservationWaveStatus.COMPLETED
-                if outcome.decision.selected_viewer_ids
+                if decision.selected_viewer_ids
                 else ObservationWaveStatus.EMPTY
             ),
-            decision=outcome.decision,
+            decision=decision,
         )
         dispatch = await self._viewer_runtime.dispatch(
             wave=wave,
-            decision=outcome.decision,
+            decision=decision,
             pool=committed.pool,
             runtime=runtime,
         )
         if proposed_policy is not None and self._dispatch_commits_admission(
-            outcome.decision,
+            decision,
             dispatch,
         ):
             self._policy_state[wave.session_id] = proposed_policy
@@ -362,20 +395,20 @@ class ViewerRuntimeCoordinator:
             dispatch=dispatch,
         )
         meme_failed = False
-        if self._allows_wave_side_effects(outcome.decision, dispatch):
+        if self._allows_wave_side_effects(decision, dispatch):
             meme_failed = await self._commit_meme_candidate(
                 wave=wave,
                 candidate=outcome.meme_candidate,
             )
             self._schedule_memory_extraction(
                 wave=wave,
-                decision=outcome.decision,
+                decision=decision,
                 dispatch=dispatch,
                 runtime=runtime,
             )
         return ViewerCoordinatorResult(
             wave=wave,
-            decision=outcome.decision,
+            decision=decision,
             dispatch=dispatch,
             meme_failed=meme_failed,
         )
@@ -429,6 +462,81 @@ class ViewerRuntimeCoordinator:
                 wave.observation_id,
                 error,
             )
+
+    def _decide_speakers(
+        self,
+        *,
+        wave: ObservationWave,
+        committed: CommittedRuntime,
+        runtime: FrozenWaveRuntime,
+        outcome: DirectorOutcome,
+    ) -> CrowdDecision:
+        assessment = outcome.assessment
+        viewers = tuple(committed.pool.viewers)
+        active_count = sum(viewer.is_active() for viewer in viewers)
+        recent_speakers = sum(
+            viewer.private_state.last_spoke_at_ms is not None
+            and viewer.private_state.last_spoke_at_ms >= wave.created_at_ms - 10_000
+            for viewer in viewers
+        )
+        crowd_pressure = recent_speakers / max(1, active_count)
+        desires = []
+        for viewer in viewers:
+            persona = self._resolved_persona(runtime, viewer.persona_id)
+            desires.append(
+                self._viewer_behavior.evaluate(
+                    viewer=viewer,
+                    persona=persona,
+                    wave=wave,
+                    assessment=assessment,
+                    recent_speaker_count=viewer.private_state.speech_streak,
+                    crowd_pressure=crowd_pressure,
+                    session_seed=committed.pool.session_seed,
+                )
+            )
+        selected = self._viewer_behavior.choose(
+            desires,
+            maximum=assessment.maximum_responses,
+            forced_viewer_id=wave.target_viewer_id,
+            forced_persona_id=wave.target_persona_id,
+        )
+        return CrowdDecision(
+            decision_id=assessment.assessment_id,
+            room_id=assessment.room_id,
+            session_id=assessment.session_id,
+            audience_epoch=assessment.audience_epoch,
+            observation_id=assessment.observation_id,
+            selected_viewer_ids=list(selected),
+            reason_codes=[
+                *assessment.reason_codes,
+                "per_viewer_behavior_v1",
+            ],
+            evidence_event_ids=assessment.evidence_event_ids,
+            evidence_frame_indexes=assessment.evidence_frame_indexes,
+            decision_source=assessment.decision_source,
+            created_at_ms=assessment.created_at_ms,
+            expires_at_ms=assessment.expires_at_ms,
+        )
+
+    @staticmethod
+    def _resolved_persona(
+        runtime: FrozenWaveRuntime,
+        persona_id: str,
+    ) -> PersonaTemplate:
+        spec = runtime.canonical_runtime_spec
+        persona = next(
+            (item for item in spec.personas if item.persona_id == persona_id),
+            None,
+        )
+        if persona is None:
+            raise ValueError("Viewer references an unavailable PersonaTemplate")
+        mode = next(
+            item for item in spec.modes if item.mode_id == spec.active_mode_id
+        )
+        override = mode.persona_overrides.get(persona_id)
+        if override is None:
+            return persona
+        return persona.model_copy(update=override.model_dump(exclude_none=True))
 
     def _record_observation_trace(
         self,

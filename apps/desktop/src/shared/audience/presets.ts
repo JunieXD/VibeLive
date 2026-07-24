@@ -94,7 +94,7 @@ function createMode(
     name,
     description,
     builtIn: true,
-    viewerCount: burstLimit[1],
+    targetConcurrentViewers: burstLimit[1],
     personaIds,
     personaWeights: Object.fromEntries([
       ...high.map((personaId) => [personaId, 3]),

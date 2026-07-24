@@ -12,7 +12,7 @@ LOCAL_TOKEN = "test-local-token"
 def request_headers(
     *,
     token: str = LOCAL_TOKEN,
-    protocol_version: str = "2",
+    protocol_version: str = "3",
 ) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
@@ -26,7 +26,7 @@ def test_session_api_requires_local_token_and_protocol_version(tmp_path: Path) -
     with TestClient(app) as client:
         missing_token = client.post(
             "/sessions",
-            headers={PROTOCOL_VERSION_HEADER: "2"},
+            headers={PROTOCOL_VERSION_HEADER: "3"},
         )
         missing_version = client.post(
             "/sessions",
@@ -42,7 +42,7 @@ def test_session_api_requires_local_token_and_protocol_version(tmp_path: Path) -
     assert missing_version.status_code == 426
     assert missing_version.json()["detail"]["code"] == "protocol_version_mismatch"
     assert wrong_version.status_code == 426
-    assert wrong_version.headers[PROTOCOL_VERSION_HEADER] == "2"
+    assert wrong_version.headers[PROTOCOL_VERSION_HEADER] == "3"
 
 
 def test_session_api_requires_canonical_runtime_start(tmp_path: Path) -> None:

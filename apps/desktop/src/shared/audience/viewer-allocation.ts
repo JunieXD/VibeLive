@@ -26,10 +26,10 @@ export function allocateViewerCounts(
   if (totalWeight <= 0) throw new Error(`Mode ${mode.id} has no enabled weighted personas`)
 
   const allocations = eligible.map((item) => {
-    const exact = mode.viewerCount * item.weight / totalWeight
+    const exact = mode.targetConcurrentViewers * item.weight / totalWeight
     return { ...item, count: Math.floor(exact), remainder: exact - Math.floor(exact) }
   })
-  let remaining = mode.viewerCount - allocations.reduce((total, item) => total + item.count, 0)
+  let remaining = mode.targetConcurrentViewers - allocations.reduce((total, item) => total + item.count, 0)
   const remainderOrder = [...allocations].sort((left, right) =>
     right.remainder - left.remainder ||
     left.modeIndex - right.modeIndex ||

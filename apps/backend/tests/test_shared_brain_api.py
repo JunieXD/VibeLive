@@ -35,7 +35,7 @@ from advx_backend.main import create_app
 LOCAL_TOKEN = "test-token"
 
 
-def headers(version: str = "2") -> dict[str, str]:
+def headers(version: str = "3") -> dict[str, str]:
     return {
         "Authorization": f"Bearer {LOCAL_TOKEN}",
         "X-ADVX-Protocol-Version": version,

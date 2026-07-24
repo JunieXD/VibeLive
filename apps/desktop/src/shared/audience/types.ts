@@ -1,4 +1,4 @@
-export const AUDIENCE_WORKSPACE_VERSION = 2 as const
+export const AUDIENCE_WORKSPACE_VERSION = 3 as const
 export const PERSONA_DOCUMENT_VERSION = 2 as const
 
 export type PersonaTemplate = {
@@ -74,7 +74,7 @@ export type AudienceMode = {
   readonly name: string
   readonly description: string
   readonly builtIn: boolean
-  readonly viewerCount: number
+  readonly targetConcurrentViewers: number
   readonly personaIds: readonly string[]
   readonly personaWeights: Readonly<Record<string, number>>
   readonly personaOverrides: Readonly<Record<string, PersonaOverride>>
@@ -169,7 +169,7 @@ export type AudienceRuntimeSnapshot = {
     | 'revision'
     | 'name'
     | 'description'
-    | 'viewerCount'
+    | 'targetConcurrentViewers'
     | 'normalResponseRange'
     | 'highlightResponseRange'
     | 'ambience'

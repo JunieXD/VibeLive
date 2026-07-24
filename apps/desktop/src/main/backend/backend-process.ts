@@ -5,7 +5,7 @@ import { redactLogText } from "../logging-redaction";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_HEALTH_INTERVAL_MS = 100;
 const STOP_TIMEOUT_MS = 3_000;
-const BACKEND_PROTOCOL_VERSION = 2;
+const BACKEND_PROTOCOL_VERSION = 3;
 const MAX_BACKEND_OUTPUT_LINE_BYTES = 64 * 1024;
 
 export type BackendProcessExit = {

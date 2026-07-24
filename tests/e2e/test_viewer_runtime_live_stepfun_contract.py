@@ -614,8 +614,8 @@ def test_live_specs_use_strict_director_without_changing_pool_semantics() -> Non
         raw = source[source_key]
         if source_key == "bundle":
             raw = raw["canonical_runtime_spec"]
-        assert [mode.viewer_count for mode in spec.modes] == [
-            mode["viewer_count"] for mode in raw["modes"]
+        assert [mode.target_concurrent_viewers for mode in spec.modes] == [
+            mode["target_concurrent_viewers"] for mode in raw["modes"]
         ]
         assert [mode.persona_weights for mode in spec.modes] == [
             mode["persona_weights"] for mode in raw["modes"]

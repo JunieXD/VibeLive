@@ -102,6 +102,10 @@ class BarrageEvent:
     text: str
     created_at_ms: int
     expires_at_ms: int
+    intent: str = "react_to_scene"
+    target_kind: str | None = None
+    target_viewer_instance_id: str | None = None
+    target_event_id: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (

@@ -748,6 +748,12 @@ export function registerDesktopIpc(
       controlWindow.webContents.send("backend:barrage", event);
     }
   });
+  backendClient.onViewerEvent((event) => {
+    const controlWindow = getControlWindow();
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("backend:viewer-event", event);
+    }
+  });
 
   ipcMain.handle("desktop:list-sources", () => listDesktopSources(getControlWindow()));
   ipcMain.handle("desktop:select-source", async (event, sourceId: string) => {
@@ -946,6 +952,28 @@ export function registerDesktopIpc(
     assertControlSender(event);
     return backendClient.queryRuntime(sessionId);
   });
+  ipcMain.handle("backend:audience-query", (event, sessionId: string) => {
+    assertControlSender(event);
+    return backendClient.queryAudience(sessionId);
+  });
+  ipcMain.handle(
+    "backend:viewer-mute",
+    (event, sessionId: string, viewerId: string, durationMs: number, reason?: string) => {
+      assertControlSender(event);
+      return backendClient.muteViewer(sessionId, viewerId, durationMs, reason);
+    }
+  );
+  ipcMain.handle("backend:viewer-unmute", (event, sessionId: string, viewerId: string) => {
+    assertControlSender(event);
+    return backendClient.unmuteViewer(sessionId, viewerId);
+  });
+  ipcMain.handle(
+    "backend:viewer-kick",
+    (event, sessionId: string, viewerId: string, reason?: string) => {
+      assertControlSender(event);
+      return backendClient.kickViewer(sessionId, viewerId, reason);
+    }
+  );
   ipcMain.handle(
     "backend:runtime-apply",
     async (

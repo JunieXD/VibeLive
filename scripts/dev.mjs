@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { waitForCompletionOrTimeout } from "./process-lifecycle.mjs";
 
 const useProcessGroups = process.platform !== "win32";
-const backendProtocolVersion = 2;
+const backendProtocolVersion = 3;
 const shutdownGraceMs = 5_000;
 const localToken = process.env.ADVX_LOCAL_TOKEN ?? randomBytes(32).toString("base64url");
 const configuredBackendUrl = process.env.ADVX_BACKEND_URL;

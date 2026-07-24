@@ -26,13 +26,14 @@ describe('audience presets and modes', () => {
     expect(BASE_PERSONAS.map((persona) => persona.id)).toContain('instigator')
     expect(BASE_PERSONAS.find((persona) => persona.id === 'instigator')?.name).toBe('串子哥')
     expect(BUILT_IN_MODES).toHaveLength(6)
-    expect(BUILT_IN_MODES.map((mode) => mode.viewerCount)).toEqual([24, 28, 16, 14, 24, 14])
+    expect(BUILT_IN_MODES.map((mode) => mode.targetConcurrentViewers))
+      .toEqual([24, 28, 16, 14, 24, 14])
     expect(BASE_PERSONAS.flatMap((persona) => validatePersona(persona))).toEqual([])
 
     const mode6657 = BUILT_IN_MODES.find((mode) => mode.id === 'room-6657')
     expect(mode6657).toMatchObject({
       ambience: 'continuous',
-      viewerCount: 28,
+      targetConcurrentViewers: 28,
       normalResponseRange: [6, 10],
       highlightResponseRange: [20, 28],
       baseActivity: [6, 10],
@@ -165,7 +166,7 @@ describe('viewer pool v2', () => {
   it('allocates exact viewers with deterministic Hamilton tie breaking', () => {
     const mode = {
       ...BUILT_IN_MODES[0],
-      viewerCount: 5,
+      targetConcurrentViewers: 5,
       personaIds: ['reaction_qmark', 'cheat_suspector', 'praise_then_bite'],
       personaWeights: {
         reaction_qmark: 1,
@@ -229,7 +230,7 @@ describe('workspace persistence', () => {
           const {
             namespaceId,
             revision,
-            viewerCount,
+            targetConcurrentViewers,
             normalResponseRange,
             highlightResponseRange,
             visualSettings,
@@ -243,8 +244,8 @@ describe('workspace persistence', () => {
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
     expect(parsed.migratedFromVersion).toBe(1)
-    expect(parsed.workspace.version).toBe(2)
-    expect(parsed.workspace.modeState.modes.map((mode) => mode.viewerCount))
+    expect(parsed.workspace.version).toBe(3)
+    expect(parsed.workspace.modeState.modes.map((mode) => mode.targetConcurrentViewers))
       .toEqual([24, 28, 16, 14, 24, 14])
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
       viewerVisualInputMode: 'direct_frames',
@@ -269,7 +270,7 @@ describe('workspace persistence', () => {
     for (const mode of v1.modeState.modes) {
       delete mode.namespaceId
       delete mode.revision
-      delete mode.viewerCount
+      delete mode.targetConcurrentViewers
       delete mode.normalResponseRange
       delete mode.highlightResponseRange
       delete mode.visualSettings

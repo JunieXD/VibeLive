@@ -19,6 +19,7 @@ class CommittedRuntime:
     spec: CanonicalRuntimeSpec
     audience_epoch: int
     pool: ViewerPoolSnapshot
+    population_revision: int = 1
     provider_generation: RuntimeProviderGeneration | None = field(
         default=None,
         repr=False,
@@ -32,6 +33,7 @@ class RuntimeStateDebugSnapshot:
     session_id: str
     spec: CanonicalRuntimeSpec
     audience_epoch: int
+    population_revision: int
     pool: ViewerPoolSnapshot
     accepting_results: bool
 
@@ -119,6 +121,7 @@ class RuntimeStateStore:
             session_id=state.session_id,
             spec=state.spec,
             audience_epoch=state.audience_epoch,
+            population_revision=state.population_revision,
             pool=state.pool,
             accepting_results=state.accepting_results,
         )
@@ -132,6 +135,9 @@ class RuntimeStateStore:
         namespace_id: str | None = None,
         viewer_instance_id: str | None = None,
         viewer_sequence: int | None = None,
+        presence_revision: int | None = None,
+        moderation_revision: int | None = None,
+        behavior_revision: int | None = None,
         **_: object,
     ) -> bool:
         async with self.boundary(session_id):
@@ -142,6 +148,9 @@ class RuntimeStateStore:
                 audience_epoch=audience_epoch,
                 viewer_instance_id=viewer_instance_id,
                 viewer_sequence=viewer_sequence,
+                presence_revision=presence_revision,
+                moderation_revision=moderation_revision,
+                behavior_revision=behavior_revision,
             )
 
     async def execute_if_accepting(
@@ -154,6 +163,9 @@ class RuntimeStateStore:
         namespace_id: str | None = None,
         viewer_instance_id: str | None = None,
         viewer_sequence: int | None = None,
+        presence_revision: int | None = None,
+        moderation_revision: int | None = None,
+        behavior_revision: int | None = None,
     ) -> tuple[bool, T | None]:
         """Keep the final epoch/sequence fence held through a durable side effect."""
 
@@ -166,6 +178,9 @@ class RuntimeStateStore:
                     audience_epoch=audience_epoch,
                     viewer_instance_id=viewer_instance_id,
                     viewer_sequence=viewer_sequence,
+                    presence_revision=presence_revision,
+                    moderation_revision=moderation_revision,
+                    behavior_revision=behavior_revision,
                 ):
                     return False, None
             return True, await operation()
@@ -276,6 +291,9 @@ class RuntimeStateStore:
         namespace_id: str | None,
         viewer_instance_id: str | None,
         viewer_sequence: int | None,
+        presence_revision: int | None = None,
+        moderation_revision: int | None = None,
+        behavior_revision: int | None = None,
     ) -> bool:
         state = self._states.get(session_id)
         if (
@@ -301,12 +319,114 @@ class RuntimeStateStore:
         )
         if viewer is None or not self._viewer_is_active(viewer):
             return False
+        if (
+            presence_revision is not None
+            and getattr(viewer, "presence_revision", None) != presence_revision
+        ):
+            return False
+        if (
+            moderation_revision is not None
+            and getattr(viewer, "moderation_revision", None) != moderation_revision
+        ):
+            return False
+        if (
+            behavior_revision is not None
+            and getattr(viewer, "behavior_revision", None) != behavior_revision
+        ):
+            return False
         if viewer_sequence is None:
             return False
         claimed = self._claimed_sequences.get(session_id, {}).get(
             viewer_instance_id
         )
         return claimed == viewer_sequence
+
+    async def update_viewer(
+        self,
+        *,
+        session_id: str,
+        viewer_instance_id: str,
+        update: Callable[[object], object],
+        persist: Callable[[object], Awaitable[None]] | None = None,
+        increment_population: bool = True,
+    ) -> object:
+        """Atomically replace one Viewer while holding the final-effect boundary."""
+
+        async with self.effect_boundary(session_id):
+            async with self.boundary(session_id):
+                state = self._states.get(session_id)
+                if state is None:
+                    raise KeyError(session_id)
+                viewers = list(state.pool.viewers)
+                index = next(
+                    (
+                        position
+                        for position, viewer in enumerate(viewers)
+                        if viewer.viewer_instance_id == viewer_instance_id
+                    ),
+                    None,
+                )
+                if index is None:
+                    raise KeyError(viewer_instance_id)
+                next_viewer = update(viewers[index])
+                if getattr(next_viewer, "viewer_instance_id", None) != viewer_instance_id:
+                    raise ValueError("Viewer update cannot change viewer_instance_id")
+                if persist is not None:
+                    await persist(next_viewer)
+                viewers[index] = next_viewer
+                pool = state.pool.model_copy(update={"viewers": viewers})
+                self._states[session_id] = replace(
+                    state,
+                    pool=pool,
+                    population_revision=(
+                        state.population_revision + 1
+                        if increment_population
+                        else state.population_revision
+                    ),
+                )
+                if not self._viewer_is_active(next_viewer):
+                    self._claimed_sequences.get(session_id, {}).pop(
+                        viewer_instance_id,
+                        None,
+                    )
+                return next_viewer
+
+    async def add_viewer(
+        self,
+        *,
+        session_id: str,
+        viewer: object,
+        persist: Callable[[object], Awaitable[None]] | None = None,
+    ) -> object:
+        async with self.effect_boundary(session_id):
+            async with self.boundary(session_id):
+                state = self._states.get(session_id)
+                if state is None:
+                    raise KeyError(session_id)
+                if any(
+                    item.viewer_instance_id
+                    == getattr(viewer, "viewer_instance_id", None)
+                    for item in state.pool.viewers
+                ):
+                    raise ValueError("Viewer already exists in this Session")
+                if persist is not None:
+                    await persist(viewer)
+                viewers = [*state.pool.viewers, viewer]
+                pool = state.pool.model_copy(
+                    update={
+                        "viewers": viewers,
+                        "next_creation_ordinal": max(
+                            state.pool.next_creation_ordinal,
+                            getattr(viewer, "ordinal") + 1,
+                        ),
+                    }
+                )
+                self._states[session_id] = replace(
+                    state,
+                    pool=pool,
+                    population_revision=state.population_revision + 1,
+                )
+                return viewer
 
     @staticmethod
     def _active_namespace(spec: CanonicalRuntimeSpec) -> str:
@@ -368,42 +488,14 @@ class RuntimeStateStore:
         current: CommittedRuntime,
         replacement: CommittedRuntime,
     ) -> set[str]:
-        if current.spec.active_mode_id != replacement.spec.active_mode_id:
-            return set()
-        current_personas = {
-            persona.persona_id: persona for persona in current.spec.personas
+        current_ids = {
+            viewer.viewer_instance_id for viewer in current.pool.viewers
         }
-        replacement_personas = {
-            persona.persona_id: persona for persona in replacement.spec.personas
+        return {
+            viewer.viewer_instance_id
+            for viewer in replacement.pool.viewers
+            if viewer.viewer_instance_id in current_ids
         }
-        current_mode = next(
-            mode
-            for mode in current.spec.modes
-            if mode.mode_id == current.spec.active_mode_id
-        )
-        replacement_mode = next(
-            mode
-            for mode in replacement.spec.modes
-            if mode.mode_id == replacement.spec.active_mode_id
-        )
-        current_by_id = {
-            viewer.viewer_instance_id: viewer for viewer in current.pool.viewers
-        }
-        retained: set[str] = set()
-        for viewer in replacement.pool.viewers:
-            previous = current_by_id.get(viewer.viewer_instance_id)
-            persona_id = viewer.persona_id
-            if (
-                previous is not None
-                and previous.persona_id == persona_id
-                and previous.ordinal == viewer.ordinal
-                and current_personas.get(persona_id)
-                == replacement_personas.get(persona_id)
-                and current_mode.persona_overrides.get(persona_id)
-                == replacement_mode.persona_overrides.get(persona_id)
-            ):
-                retained.add(viewer.viewer_instance_id)
-        return retained
 
     def _validate_activation_locked(self, state: CommittedRuntime) -> None:
         current = self._states.get(state.session_id)
@@ -419,3 +511,5 @@ class RuntimeStateStore:
             raise KeyError(state.session_id)
         if state.audience_epoch <= current.audience_epoch:
             raise ValueError("replacement epoch must advance")
+        if state.population_revision <= current.population_revision:
+            raise ValueError("replacement population revision must advance")

@@ -49,7 +49,7 @@ class RuntimeSessionSnapshot(RuntimeSessionContract):
     config_revision: int = Field(ge=1)
     config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     canonical_runtime_spec: CanonicalRuntimeSpec
-    viewers: list[ViewerInstance] = Field(default_factory=list, max_length=32)
+    viewers: list[ViewerInstance] = Field(default_factory=list, max_length=128)
     apply_id: str | None = Field(default=None, min_length=1, max_length=128)
     diff: RuntimeDiffSummary = Field(default_factory=RuntimeDiffSummary)
     recovered: bool = False

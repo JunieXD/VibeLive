@@ -20,6 +20,7 @@ from advx_backend.domain.observation_wave import (
     ObservationWave,
     ViewerVisualInputMode,
 )
+from advx_backend.domain.scene_assessment import SceneAssessment
 
 
 class FixedClock:
@@ -51,21 +52,22 @@ class FakeDirector:
         self.calls: list[object] = []
         self.preferred_viewer_ids = preferred_viewer_ids
 
-    async def decide(self, request: object) -> CrowdDecision:
+    async def decide(self, request: object) -> SceneAssessment:
         self.calls.append(request)
-        selected = [
-            viewer_id
-            for viewer_id in self.preferred_viewer_ids
-            if viewer_id in request.viewer_ids
-        ][:2]
-        return CrowdDecision(
-            decision_id="decision-cs2-1",
+        return SceneAssessment(
+            assessment_id="assessment-cs2-1",
             room_id=request.wave.room_id,
             session_id=request.wave.session_id,
             audience_epoch=request.wave.audience_epoch,
             observation_id=request.wave.observation_id,
-            selected_viewer_ids=selected,
+            salience=1.0,
+            novelty=1.0,
+            emotional_intensity=1.0,
+            topics=["cs2", "highlight"],
+            emotional_tone=["excited"],
+            replyable_event_ids=["cs2-event-1"],
             evidence_event_ids=["cs2-event-1"],
+            maximum_responses=min(2, request.maximum),
             created_at_ms=1_250,
             expires_at_ms=2_000,
         )
@@ -228,14 +230,31 @@ async def collect_evidence(
         max_in_flight=2,
     )
     await runtime.start_session("cs2-session-1")
+    selected_ids = hot_instigator_ids[: outcome.assessment.maximum_responses]
+    decision = CrowdDecision(
+        decision_id=outcome.assessment.assessment_id,
+        room_id=wave.room_id,
+        session_id=wave.session_id,
+        audience_epoch=wave.audience_epoch,
+        observation_id=wave.observation_id,
+        selected_viewer_ids=selected_ids,
+        reason_codes=["recorded_per_viewer_behavior"],
+        evidence_event_ids=list(outcome.assessment.evidence_event_ids),
+        created_at_ms=outcome.assessment.created_at_ms,
+        expires_at_ms=outcome.assessment.expires_at_ms,
+    )
+    runtime_context = SimpleNamespace(
+        canonical_runtime_spec=updated_spec,
+        settings=updated_spec.settings,
+        scene_assessment=outcome.assessment,
+    )
     summary = await runtime.dispatch(
         wave=wave,
-        decision=outcome.decision,
+        decision=decision,
         pool=updated_pool,
-        runtime=updated_spec,
+        runtime=runtime_context,
     )
 
-    selected_ids = outcome.decision.selected_viewer_ids
     selected_by_id = {
         viewer.viewer_instance_id: viewer for viewer in updated_pool.viewers
     }
@@ -275,21 +294,7 @@ async def collect_evidence(
         "reaction_qmark": 3,
         "room_historian": 1,
     }
-    expected_updated_counts = {
-        "abstract_radio": 2,
-        "cheat_suspector": 1,
-        "clip_alarm": 1,
-        "fun_seeker": 2,
-        "grudge_keeper": 2,
-        "hardmouth_antifan": 3,
-        "instigator": 6,
-        "jinx_machine": 2,
-        "meme_archivist": 2,
-        "parrot_unit": 2,
-        "praise_then_bite": 1,
-        "reaction_qmark": 3,
-        "room_historian": 1,
-    }
+    expected_updated_counts = expected_initial_counts
     active_mode = next(
         mode for mode in updated_spec.modes if mode.mode_id == updated_spec.active_mode_id
     )
@@ -348,9 +353,9 @@ async def collect_evidence(
             "updated_hamilton_allocation_is_exact": updated_counts
             == expected_updated_counts,
             "hot_update_reconciliation_is_exact": (
-                len(reconciliation.retained_viewer_ids) == 25
-                and len(reconciliation.added_viewer_ids) == 3
-                and len(reconciliation.removed_viewer_ids) == 3
+                len(reconciliation.retained_viewer_ids) == 28
+                and not reconciliation.added_viewer_ids
+                and not reconciliation.removed_viewer_ids
                 and not reconciliation.reset_viewer_ids
             ),
             "one_director_call": len(director_provider.calls) == 1,

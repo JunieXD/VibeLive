@@ -39,7 +39,16 @@ class RecordedProviderOutput(ReplayContractModel):
     def validate_role_output(self) -> "RecordedProviderOutput":
         allowed = {
             "director": {
+                "assessment_id",
                 "decision_id",
+                "salience",
+                "novelty",
+                "emotional_intensity",
+                "topics",
+                "emotional_tone",
+                "replyable_event_ids",
+                "suggested_reaction_types",
+                "maximum_responses",
                 "selected_viewer_ids",
                 "selected_persona_ids",
                 "reason_codes",
@@ -64,8 +73,8 @@ class RecordedProviderOutput(ReplayContractModel):
 
 class ReplayBundle(ReplayContractModel):
     replay_schema_version: Literal[1] = REPLAY_SCHEMA_VERSION
-    protocol_version: Literal[2] = PROTOCOL_VERSION
-    audience_contract_version: Literal[1] = AUDIENCE_CONTRACT_VERSION
+    protocol_version: Literal[3] = PROTOCOL_VERSION
+    audience_contract_version: Literal[2] = AUDIENCE_CONTRACT_VERSION
     bundle_id: str = Field(min_length=1, max_length=128)
     created_at_ms: int = Field(ge=0)
     seed: int

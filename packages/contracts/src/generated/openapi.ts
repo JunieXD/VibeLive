@@ -311,6 +311,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runtime/sessions/{session_id}/audience": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current Audience */
+        get: operations["current_audience_runtime_sessions__session_id__audience_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/sessions/{session_id}/viewers/{viewer_id}/mute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mute Viewer */
+        post: operations["mute_viewer_runtime_sessions__session_id__viewers__viewer_id__mute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/sessions/{session_id}/viewers/{viewer_id}/unmute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unmute Viewer */
+        post: operations["unmute_viewer_runtime_sessions__session_id__viewers__viewer_id__unmute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/sessions/{session_id}/viewers/{viewer_id}/kick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Kick Viewer */
+        post: operations["kick_viewer_runtime_sessions__session_id__viewers__viewer_id__kick_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/shared-brain/rooms/{room_id}/memories": {
         parameters: {
             query?: never;
@@ -808,16 +876,16 @@ export interface components {
         CanonicalRuntimeSpec: {
             /**
              * Protocol Version
+             * @default 3
+             * @constant
+             */
+            protocol_version: 3;
+            /**
+             * Audience Contract Version
              * @default 2
              * @constant
              */
-            protocol_version: 2;
-            /**
-             * Audience Contract Version
-             * @default 1
-             * @constant
-             */
-            audience_contract_version: 1;
+            audience_contract_version: 2;
             /** Config Revision */
             config_revision: number;
             room: components["schemas"]["Room"];
@@ -894,10 +962,10 @@ export interface components {
         DebugRuntimeSnapshot: {
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /**
              * Redacted
              * @default true
@@ -1016,10 +1084,10 @@ export interface components {
             status: "ok" | "degraded";
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /** Persistence Error */
             persistence_error?: {
                 [key: string]: string;
@@ -1202,8 +1270,8 @@ export interface components {
             namespace_id: string;
             /** Revision */
             revision: number;
-            /** Viewer Count */
-            viewer_count: number;
+            /** Target Concurrent Viewers */
+            target_concurrent_viewers: number;
             /** Persona Ids */
             persona_ids: string[];
             /** Persona Weights */
@@ -1260,6 +1328,15 @@ export interface components {
          * @enum {string}
          */
         ModeMemeState: "active" | "disabled" | "archived" | "revoked";
+        /** MuteViewerRequest */
+        MuteViewerRequest: {
+            /** Command Id */
+            command_id: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Reason */
+            reason?: string | null;
+        };
         /**
          * ObservationTrigger
          * @enum {string}
@@ -1587,16 +1664,16 @@ export interface components {
             replay_schema_version: 1;
             /**
              * Protocol Version
+             * @default 3
+             * @constant
+             */
+            protocol_version: 3;
+            /**
+             * Audience Contract Version
              * @default 2
              * @constant
              */
-            protocol_version: 2;
-            /**
-             * Audience Contract Version
-             * @default 1
-             * @constant
-             */
-            audience_contract_version: 1;
+            audience_contract_version: 2;
             /** Bundle Id */
             bundle_id: string;
             /** Created At Ms */
@@ -1748,10 +1825,10 @@ export interface components {
             base_revision: number;
             /**
              * Audience Contract Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            audience_contract_version: 1;
+            audience_contract_version: 2;
             canonical_runtime_spec: components["schemas"]["CanonicalRuntimeSpec"];
             /** Client Config Hash */
             client_config_hash: string;
@@ -1803,10 +1880,10 @@ export interface components {
             target_revision: number;
             /**
              * Audience Contract Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            audience_contract_version: 1;
+            audience_contract_version: 2;
             /** @default null */
             provider_candidate: components["schemas"]["RuntimeModelProviderCandidate"] | null;
         };
@@ -1889,6 +1966,23 @@ export interface components {
              * @default 2
              */
             max_consecutive_ambient_waves: number;
+        };
+        /** SessionAudienceSnapshot */
+        SessionAudienceSnapshot: {
+            /** Session Id */
+            session_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Population Revision */
+            population_revision: number;
+            /** Target Concurrent Viewers */
+            target_concurrent_viewers: number;
+            /** Active Count */
+            active_count: number;
+            /** Viewers */
+            viewers?: components["schemas"]["ViewerSnapshot"][];
         };
         /** SessionSnapshot */
         SessionSnapshot: {
@@ -1991,6 +2085,13 @@ export interface components {
             /** Codes */
             codes?: string[];
         };
+        /** ViewerCommandRequest */
+        ViewerCommandRequest: {
+            /** Command Id */
+            command_id: string;
+            /** Reason */
+            reason?: string | null;
+        };
         /** ViewerInstance */
         ViewerInstance: {
             /** Viewer Instance Id */
@@ -2005,10 +2106,26 @@ export interface components {
             persona_id: string;
             /** Persona Revision */
             persona_revision: number;
+            /**
+             * Persona Content Hash
+             * @default 0000000000000000000000000000000000000000000000000000000000000000
+             */
+            persona_content_hash: string;
             /** Ordinal */
             ordinal: number;
+            /** Username */
+            username: string;
             /** Display Name */
             display_name: string;
+            /** Avatar Seed */
+            avatar_seed: string;
+            /** Color Seed */
+            color_seed: string;
+            /**
+             * Locale
+             * @default zh-CN
+             */
+            locale: string;
             variant: components["schemas"]["ViewerInstanceVariant"];
             private_state?: components["schemas"]["ViewerPrivateState"];
             /**
@@ -2018,6 +2135,38 @@ export interface components {
             viewer_sequence: number;
             /** @default active */
             lifecycle_state: components["schemas"]["ViewerLifecycleState"];
+            /**
+             * Presence Revision
+             * @default 1
+             */
+            presence_revision: number;
+            /**
+             * Moderation Revision
+             * @default 1
+             */
+            moderation_revision: number;
+            /**
+             * Behavior Revision
+             * @default 1
+             */
+            behavior_revision: number;
+            /** Joined At Ms */
+            joined_at_ms?: number | null;
+            /** Last Left At Ms */
+            last_left_at_ms?: number | null;
+            /**
+             * Join Count
+             * @default 0
+             */
+            join_count: number;
+            /** Muted Until Ms */
+            muted_until_ms?: number | null;
+            /** Mute Reason */
+            mute_reason?: string | null;
+            /** Kicked At Ms */
+            kicked_at_ms?: number | null;
+            /** Kick Reason */
+            kick_reason?: string | null;
             /** Created At Ms */
             created_at_ms: number;
             /** Removed At Ms */
@@ -2025,6 +2174,26 @@ export interface components {
         };
         /** ViewerInstanceVariant */
         ViewerInstanceVariant: {
+            /**
+             * Activity Baseline
+             * @default 0.5
+             */
+            activity_baseline: number;
+            /**
+             * Attention Span
+             * @default 0.5
+             */
+            attention_span: number;
+            /**
+             * Social Initiative
+             * @default 0.5
+             */
+            social_initiative: number;
+            /**
+             * Reply Affinity
+             * @default 0.5
+             */
+            reply_affinity: number;
             /** Expression Length */
             expression_length: number;
             /** Skepticism */
@@ -2037,12 +2206,22 @@ export interface components {
             focus: string;
             /** Silence Tendency */
             silence_tendency: number;
+            /**
+             * Stay Duration Tendency
+             * @default 0.5
+             */
+            stay_duration_tendency: number;
+            /**
+             * Rejoin Tendency
+             * @default 0.5
+             */
+            rejoin_tendency: number;
         };
         /**
          * ViewerLifecycleState
          * @enum {string}
          */
-        ViewerLifecycleState: "active" | "removed";
+        ViewerLifecycleState: "not_joined" | "active" | "left" | "kicked" | "ended" | "removed";
         /** ViewerPrivateState */
         ViewerPrivateState: {
             /**
@@ -2062,6 +2241,53 @@ export interface components {
             };
             /** Cooldown Until Ms */
             cooldown_until_ms?: number | null;
+            /**
+             * Attention Strength
+             * @default 0.5
+             */
+            attention_strength: number;
+            /**
+             * Arousal
+             * @default 0
+             */
+            arousal: number;
+            /**
+             * Fatigue
+             * @default 0
+             */
+            fatigue: number;
+            /**
+             * Engagement
+             * @default 0.5
+             */
+            engagement: number;
+            /** Last Spoke At Ms */
+            last_spoke_at_ms?: number | null;
+            /** Last Reacted At Ms */
+            last_reacted_at_ms?: number | null;
+            /** Current Thread Id */
+            current_thread_id?: string | null;
+            /** Current Target Viewer Id */
+            current_target_viewer_id?: string | null;
+            /**
+             * Host Affinity
+             * @default 0
+             */
+            host_affinity: number;
+            /** Peer Affinities */
+            peer_affinities?: {
+                [key: string]: number;
+            };
+            /**
+             * Silence Streak
+             * @default 0
+             */
+            silence_streak: number;
+            /**
+             * Speech Streak
+             * @default 0
+             */
+            speech_streak: number;
         };
         /** ViewerRequestTrace */
         ViewerRequestTrace: {
@@ -2188,6 +2414,38 @@ export interface components {
              */
             retry: number;
         };
+        /** ViewerSnapshot */
+        ViewerSnapshot: {
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Username */
+            username: string;
+            /** Display Name */
+            display_name: string;
+            /** Avatar Seed */
+            avatar_seed: string;
+            /** Color Seed */
+            color_seed: string;
+            /** Persona Id */
+            persona_id: string;
+            /** Persona Display Name */
+            persona_display_name: string;
+            presence_state: components["schemas"]["ViewerLifecycleState"];
+            /** Joined At Ms */
+            joined_at_ms: number | null;
+            /** Last Left At Ms */
+            last_left_at_ms: number | null;
+            /** Join Count */
+            join_count: number;
+            /** Muted Until Ms */
+            muted_until_ms: number | null;
+            /** Viewer Sequence */
+            viewer_sequence: number;
+            /** Presence Revision */
+            presence_revision: number;
+            /** Moderation Revision */
+            moderation_revision: number;
+        };
         /**
          * ViewerVisualInputMode
          * @enum {string}
@@ -2257,10 +2515,10 @@ export interface components {
         BackendPong: {
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2273,10 +2531,10 @@ export interface components {
         BackendReady: {
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2288,10 +2546,10 @@ export interface components {
         BarrageEventMessage: {
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2323,6 +2581,9 @@ export interface components {
             viewer_sequence: number;
             /** Reaction Type */
             reaction_type: string;
+            intent: components["schemas"]["ViewerReactionIntent"];
+            /** @default null */
+            target: components["schemas"]["ViewerReactionTarget"] | null;
             /** Evidence Refs */
             evidence_refs?: components["schemas"]["EvidenceRef"][];
             /** Text */
@@ -2355,10 +2616,10 @@ export interface components {
         IngestAck: {
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2387,10 +2648,10 @@ export interface components {
         IngestRejected: {
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2421,10 +2682,10 @@ export interface components {
         RealtimeProtocolError: {
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2448,10 +2709,10 @@ export interface components {
         SessionStatusEvent: {
             /**
              * Protocol Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            protocol_version: 2;
+            protocol_version: 3;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -2459,8 +2720,55 @@ export interface components {
             type: "session.status";
             session: components["schemas"]["SessionSnapshot"];
         };
+        /** ViewerPresenceEvent */
+        ViewerPresenceEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "viewer.joined" | "viewer.kicked" | "viewer.left" | "viewer.muted" | "viewer.rejoined" | "viewer.unmuted";
+            /**
+             * Protocol Version
+             * @default 3
+             * @constant
+             */
+            protocol_version: 3;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Population Revision */
+            population_revision: number;
+            /** Occurred At Ms */
+            occurred_at_ms: number;
+            viewer: components["schemas"]["ViewerSnapshot"];
+        };
+        /**
+         * ViewerReactionIntent
+         * @enum {string}
+         */
+        ViewerReactionIntent: "react_to_host" | "react_to_scene" | "reply_to_viewer" | "ask_question" | "agree" | "disagree" | "encourage" | "joke" | "continue_thread" | "room_meta" | "silence";
+        /** ViewerReactionTarget */
+        ViewerReactionTarget: {
+            kind: components["schemas"]["ViewerTargetKind"];
+            /**
+             * Viewer Instance Id
+             * @default null
+             */
+            viewer_instance_id: string | null;
+            /**
+             * Event Id
+             * @default null
+             */
+            event_id: string | null;
+        };
+        /**
+         * ViewerTargetKind
+         * @enum {string}
+         */
+        ViewerTargetKind: "host" | "scene" | "room" | "viewer" | "event";
         /** ServerMessageEnvelope */
-        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["RealtimeProtocolError"] | components["schemas"]["IngestAck"] | components["schemas"]["IngestRejected"];
+        ServerMessageEnvelope: components["schemas"]["BackendReady"] | components["schemas"]["BackendPong"] | components["schemas"]["SessionStatusEvent"] | components["schemas"]["BarrageEventMessage"] | components["schemas"]["RealtimeProtocolError"] | components["schemas"]["IngestAck"] | components["schemas"]["IngestRejected"] | components["schemas"]["ViewerPresenceEvent"];
         /**
          * BinaryMediaType
          * @enum {string}
@@ -2566,6 +2874,83 @@ export interface components {
             /** Items */
             items?: components["schemas"]["RoomLongTermMemory"][];
         };
+        /** SceneAssessment */
+        SceneAssessment: {
+            /** Assessment Id */
+            assessment_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Observation Id */
+            observation_id: string;
+            /** Salience */
+            salience: number;
+            /** Novelty */
+            novelty: number;
+            /** Emotional Intensity */
+            emotional_intensity: number;
+            /** Topics */
+            topics?: string[];
+            /** Emotional Tone */
+            emotional_tone?: string[];
+            /** Replyable Event Ids */
+            replyable_event_ids?: string[];
+            /** Evidence Event Ids */
+            evidence_event_ids?: string[];
+            /** Evidence Frame Indexes */
+            evidence_frame_indexes?: number[];
+            /** Suggested Reaction Types */
+            suggested_reaction_types?: string[];
+            /** Maximum Responses */
+            maximum_responses: number;
+            /** Reason Codes */
+            reason_codes?: string[];
+            /** @default director */
+            decision_source: components["schemas"]["DecisionSource"];
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Expires At Ms */
+            expires_at_ms: number;
+        };
+        /** ViewerPublicEvent */
+        ViewerPublicEvent: {
+            /** Event Id */
+            event_id: string;
+            /** Sequence */
+            sequence: number;
+            /** Source Type */
+            source_type: string;
+            /**
+             * Source Id
+             * @default null
+             */
+            source_id: string | null;
+            /**
+             * Text
+             * @default null
+             */
+            text: string | null;
+            /**
+             * Viewer Instance Id
+             * @default null
+             */
+            viewer_instance_id: string | null;
+            /**
+             * Display Name
+             * @default null
+             */
+            display_name: string | null;
+            /**
+             * Target Viewer Id
+             * @default null
+             */
+            target_viewer_id: string | null;
+            /** Occurred At Ms */
+            occurred_at_ms: number;
+        };
         /** ViewerGenerationRequest */
         ViewerGenerationRequest: {
             /** Room Id */
@@ -2582,8 +2967,22 @@ export interface components {
             viewer_instance_id: string;
             /** Viewer Sequence */
             viewer_sequence: number;
+            /** Username */
+            username: string;
+            /** Display Name */
+            display_name: string;
+            persona: components["schemas"]["PersonaTemplate"];
             /** Persona Revision */
             persona_revision: number;
+            /** Presence Revision */
+            presence_revision: number;
+            /** Moderation Revision */
+            moderation_revision: number;
+            /** Behavior Revision */
+            behavior_revision: number;
+            scene_assessment: components["schemas"]["SceneAssessment"];
+            /** Active Viewer Ids */
+            active_viewer_ids?: string[];
             instance_variant: components["schemas"]["ViewerInstanceVariant"];
             /** Mode Context */
             mode_context: {
@@ -2601,6 +3000,8 @@ export interface components {
             input_event_ids?: string[];
             /** Public Context Event Ids */
             public_context_event_ids?: string[];
+            /** Public Context */
+            public_context?: components["schemas"]["ViewerPublicEvent"][];
             viewer_private_state: components["schemas"]["ViewerPrivateState"];
             room_memory_slice: components["schemas"]["RoomMemorySlice"];
             /** Deadline At Ms */
@@ -2620,6 +3021,10 @@ export interface components {
             /** Viewer Sequence */
             viewer_sequence: number;
             action: components["schemas"]["ViewerAction"];
+            /** @default react_to_scene */
+            intent: components["schemas"]["ViewerReactionIntent"];
+            /** @default null */
+            target: components["schemas"]["ViewerReactionTarget"] | null;
             /**
              * Text
              * @default null
@@ -2654,6 +3059,9 @@ export interface components {
             viewer_sequence: number;
             /** Reaction Type */
             reaction_type: string;
+            intent: components["schemas"]["ViewerReactionIntent"];
+            /** @default null */
+            target: components["schemas"]["ViewerReactionTarget"] | null;
             /** Evidence Refs */
             evidence_refs?: components["schemas"]["EvidenceRef"][];
             /** Text */
@@ -2696,7 +3104,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -2727,7 +3135,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -2762,7 +3170,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -2793,7 +3201,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -2828,7 +3236,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -2859,7 +3267,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -2890,7 +3298,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 session_id: string;
@@ -2923,7 +3331,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 session_id: string;
@@ -2956,7 +3364,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 session_id: string;
@@ -2997,7 +3405,7 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -3028,7 +3436,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -3065,7 +3473,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 session_id: string;
@@ -3098,7 +3506,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -3133,7 +3541,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -3168,7 +3576,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 session_id: string;
@@ -3201,7 +3609,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 session_id: string;
@@ -3238,7 +3646,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 session_id: string;
@@ -3275,7 +3683,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 session_id: string;
@@ -3304,11 +3712,158 @@ export interface operations {
             };
         };
     };
+    current_audience_runtime_sessions__session_id__audience_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "3";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionAudienceSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mute_viewer_runtime_sessions__session_id__viewers__viewer_id__mute_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "3";
+            };
+            path: {
+                session_id: string;
+                viewer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MuteViewerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewerSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unmute_viewer_runtime_sessions__session_id__viewers__viewer_id__unmute_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "3";
+            };
+            path: {
+                session_id: string;
+                viewer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewerCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewerSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    kick_viewer_runtime_sessions__session_id__viewers__viewer_id__kick_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "3";
+            };
+            path: {
+                session_id: string;
+                viewer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ViewerCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewerSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_memories_shared_brain_rooms__room_id__memories_get: {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3341,7 +3896,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3374,7 +3929,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3408,7 +3963,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3448,7 +4003,7 @@ export interface operations {
                 expected_revision: number;
             };
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3484,7 +4039,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -3517,7 +4072,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3555,7 +4110,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3593,7 +4148,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -3628,7 +4183,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3666,7 +4221,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 room_id: string;
@@ -3705,7 +4260,7 @@ export interface operations {
                 active_only?: boolean;
             };
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -3738,7 +4293,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -3771,7 +4326,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -3804,7 +4359,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -3837,7 +4392,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -3874,7 +4429,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path?: never;
             cookie?: never;
@@ -3909,7 +4464,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -3946,7 +4501,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -3980,7 +4535,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4014,7 +4569,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4052,7 +4607,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4090,7 +4645,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4128,7 +4683,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4166,7 +4721,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4204,7 +4759,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4242,7 +4797,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4280,7 +4835,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;
@@ -4318,7 +4873,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "2";
+                "X-ADVX-Protocol-Version": "3";
             };
             path: {
                 namespace_id: string;

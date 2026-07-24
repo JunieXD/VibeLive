@@ -118,8 +118,8 @@ export function compileCanonicalRuntimeSpec(
   )
   const visual = activeMode.visualSettings
   const spec: CanonicalRuntimeSpec = {
-    protocol_version: 2,
-    audience_contract_version: 1,
+    protocol_version: 3,
+    audience_contract_version: 2,
     config_revision: options.configRevision,
     room: {
       room_id: options.roomId ?? 'default-room',
@@ -148,7 +148,7 @@ export function compileCanonicalRuntimeSpec(
       },
       viewer_visual_input_mode: visual.viewerVisualInputMode,
       director_failure_mode: 'resilient',
-      max_in_flight_viewer_requests: Math.min(12, activeMode.viewerCount),
+      max_in_flight_viewer_requests: Math.min(12, activeMode.targetConcurrentViewers),
       viewer_request_ttl_ms: 90_000,
       viewer_queue_capacity: 64,
       observation_merge_window_ms: 250,
@@ -221,7 +221,7 @@ function compileMode(mode: AudienceMode): CanonicalModeDefinition {
     mode_id: mode.id,
     namespace_id: mode.namespaceId,
     revision: mode.revision,
-    viewer_count: mode.viewerCount,
+    target_concurrent_viewers: mode.targetConcurrentViewers,
     persona_ids: [...mode.personaIds],
     persona_weights: Object.fromEntries(
       mode.personaIds.map((personaId) => [personaId, mode.personaWeights[personaId]])

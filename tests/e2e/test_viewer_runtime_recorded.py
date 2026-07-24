@@ -65,23 +65,23 @@ async def test_cs2_recorded_replay_hot_update_and_call_identity(tmp_path: Path) 
         "room_historian": 1,
     }
     assert evidence["hot_update"]["updated_counts"] == {
-        "abstract_radio": 2,
+        "abstract_radio": 3,
         "cheat_suspector": 1,
         "clip_alarm": 1,
-        "fun_seeker": 2,
+        "fun_seeker": 3,
         "grudge_keeper": 2,
         "hardmouth_antifan": 3,
-        "instigator": 6,
+        "instigator": 3,
         "jinx_machine": 2,
-        "meme_archivist": 2,
+        "meme_archivist": 3,
         "parrot_unit": 2,
         "praise_then_bite": 1,
         "reaction_qmark": 3,
         "room_historian": 1,
     }
-    assert len(evidence["hot_update"]["retained_viewer_ids"]) == 25
-    assert len(evidence["hot_update"]["added_viewer_ids"]) == 3
-    assert len(evidence["hot_update"]["removed_viewer_ids"]) == 3
+    assert len(evidence["hot_update"]["retained_viewer_ids"]) == 28
+    assert evidence["hot_update"]["added_viewer_ids"] == []
+    assert evidence["hot_update"]["removed_viewer_ids"] == []
     assert evidence["hot_update"]["reset_viewer_ids"] == []
     assert evidence["call_identity"]["selected_viewer_ids"] == evidence[
         "call_identity"

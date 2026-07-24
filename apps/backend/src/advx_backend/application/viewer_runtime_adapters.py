@@ -32,6 +32,12 @@ def to_barrage_event(event: ViewerBarrageEvent) -> BarrageEvent:
         display_name=event.display_name,
         viewer_sequence=event.viewer_sequence,
         reaction_type=event.reaction_type,
+        intent=event.intent.value,
+        target_kind=None if event.target is None else event.target.kind.value,
+        target_viewer_instance_id=(
+            None if event.target is None else event.target.viewer_instance_id
+        ),
+        target_event_id=None if event.target is None else event.target.event_id,
         evidence_refs=tuple(
             BarrageEvidenceRef(
                 source=(
@@ -113,6 +119,8 @@ def _room_payload(content: dict[str, Any]) -> dict[str, object]:
         "display_name": content["display_name"],
         "viewer_sequence": content["viewer_sequence"],
         "reaction_type": content["reaction_type"],
+        "intent": content["intent"],
+        "target": content["target"],
         "evidence_refs": content["evidence_refs"],
         "expires_at_ms": content["expires_at_ms"],
     }

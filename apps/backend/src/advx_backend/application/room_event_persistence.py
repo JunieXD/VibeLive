@@ -66,6 +66,24 @@ class _EvidenceRefPayload(_PayloadModel):
         return self
 
 
+class _ViewerReactionTargetPayload(_PayloadModel):
+    kind: Literal["host", "scene", "room", "viewer", "event"]
+    viewer_instance_id: str | None = None
+    event_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "_ViewerReactionTargetPayload":
+        if self.kind == "viewer" and self.viewer_instance_id is None:
+            raise ValueError("viewer target requires viewer_instance_id")
+        if self.kind == "event" and self.event_id is None:
+            raise ValueError("event target requires event_id")
+        if self.kind != "viewer" and self.viewer_instance_id is not None:
+            raise ValueError("viewer_instance_id requires viewer target")
+        if self.kind != "event" and self.event_id is not None:
+            raise ValueError("event_id requires event target")
+        return self
+
+
 class _AudienceBarragePayload(_PayloadModel):
     barrage_id: str | None = None
     audience_epoch: int | None = Field(default=None, ge=1)
@@ -77,6 +95,20 @@ class _AudienceBarragePayload(_PayloadModel):
     display_name: str | None = None
     viewer_sequence: int | None = Field(default=None, ge=1)
     reaction_type: str | None = None
+    intent: Literal[
+        "react_to_host",
+        "react_to_scene",
+        "reply_to_viewer",
+        "ask_question",
+        "agree",
+        "disagree",
+        "encourage",
+        "joke",
+        "continue_thread",
+        "room_meta",
+        "silence",
+    ] | None = None
+    target: _ViewerReactionTargetPayload | None = None
     evidence_refs: list[_EvidenceRefPayload] | None = None
     expires_at_ms: int | None = Field(default=None, ge=0)
 

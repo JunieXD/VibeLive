@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer as electronIpcRenderer } from "electron";
 import type {
   BackendBarrageEvent,
   BackendRuntimeStatus,
+  BackendViewerEvent,
   ControlApi,
   ModelConfig,
   OverlaySettings
@@ -120,6 +121,14 @@ const api: ControlApi = {
   stopBackendSession: () => ipcRenderer.invoke("backend:session-stop"),
   queryAudienceRuntime: (sessionId) =>
     ipcRenderer.invoke("backend:runtime-query", sessionId),
+  queryLiveAudience: (sessionId) =>
+    ipcRenderer.invoke("backend:audience-query", sessionId),
+  muteViewer: (sessionId, viewerId, durationMs, reason) =>
+    ipcRenderer.invoke("backend:viewer-mute", sessionId, viewerId, durationMs, reason),
+  unmuteViewer: (sessionId, viewerId) =>
+    ipcRenderer.invoke("backend:viewer-unmute", sessionId, viewerId),
+  kickViewer: (sessionId, viewerId, reason) =>
+    ipcRenderer.invoke("backend:viewer-kick", sessionId, viewerId, reason),
   applyAudienceRuntime: (sessionId, workspace, baseRevision) =>
     ipcRenderer.invoke("backend:runtime-apply", sessionId, workspace, baseRevision),
   rollbackAudienceRuntime: (sessionId, baseRevision, targetRevision) =>
@@ -207,6 +216,12 @@ const api: ControlApi = {
       listener(event);
     ipcRenderer.on("backend:barrage", handler);
     return () => ipcRenderer.removeListener("backend:barrage", handler);
+  },
+  onBackendViewerEvent: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, event: BackendViewerEvent): void =>
+      listener(event);
+    ipcRenderer.on("backend:viewer-event", handler);
+    return () => ipcRenderer.removeListener("backend:viewer-event", handler);
   }
 };
 

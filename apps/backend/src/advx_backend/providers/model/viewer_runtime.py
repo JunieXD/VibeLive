@@ -19,7 +19,6 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerGenerationRequest,
     ViewerGenerationResponse,
 )
-from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.observation import FrameRef
 from advx_backend.domain.observation_wave import (
@@ -27,6 +26,7 @@ from advx_backend.domain.observation_wave import (
     ObservationWave,
     ViewerVisualInputMode,
 )
+from advx_backend.domain.scene_assessment import SceneAssessment
 from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleConfig,
     OpenAICompatibleHttpError,
@@ -94,29 +94,38 @@ _DIRECTOR_SCHEMA: Final[dict[str, object]] = {
     "type": "object",
     "additionalProperties": False,
     "required": [
-        "decision_id",
-        "room_id",
-        "session_id",
-        "audience_epoch",
-        "observation_id",
-        "selected_viewer_ids",
+        "assessment_id",
+        "salience",
+        "novelty",
+        "emotional_intensity",
+        "topics",
+        "emotional_tone",
+        "replyable_event_ids",
         "reason_codes",
         "evidence_event_ids",
         "evidence_frame_indexes",
-        "decision_source",
-        "created_at_ms",
-        "expires_at_ms",
+        "suggested_reaction_types",
+        "maximum_responses",
         "meme_candidate",
     ],
     "properties": {
-        "decision_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "room_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "session_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "audience_epoch": {"type": "integer", "minimum": 1},
-        "observation_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "selected_viewer_ids": {
+        "assessment_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "salience": {"type": "number", "minimum": 0, "maximum": 1},
+        "novelty": {"type": "number", "minimum": 0, "maximum": 1},
+        "emotional_intensity": {"type": "number", "minimum": 0, "maximum": 1},
+        "topics": {
             "type": "array",
             "maxItems": 32,
+            "items": {"type": "string", "minLength": 1, "maxLength": 128},
+        },
+        "emotional_tone": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {"type": "string", "minLength": 1, "maxLength": 128},
+        },
+        "replyable_event_ids": {
+            "type": "array",
+            "maxItems": 128,
             "items": {"type": "string", "minLength": 1, "maxLength": 128},
         },
         "reason_codes": {
@@ -134,9 +143,12 @@ _DIRECTOR_SCHEMA: Final[dict[str, object]] = {
             "maxItems": 32,
             "items": {"type": "integer", "minimum": 0},
         },
-        "decision_source": {"type": "string", "const": "director"},
-        "created_at_ms": {"type": "integer", "minimum": 0},
-        "expires_at_ms": {"type": "integer", "minimum": 1},
+        "suggested_reaction_types": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {"type": "string", "minLength": 1, "maxLength": 64},
+        },
+        "maximum_responses": {"type": "integer", "minimum": 0, "maximum": 32},
         "meme_candidate": {
             "anyOf": [
                 {"type": "null"},
@@ -221,6 +233,8 @@ _VIEWER_SCHEMA: Final[dict[str, object]] = {
         "viewer_instance_id",
         "viewer_sequence",
         "action",
+        "intent",
+        "target",
         "text",
         "reaction_type",
         "evidence_refs",
@@ -230,6 +244,44 @@ _VIEWER_SCHEMA: Final[dict[str, object]] = {
         "viewer_instance_id": {"type": "string", "minLength": 1, "maxLength": 128},
         "viewer_sequence": {"type": "integer", "minimum": 1},
         "action": {"type": "string", "enum": ["barrage", "silence"]},
+        "intent": {
+            "type": "string",
+            "enum": [
+                "react_to_host",
+                "react_to_scene",
+                "reply_to_viewer",
+                "ask_question",
+                "agree",
+                "disagree",
+                "encourage",
+                "joke",
+                "continue_thread",
+                "room_meta",
+                "silence",
+            ],
+        },
+        "target": {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["kind", "viewer_instance_id", "event_id"],
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": ["host", "scene", "room", "viewer", "event"],
+                        },
+                        "viewer_instance_id": {
+                            "anyOf": [{"type": "string"}, {"type": "null"}]
+                        },
+                        "event_id": {
+                            "anyOf": [{"type": "string"}, {"type": "null"}]
+                        },
+                    },
+                },
+                {"type": "null"},
+            ]
+        },
         "text": {
             "anyOf": [
                 {"type": "string", "minLength": 1, "maxLength": 200},
@@ -253,16 +305,21 @@ _VISUAL_SUMMARY_SCHEMA: Final[dict[str, object]] = {
     },
 }
 _DIRECTOR_SYSTEM_PROMPT: Final = (
-    "Select only viewer_instance_id values and evidence references present in the input. "
-    "Do not exceed maximum. If the same non-empty phrase appears at least three times "
+    "Assess the supplied live scene without selecting any viewer or writing barrage text. "
+    "Use only event IDs and evidence references present in the input, and never exceed maximum. "
+    "If the same non-empty phrase appears at least three times "
     "inside a visible public event, you MUST emit meme_candidate, copy the shortest "
     "repeated phrase verbatim as its text without paraphrasing, and cite that event. "
-    "Otherwise set meme_candidate to null. Use only supplied event/frame evidence. "
+    "Otherwise set meme_candidate to null. "
     "Return only the required JSON object."
 )
 _VIEWER_SYSTEM_PROMPT: Final = (
-    "Act as exactly the supplied viewer instance. Produce zero or one barrage reaction. "
-    "Use only evidence references present in the input. Return only the required JSON object."
+    "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
+    "is only a behavioral tendency and is not your name or a system role. Produce zero or one "
+    "natural barrage reaction. You may react to the host, scene, or a replyable public Viewer "
+    "event, but may target only IDs explicitly allowed by the request. Shared room memory is "
+    "public background, not proof that you personally attended an earlier stream. Use only "
+    "evidence references present in the input. Return only the required JSON object."
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
     "Summarize only visible, decision-relevant changes across the ordered frame bundle. "
@@ -302,7 +359,7 @@ class OpenAICompatibleViewerRuntimeProvider:
             model_id=self.config.provider.director_model,
             system_prompt=_DIRECTOR_SYSTEM_PROMPT,
             content=content,
-            schema_name="crowd_decision",
+            schema_name="scene_assessment",
             schema=_director_schema(frame_count),
         )
         response = await self._send(self._director, payload)
@@ -320,14 +377,14 @@ class OpenAICompatibleViewerRuntimeProvider:
             }
         )
         try:
-            decision = CrowdDecision.model_validate(output)
+            assessment = SceneAssessment.model_validate(output)
         except ValidationError as error:
             raise ViewerRuntimeProtocolError(
-                "Director response violated the CrowdDecision contract: "
+                "Director response violated the SceneAssessment contract: "
                 f"{self._validation_codes(error)}"
             ) from None
         candidate = self._meme_candidate(request, raw_meme_candidate)
-        return DirectorOutcome(decision=decision, meme_candidate=candidate)
+        return DirectorOutcome(assessment=assessment, meme_candidate=candidate)
 
     async def generate(self, request: ViewerGenerationRequest) -> ViewerGenerationResponse:
         content = await self._viewer_content(request)
@@ -476,7 +533,6 @@ class OpenAICompatibleViewerRuntimeProvider:
     ) -> str | list[dict[str, object]]:
         context = {
             "wave": request.wave.model_dump(mode="json"),
-            "viewer_ids": list(request.viewer_ids),
             "maximum": request.maximum,
             "runtime": self._json_value(request.runtime),
         }
