@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from advx_backend.domain.crowd_decision import DecisionSource
+from advx_backend.domain.observation_wave import MAX_FRAME_BUNDLE_SIZE
 
 
 class SceneAssessment(BaseModel):
@@ -18,7 +19,10 @@ class SceneAssessment(BaseModel):
     emotional_tone: list[str] = Field(default_factory=list, max_length=16)
     replyable_event_ids: list[str] = Field(default_factory=list, max_length=128)
     evidence_event_ids: list[str] = Field(default_factory=list, max_length=128)
-    evidence_frame_indexes: list[int] = Field(default_factory=list, max_length=32)
+    evidence_frame_indexes: list[int] = Field(
+        default_factory=list,
+        max_length=MAX_FRAME_BUNDLE_SIZE,
+    )
     suggested_reaction_types: list[str] = Field(default_factory=list, max_length=32)
     maximum_responses: int = Field(ge=0, le=32)
     reason_codes: list[str] = Field(default_factory=list, max_length=32)

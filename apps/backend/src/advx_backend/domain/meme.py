@@ -2,6 +2,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from advx_backend.domain.observation_wave import MAX_FRAME_BUNDLE_SIZE
+
 
 class MemeDomainModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -30,7 +32,10 @@ class MemeCandidate(MemeDomainModel):
     text: str = Field(min_length=1, max_length=500)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
     evidence_event_ids: list[str] = Field(min_length=1, max_length=128)
-    evidence_frame_indexes: list[int] = Field(default_factory=list, max_length=32)
+    evidence_frame_indexes: list[int] = Field(
+        default_factory=list,
+        max_length=MAX_FRAME_BUNDLE_SIZE,
+    )
     outcome: MemeCandidateOutcome = MemeCandidateOutcome.PENDING
     created_at_ms: int = Field(ge=0)
 

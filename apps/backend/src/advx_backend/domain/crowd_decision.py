@@ -2,6 +2,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from advx_backend.domain.observation_wave import MAX_FRAME_BUNDLE_SIZE
+
 
 class CrowdDomainModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -22,7 +24,10 @@ class CrowdDecision(CrowdDomainModel):
     selected_viewer_ids: list[str] = Field(default_factory=list, max_length=32)
     reason_codes: list[str] = Field(default_factory=list, max_length=32)
     evidence_event_ids: list[str] = Field(default_factory=list, max_length=128)
-    evidence_frame_indexes: list[int] = Field(default_factory=list, max_length=32)
+    evidence_frame_indexes: list[int] = Field(
+        default_factory=list,
+        max_length=MAX_FRAME_BUNDLE_SIZE,
+    )
     decision_source: DecisionSource = DecisionSource.AUTONOMOUS
     created_at_ms: int = Field(ge=0)
     expires_at_ms: int = Field(gt=0)
