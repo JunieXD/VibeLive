@@ -12,7 +12,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class ProviderRatePolicy:
     max_in_flight: int = 12
-    min_start_interval_seconds: float = 0.1
+    min_start_interval_seconds: float = 0.3
     fallback_429_backoff_seconds: float = 5.0
     max_429_backoff_seconds: float = 60.0
 
