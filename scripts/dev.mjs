@@ -3,15 +3,19 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 
-const useShell = process.platform === "win32";
 const useProcessGroups = process.platform !== "win32";
+const backendProtocolVersion = 2;
 const shutdownGraceMs = 5_000;
 const localToken = process.env.ADVX_LOCAL_TOKEN ?? randomBytes(32).toString("base64url");
 const configuredBackendUrl = process.env.ADVX_BACKEND_URL;
 const backendPort = configuredBackendUrl ? null : await findAvailablePort();
 const backendUrl = configuredBackendUrl ?? `http://127.0.0.1:${backendPort}`;
+const {
+  ELECTRON_RUN_AS_NODE: _electronRunAsNode,
+  ...inheritedEnvironment
+} = process.env;
 const childEnvironment = {
-  ...process.env,
+  ...inheritedEnvironment,
   ADVX_BACKEND_EXTERNAL: "1",
   ADVX_BACKEND_URL: backendUrl,
   ADVX_DATA_DIR: resolve(".advx-data"),
@@ -41,7 +45,6 @@ if (!configuredBackendUrl) {
     ],
     {
       stdio: "inherit",
-      shell: useShell,
       detached: useProcessGroups,
       env: childEnvironment
     }
@@ -62,9 +65,10 @@ try {
   if (backendExited) throw new Error("Backend exited immediately after becoming ready.");
   console.log("Backend ready; starting Electron.");
 
-  const desktop = spawn("pnpm", ["--filter", "@advx/desktop", "dev"], {
+  const desktopCommand = resolvePnpmCommand(["--filter", "@advx/desktop", "dev"]);
+  const desktop = spawn(desktopCommand.executable, desktopCommand.arguments, {
     stdio: "inherit",
-    shell: useShell,
+    shell: desktopCommand.useShell,
     detached: useProcessGroups,
     env: childEnvironment
   });
@@ -85,6 +89,21 @@ function observeChild(child, label) {
     if (signal) console.error(`${label} stopped by ${signal}.`);
     void shutdown(code ?? 1);
   });
+}
+
+function resolvePnpmCommand(arguments_) {
+  if (process.env.npm_execpath) {
+    return {
+      executable: process.execPath,
+      arguments: [process.env.npm_execpath, ...arguments_],
+      useShell: false
+    };
+  }
+  return {
+    executable: "pnpm",
+    arguments: arguments_,
+    useShell: process.platform === "win32"
+  };
 }
 
 function shutdown(exitCode = 0, signal = "SIGTERM") {
@@ -180,7 +199,12 @@ async function waitForBackendHealth(baseUrl) {
       });
       if (response.ok) {
         const payload = await response.json();
-        if (payload.status === "ok" && payload.protocol_version === 1) return;
+        if (
+          payload.status === "ok" &&
+          payload.protocol_version === backendProtocolVersion
+        ) {
+          return;
+        }
         lastError = new Error("Backend health response uses an incompatible protocol.");
       }
     } catch (error) {
