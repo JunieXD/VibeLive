@@ -31,6 +31,7 @@ from advx_backend.domain.observation_wave import (
     ViewerVisualInputMode,
 )
 from advx_backend.providers.model.openai_compatible import (
+    JSON_MODE_RESPONSE_FORMAT,
     OpenAICompatibleConfig,
     OpenAICompatibleHttpError,
     OpenAICompatibleProvider,
@@ -492,6 +493,7 @@ class OpenAICompatibleViewerRuntimeProvider:
             "stream": False,
             "n": 1,
             "max_tokens": _ROLE_OUTPUT_TOKEN_BUDGET,
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
         }
         payload.update(default_reasoning_options(self.config.base_url, model_id))
         return payload

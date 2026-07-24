@@ -257,7 +257,7 @@ async def test_memory_extractor_records_request_and_parsed_candidates() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/chat/completions")
         payload = json.loads(request.content)
-        assert "response_format" not in payload
+        assert payload["response_format"] == {"type": "json_object"}
         assert "Use this shape: {\"candidates\"" in payload["messages"][0]["content"]
         return httpx.Response(
             200,

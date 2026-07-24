@@ -55,7 +55,7 @@ async def test_role_payload_uses_json_examples_and_stepfun_low_reasoning() -> No
         )
         await provider.aclose()
 
-    assert "response_format" not in payload
+    assert payload["response_format"] == {"type": "json_object"}
     assert payload["reasoning_effort"] == "low"
     assert payload["messages"] == [
         {
@@ -99,7 +99,7 @@ async def test_image_probe_allows_the_production_output_budget() -> None:
         payload = json.loads(request.content)
         assert payload["max_tokens"] == 4_096
         assert isinstance(payload["messages"][0]["content"], list)
-        assert "response_format" not in payload
+        assert payload["response_format"] == {"type": "json_object"}
         assert payload["messages"][0]["content"][0]["text"] == (
             'Return exactly this JSON object and no Markdown or prose: {"ok":true}.'
         )
@@ -129,6 +129,39 @@ async def test_image_probe_allows_the_production_output_budget() -> None:
 
     assert check.status.value == "passed"
     assert check.error_code is None
+    await provider.aclose()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_probe_falls_back_when_json_mode_is_explicitly_unsupported() -> None:
+    requests: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if "response_format" in payload:
+            return httpx.Response(
+                400,
+                json={"error": {"message": "response_format json_object is unsupported"}},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}
+                ]
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = provider_with(client)
+
+    check = await provider._probe_chat(capability="viewer_json_output", model_id="vision-model")
+
+    assert check.status.value == "passed"
+    assert requests[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in requests[1]
     await provider.aclose()
     await client.aclose()
 

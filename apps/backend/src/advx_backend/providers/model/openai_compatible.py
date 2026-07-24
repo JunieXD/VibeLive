@@ -125,6 +125,7 @@ _BLOCKING_HTTP_STATUSES: Final = frozenset({401, 402, 403, 408, 429})
 _PROBE_OUTPUT_TOKEN_BUDGET: Final = 4_096
 _STEPFUN_API_HOST: Final = "api.stepfun.com"
 _STEPFUN_REASONING_MODEL: Final = "step-3.7-flash"
+JSON_MODE_RESPONSE_FORMAT: Final = {"type": "json_object"}
 
 
 def default_reasoning_options(base_url: str, model_id: str) -> dict[str, str]:
@@ -375,6 +376,7 @@ class OpenAICompatibleProvider:
             ],
             "stream": False,
             "n": 1,
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
         }
         payload.update(default_reasoning_options(self.config.base_url, self.config.model))
         return payload
@@ -426,8 +428,31 @@ class OpenAICompatibleProvider:
         if payload is not None:
             headers["Content-Type"] = "application/json"
 
+        response = await self._request(method, url, headers=headers, payload=payload)
+
+        if self._should_fallback_from_json_mode(response, payload):
+            fallback_payload = dict(payload)
+            fallback_payload.pop("response_format", None)
+            response = await self._request(method, url, headers=headers, payload=fallback_payload)
+
+        if not response.is_success:
+            raise OpenAICompatibleHttpError(
+                response.status_code,
+                retry_after_seconds=self._retry_after_seconds(response.headers.get("Retry-After")),
+                response=response,
+            )
+        return response
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str],
+        payload: dict[str, object] | None,
+    ) -> httpx.Response:
         try:
-            response = await self._client.request(
+            return await self._client.request(
                 method,
                 url,
                 headers=headers,
@@ -439,13 +464,22 @@ class OpenAICompatibleProvider:
         except (httpx.HTTPError, RuntimeError):
             raise OpenAICompatibleTransportError("OpenAI-compatible transport failed") from None
 
-        if not response.is_success:
-            raise OpenAICompatibleHttpError(
-                response.status_code,
-                retry_after_seconds=self._retry_after_seconds(response.headers.get("Retry-After")),
-                response=response,
-            )
-        return response
+    @staticmethod
+    def _should_fallback_from_json_mode(
+        response: httpx.Response,
+        payload: dict[str, object] | None,
+    ) -> bool:
+        if response.status_code != 400 or payload is None:
+            return False
+        if payload.get("response_format") != JSON_MODE_RESPONSE_FORMAT:
+            return False
+        try:
+            detail = response.text.lower()
+        except (UnicodeDecodeError, httpx.HTTPError):
+            return False
+        return "response_format" in detail and (
+            "json_object" in detail or "json mode" in detail
+        )
 
     @staticmethod
     def _retry_after_seconds(value: str | None) -> float | None:
@@ -493,6 +527,7 @@ class OpenAICompatibleProvider:
             "messages": [{"role": "user", "content": content}],
             "stream": False,
             "n": 1,
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
             # Match the production role budget so reasoning-capable multimodal
             # models can finish before emitting the tiny structured response.
             "max_tokens": _PROBE_OUTPUT_TOKEN_BUDGET,
