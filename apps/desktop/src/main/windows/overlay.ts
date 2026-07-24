@@ -1,4 +1,4 @@
-import { BrowserWindow, Rectangle, screen, shell } from "electron";
+import { app, BrowserWindow, Rectangle, screen, shell } from "electron";
 import { join } from "node:path";
 import type { BarrageEvent, OverlaySettings } from "../../shared/contracts";
 import { overlayIpcEnvelope } from "../../shared/overlay-protocol";
@@ -6,6 +6,12 @@ import { getOverlaySettings } from "../overlay-settings";
 import { loadRenderer } from "./load-renderer";
 
 let overlayWindow: BrowserWindow | null = null;
+
+function restoreMacApplicationActivation(): void {
+  if (process.platform !== "darwin") return;
+  app.setActivationPolicy("regular");
+  app.dock.show();
+}
 
 export function createOverlayWindow(bounds: Rectangle): BrowserWindow {
   const window = new BrowserWindow({
@@ -82,6 +88,7 @@ function sendWhenReady(
 
 export function showOverlay(): void {
   getOverlayWindow().showInactive();
+  restoreMacApplicationActivation();
 }
 
 export function hideOverlay(): void {
@@ -96,6 +103,7 @@ export function clearOverlay(): void {
 export function pushBarrage(event: BarrageEvent): void {
   const window = getOverlayWindow();
   if (!window.isVisible()) window.showInactive();
+  restoreMacApplicationActivation();
   sendWhenReady(window, "overlay:barrage", event);
 }
 
