@@ -21,9 +21,11 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerGenerationRequest,
     ViewerGenerationResponse,
 )
+from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation import Observation
 from advx_backend.domain.observation_wave import (
+    MAX_FRAME_BUNDLE_SIZE,
     FrameBundle,
     FrameBundleItem,
     FrameBundleSettings,
@@ -295,6 +297,46 @@ def test_smart_frame_timeline_keeps_anchors_and_caps_at_sixty() -> None:
     assert selected == tuple(sorted(selected, key=lambda frame: frame.captured_at_ms))
     assert {0, 5_000, 10_000, 15_000}.issubset(selected_times)
     assert {15_000, 45_000, 75_000, 105_000}.issubset(selected_times)
+
+
+def test_autonomous_wave_accepts_evidence_for_every_frame_in_a_maximum_bundle() -> None:
+    frames = [_frame(index, change_score=0.5) for index in range(MAX_FRAME_BUNDLE_SIZE)]
+    wave = ObservationWave(
+        room_id="room",
+        session_id="session",
+        audience_epoch=1,
+        observation_id="observation",
+        created_at_ms=1_000,
+        deadline_at_ms=10_000,
+        triggers=[ObservationTrigger.USER_TEXT],
+        frame_bundle=FrameBundle(
+            bundle_id="bundle",
+            settings=FrameBundleSettings(frame_bundle_size=MAX_FRAME_BUNDLE_SIZE),
+            frames=frames,
+        ),
+    )
+    committed = SimpleNamespace(pool=SimpleNamespace(viewers=[]))
+    coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
+
+    assessment = coordinator._independent_assessment(wave, committed)
+    decision = coordinator._decide_speakers(wave=wave, committed=committed)
+    meme_candidate = MemeCandidate(
+        candidate_id="candidate",
+        room_id="room",
+        session_id="session",
+        audience_epoch=1,
+        observation_id="observation",
+        namespace_id="namespace",
+        text="meme",
+        evidence_event_ids=["event"],
+        evidence_frame_indexes=list(range(MAX_FRAME_BUNDLE_SIZE)),
+        created_at_ms=1_000,
+    )
+
+    expected_indexes = list(range(MAX_FRAME_BUNDLE_SIZE))
+    assert assessment.evidence_frame_indexes == expected_indexes
+    assert decision.evidence_frame_indexes == expected_indexes
+    assert meme_candidate.evidence_frame_indexes == expected_indexes
 
 
 @pytest.mark.asyncio
