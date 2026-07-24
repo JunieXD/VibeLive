@@ -198,17 +198,8 @@ async def test_user_text_event_is_durable_and_recoverable_for_active_runtime(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("audio_source", "source_id"),
-    [
-        (AudioSource.MICROPHONE, "host"),
-        (AudioSource.SYSTEM_AUDIO, "system-audio"),
-    ],
-)
-async def test_user_voice_audio_source_is_durable_and_recoverable(
+async def test_microphone_voice_is_durable_and_recoverable(
     database: SQLiteDatabase,
-    audio_source: AudioSource,
-    source_id: str,
 ) -> None:
     runtime_service, room_service, event_store, _ = runtime_harness(database)
     started = await start_runtime(runtime_service, room_service)
@@ -216,14 +207,50 @@ async def test_user_voice_audio_source_is_durable_and_recoverable(
     event = await room_service.append_event(
         started.session_id,
         source_type=RoomEventSource.USER_VOICE,
-        source_id=source_id,
+        source_id="host",
         text="voice",
         payload={
-            "audio_source": audio_source.value,
+            "audio_source": AudioSource.MICROPHONE.value,
             "final": True,
             "started_at_ms": 100,
             "ended_at_ms": 200,
-            "utterance_id": f"{audio_source.value}-1",
+            "utterance_id": "microphone-1",
+            "revision": 1,
+        },
+    )
+
+    async with database.session_factory() as session:
+        row = await session.scalar(
+            select(RoomEventRow).where(RoomEventRow.event_id == event.event_id)
+    )
+    assert row is not None
+    assert json.loads(row.content_json)["payload"]["audio_source"] == "microphone"
+    assert await event_store.load_for_recovery(
+        room_id="room-1",
+        session_id=started.session_id,
+        maximum_audience_epoch=1,
+    ) == (event,)
+
+
+@pytest.mark.asyncio
+async def test_system_audio_transcript_is_durable_context_not_user_voice(
+    database: SQLiteDatabase,
+) -> None:
+    runtime_service, room_service, event_store, _ = runtime_harness(database)
+    started = await start_runtime(runtime_service, room_service)
+
+    event = await room_service.append_event(
+        started.session_id,
+        source_type=RoomEventSource.SYSTEM_EVENT,
+        source_id="system-audio",
+        text="video dialogue",
+        payload={
+            "event": "system_audio_transcript",
+            "audio_source": AudioSource.SYSTEM_AUDIO.value,
+            "final": True,
+            "started_at_ms": 100,
+            "ended_at_ms": 200,
+            "utterance_id": "system-audio-1",
             "revision": 1,
         },
     )
@@ -233,7 +260,9 @@ async def test_user_voice_audio_source_is_durable_and_recoverable(
             select(RoomEventRow).where(RoomEventRow.event_id == event.event_id)
         )
     assert row is not None
-    assert json.loads(row.content_json)["payload"]["audio_source"] == audio_source.value
+    content = json.loads(row.content_json)
+    assert content["source_type"] == "system_event"
+    assert content["source_id"] == "system-audio"
     assert await event_store.load_for_recovery(
         room_id="room-1",
         session_id=started.session_id,

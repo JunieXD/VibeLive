@@ -231,6 +231,8 @@ export type RealtimeMediaInput = {
 
 export type RealtimeAudioInput = RealtimeMediaInput & {
   source: AudioSource
+  turnId?: string
+  systemAudioRequired?: boolean
 }
 
 export type RealtimeFrameInput = RealtimeMediaInput & {

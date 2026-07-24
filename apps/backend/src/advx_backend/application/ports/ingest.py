@@ -88,12 +88,22 @@ class AudioCommit:
     input_id: str
     committed_at_ms: int
     source: AudioSource = AudioSource.MICROPHONE
+    turn_id: str | None = None
+    system_audio_required: bool = False
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
         _require_non_empty_string(self.input_id, "input_id")
         _require_timestamp(self.committed_at_ms, "committed_at_ms")
         object.__setattr__(self, "source", AudioSource(self.source))
+        if self.turn_id is not None:
+            _require_non_empty_string(self.turn_id, "turn_id")
+        if not isinstance(self.system_audio_required, bool):
+            raise ValueError("system_audio_required must be a boolean")
+        if self.source is not AudioSource.MICROPHONE and self.system_audio_required:
+            raise ValueError("only microphone audio can require system audio")
+        if self.system_audio_required and self.turn_id is None:
+            raise ValueError("system audio requirements need a turn_id")
 
 
 @dataclass(frozen=True, slots=True)

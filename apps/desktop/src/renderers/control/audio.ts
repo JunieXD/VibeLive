@@ -1,6 +1,34 @@
 export const PCM_SAMPLE_RATE = 16_000
 export const AUDIO_SENTENCE_SILENCE_SECONDS = 0.8
-export const AUDIO_SPEECH_THRESHOLD = 0.015
+export const AUDIO_MIN_SPEECH_THRESHOLD = 0.015
+export const AUDIO_SPEECH_CONFIRMATION_MS = 200
+export const AUDIO_SYSTEM_BUFFER_SECONDS = 60
+
+const AUDIO_NOISE_FLOOR_ALPHA = 0.08
+const AUDIO_NOISE_FLOOR_MAX_STEP = 0.01
+
+export type SpeechThresholds = {
+  start: number
+  continue: number
+}
+
+export function updateNoiseFloor(current: number, level: number): number {
+  const boundedLevel = Math.max(0, Math.min(1, level))
+  const delta = boundedLevel - current
+  const limitedDelta = Math.max(-AUDIO_NOISE_FLOOR_MAX_STEP, Math.min(
+    AUDIO_NOISE_FLOOR_MAX_STEP,
+    delta
+  ))
+  return Math.max(0, current + limitedDelta * AUDIO_NOISE_FLOOR_ALPHA)
+}
+
+export function speechThresholds(noiseFloor: number): SpeechThresholds {
+  const start = Math.max(AUDIO_MIN_SPEECH_THRESHOLD, noiseFloor * 2 + 0.006)
+  return {
+    start,
+    continue: Math.max(0.01, start * 0.65)
+  }
+}
 
 export function concatenateFloat32(chunks: readonly Float32Array[]): Float32Array {
   const length = chunks.reduce((total, chunk) => total + chunk.length, 0)

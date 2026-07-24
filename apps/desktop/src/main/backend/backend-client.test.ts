@@ -232,7 +232,7 @@ describe("BackendClient runtime v2", () => {
     }));
   });
 
-  it("carries the audio source through binary, commit and voice activity messages", async () => {
+  it("carries audio source and turn requirements through commit messages", async () => {
     const client = new BackendClient({ localToken: "token" });
     const sendBinary = vi.fn();
     const sendJson = vi.fn();
@@ -263,7 +263,16 @@ describe("BackendClient runtime v2", () => {
       inputId: "audio-1",
       capturedAtMs: 10,
       body: new Uint8Array([1, 2]),
-      source: "system_audio"
+      source: "system_audio",
+      turnId: "turn-1"
+    });
+    await client.submitAudioSegment({
+      inputId: "audio-2",
+      capturedAtMs: 11,
+      body: new Uint8Array([3, 4]),
+      source: "microphone",
+      turnId: "turn-1",
+      systemAudioRequired: true
     });
     client.notifyVoiceActivity("system_audio", 20);
 
@@ -276,10 +285,21 @@ describe("BackendClient runtime v2", () => {
       expect.objectContaining({
         type: "client.audio.commit",
         input_id: "audio-1",
-        source: "system_audio"
+        source: "system_audio",
+        turn_id: "turn-1"
       })
     );
-    expect(sendJson).toHaveBeenNthCalledWith(2, {
+    expect(sendJson).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: "client.audio.commit",
+        input_id: "audio-2",
+        source: "microphone",
+        turn_id: "turn-1",
+        system_audio_required: true
+      })
+    );
+    expect(sendJson).toHaveBeenNthCalledWith(3, {
       type: "client.voice.activity",
       protocol_version: 3,
       session_id: "session-1",

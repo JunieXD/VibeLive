@@ -95,6 +95,20 @@ class ClientAudioCommit(RealtimeMessage):
     input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     committed_at_ms: int = Field(ge=0)
     source: AudioSource = AudioSource.MICROPHONE
+    turn_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_INGEST_IDENTIFIER_LENGTH,
+    )
+    system_audio_required: bool = False
+
+    @model_validator(mode="after")
+    def validate_turn_requirements(self) -> "ClientAudioCommit":
+        if self.source is not AudioSource.MICROPHONE and self.system_audio_required:
+            raise ValueError("only microphone audio can require system audio")
+        if self.system_audio_required and self.turn_id is None:
+            raise ValueError("system audio requirements need a turn_id")
+        return self
 
 
 class ClientVoiceActivity(RealtimeMessage):

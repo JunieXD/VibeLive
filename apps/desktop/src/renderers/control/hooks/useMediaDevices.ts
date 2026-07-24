@@ -2,9 +2,14 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import type { DesktopSource, MediaAccessStatus } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
 import {
+  appendSystemAudioBuffer,
+  clearSystemAudioBuffer,
   createAudioChannelState,
+  markSystemAudioSubmitted,
+  pendingSystemAudioSnapshot,
   releaseFailedLoopbackCapture,
   resetAudioSegment,
+  resetSpeechGate,
   shouldReleaseLoopbackVideo,
   updateAudioTransportError,
   type AudioChannelState
@@ -12,8 +17,10 @@ import {
 import { loadAudioSettings, saveAudioSettings } from '../audio-settings'
 import {
   AUDIO_SENTENCE_SILENCE_SECONDS,
-  AUDIO_SPEECH_THRESHOLD,
-  encodePcm16Mono
+  AUDIO_SPEECH_CONFIRMATION_MS,
+  encodePcm16Mono,
+  speechThresholds,
+  updateNoiseFloor
 } from '../audio'
 import {
   bindMediaStreamToVideo,
@@ -168,33 +175,10 @@ export function useMediaDevices({
     setCameraStream(null)
   }, [])
 
-  const flushAudioSegment = useCallback((channel: AudioChannelState): Promise<void> => {
-    if (!mediaIngestEnabledRef.current) {
-      resetAudioSegment(channel)
-      return channel.sendQueue
-    }
-    const sampleRate = channel.sampleRate
-    const sampleCount = channel.sampleCount
-    const minimumSamples = Math.round(sampleRate * 0.1)
-    if (sampleRate <= 0 || sampleCount < minimumSamples) {
-      resetAudioSegment(channel)
-      return channel.sendQueue
-    }
-
-    const chunks = channel.chunks
-    const capturedAtMs = channel.segmentStartedAt ?? Date.now()
-    resetAudioSegment(channel)
-    const sequence = channel.sequence + 1
-    channel.sequence = sequence
-    const body = encodePcm16Mono(chunks, sampleRate)
-    const send = channel.sendQueue.then(() =>
-      window.advx.submitAudioSegment({
-        source: channel.source,
-        inputId: `${channel.source}-${capturedAtMs}-${sequence}`,
-        capturedAtMs,
-        body
-      })
-    )
+  const observeAudioTransport = useCallback((
+    channel: AudioChannelState,
+    send: Promise<void>
+  ): Promise<void> => {
     const observed = send.then(
       () => {
         channel.ingestErrorReported = false
@@ -228,6 +212,90 @@ export function useMediaDevices({
     return observed
   }, [])
 
+  const enqueueAudioSegment = useCallback((
+    channel: AudioChannelState,
+    input: {
+      inputId: string
+      capturedAtMs: number
+      body: Uint8Array
+      turnId: string
+      systemAudioRequired?: boolean
+    }
+  ): Promise<void> => {
+    const send = channel.sendQueue.then(() =>
+      window.advx.submitAudioSegment({
+        source: channel.source,
+        ...input
+      })
+    )
+    observeAudioTransport(channel, send)
+    return send
+  }, [observeAudioTransport])
+
+  const flushMicrophoneSegment = useCallback((channel: AudioChannelState): Promise<void> => {
+    if (!mediaIngestEnabledRef.current) {
+      resetAudioSegment(channel)
+      return channel.sendQueue
+    }
+    const sampleRate = channel.sampleRate
+    const sampleCount = channel.sampleCount
+    const minimumSamples = Math.round(sampleRate * 0.1)
+    if (sampleRate <= 0 || sampleCount < minimumSamples) {
+      resetAudioSegment(channel)
+      return channel.sendQueue
+    }
+
+    const chunks = channel.chunks
+    const capturedAtMs = channel.segmentStartedAt ?? Date.now()
+    const endedAtMs = Date.now()
+    const systemChannel = systemAudioChannelRef.current
+    const systemAudioWasActive = systemChannel.stream !== null
+    const sequence = channel.sequence + 1
+    channel.sequence = sequence
+    resetAudioSegment(channel)
+    const microphoneBody = encodePcm16Mono(chunks, sampleRate)
+    const send = channel.sendQueue.then(async () => {
+      // Select the system range only after the previous turn settles, so a slow
+      // upload cannot cause this turn to submit already-consumed audio again.
+      const systemSnapshot = systemAudioWasActive
+        ? pendingSystemAudioSnapshot(systemChannel, endedAtMs)
+        : null
+      const turnId = crypto.randomUUID()
+      let systemSend: Promise<void> | null = null
+      if (systemSnapshot !== null) {
+        const systemSequence = systemChannel.sequence + 1
+        systemChannel.sequence = systemSequence
+        systemSend = enqueueAudioSegment(systemChannel, {
+          inputId: `system_audio-${systemSnapshot.capturedAtMs}-${systemSequence}`,
+          capturedAtMs: systemSnapshot.capturedAtMs,
+          body: encodePcm16Mono(systemSnapshot.chunks, systemSnapshot.sampleRate),
+          turnId
+        })
+      }
+      const microphoneSend = window.advx.submitAudioSegment({
+        source: 'microphone',
+        inputId: `microphone-${capturedAtMs}-${sequence}`,
+        capturedAtMs,
+        body: microphoneBody,
+        turnId,
+        systemAudioRequired: systemSnapshot !== null
+      })
+      if (systemSend === null) {
+        await microphoneSend
+        return
+      }
+      const [systemResult, microphoneResult] = await Promise.allSettled([
+        systemSend,
+        microphoneSend
+      ])
+      if (systemResult.status === 'fulfilled') {
+        markSystemAudioSubmitted(systemChannel, systemSnapshot.endedAtMs)
+      }
+      if (microphoneResult.status === 'rejected') throw microphoneResult.reason
+    })
+    return observeAudioTransport(channel, send)
+  }, [enqueueAudioSegment, observeAudioTransport])
+
   const stopMicrophone = useCallback(async (
     preservePendingStream?: MediaStream
   ): Promise<void> => {
@@ -249,14 +317,14 @@ export function useMediaDevices({
     microphoneStreamRef.current = null
     channel.stream = null
     stopMediaStream(stream)
-    await flushAudioSegment(channel)
+    await flushMicrophoneSegment(channel)
     updateAudioTransportError(channel, null, setMicrophoneTransportError)
     const context = channel.context
     channel.context = null
     if (context && context.state !== 'closed') await context.close().catch(() => undefined)
     setMicrophoneLevel(0)
     setMicrophoneReady(false)
-  }, [flushAudioSegment])
+  }, [flushMicrophoneSegment])
 
   const stopSystemAudio = useCallback(async (): Promise<void> => {
     const channel = systemAudioChannelRef.current
@@ -270,7 +338,8 @@ export function useMediaDevices({
       processor.onaudioprocess = null
       processor.disconnect()
     }
-    await flushAudioSegment(channel)
+    clearSystemAudioBuffer(channel)
+    resetAudioSegment(channel)
     updateAudioTransportError(channel, null, setSystemAudioTransportError)
     const context = channel.context
     channel.context = null
@@ -286,7 +355,7 @@ export function useMediaDevices({
     )) {
       stopCapture()
     }
-  }, [flushAudioSegment, stopCapture])
+  }, [stopCapture])
 
   const refreshMicrophones = useCallback(async (preferred?: string, id?: number) => {
     const devices = await navigator.mediaDevices.enumerateDevices()
@@ -460,26 +529,42 @@ export function useMediaDevices({
           samples.reduce((total, sample) => total + sample * sample, 0) / samples.length
         )
         const now = Date.now()
-        if (channel.segmentStartedAt === null) {
-          if (level < AUDIO_SPEECH_THRESHOLD) return
-          channel.segmentStartedAt = now
-          try {
-            window.advx.notifyVoiceActivity(channel.source, now)
-          } catch (error) {
-            console.error('Voice activity notification failed; continuing audio ingestion', error)
-          }
-        }
+        const sampleRate = context.sampleRate || event.inputBuffer.sampleRate
         const copy = new Float32Array(samples)
+        channel.sampleRate = sampleRate
+        if (channel.source === 'system_audio') {
+          appendSystemAudioBuffer(channel, copy, sampleRate, now)
+          return
+        }
+
+        const thresholds = speechThresholds(channel.noiseFloor)
+        if (channel.segmentStartedAt === null) {
+          channel.noiseFloor = updateNoiseFloor(channel.noiseFloor, level)
+          if (level < thresholds.start) {
+            channel.candidateChunks = []
+            channel.candidateStartedAt = null
+            return
+          }
+          if (channel.candidateStartedAt === null) channel.candidateStartedAt = now
+          channel.candidateChunks.push(copy)
+          if (now - channel.candidateStartedAt < AUDIO_SPEECH_CONFIRMATION_MS) return
+          channel.segmentStartedAt = channel.candidateStartedAt
+          channel.chunks = channel.candidateChunks
+          channel.sampleCount = channel.chunks.reduce((total, chunk) => total + chunk.length, 0)
+          channel.candidateChunks = []
+          channel.candidateStartedAt = null
+          channel.lastSpeechAt = now
+          return
+        }
         channel.chunks.push(copy)
         channel.sampleCount += copy.length
-        channel.sampleRate = context.sampleRate || event.inputBuffer.sampleRate
-        if (level >= AUDIO_SPEECH_THRESHOLD) {
+        if (level >= thresholds.continue) {
           channel.lastSpeechAt = now
         } else if (
           channel.lastSpeechAt !== null &&
           now - channel.lastSpeechAt >= AUDIO_SENTENCE_SILENCE_SECONDS * 1_000
         ) {
-          void flushAudioSegment(channel)
+          void flushMicrophoneSegment(channel)
         }
       }
       if (context.state === 'suspended') {
@@ -490,7 +575,11 @@ export function useMediaDevices({
       channel.context = context
       channel.processor = processor
       channel.sampleRate = context.sampleRate
-      resetAudioSegment(channel)
+      if (channel.source === 'microphone') resetSpeechGate(channel)
+      else {
+        resetAudioSegment(channel)
+        clearSystemAudioBuffer(channel)
+      }
       const meterSamples = new Uint8Array(analyser.fftSize)
       const measure = (): void => {
         if (channel.stream !== stream) return
@@ -504,7 +593,7 @@ export function useMediaDevices({
       if (context.state !== 'closed') await context.close().catch(() => undefined)
       throw error
     }
-  }, [assertCurrent, flushAudioSegment, sessionStatusRef])
+  }, [assertCurrent, flushMicrophoneSegment, sessionStatusRef])
 
   const startMicrophone = useCallback(async (id: number, deviceId?: string): Promise<MediaStream> => {
     assertCurrent(id)

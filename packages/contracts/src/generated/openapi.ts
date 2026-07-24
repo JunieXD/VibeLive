@@ -2610,6 +2610,16 @@ export interface components {
             committed_at_ms: number;
             /** @default microphone */
             source: components["schemas"]["AudioSource"];
+            /**
+             * Turn Id
+             * @default null
+             */
+            turn_id: string | null;
+            /**
+             * System Audio Required
+             * @default false
+             */
+            system_audio_required: boolean;
         };
         /** ClientHello */
         ClientHello: {

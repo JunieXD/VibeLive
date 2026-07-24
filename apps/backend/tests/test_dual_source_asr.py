@@ -12,14 +12,18 @@ from advx_backend.application.ports.ingest import AudioCommit, AudioInput
 from advx_backend.application.recorded_scenario import _RecordedAsrProvider
 from advx_backend.contracts.realtime import AsrTranscriptEvent
 from advx_backend.domain.observation import Observation
+from advx_backend.domain.room import RoomEventSource
 from advx_backend.providers.asr.mux import AsrProviderMux
 
 AUDIO_FORMAT = "audio/pcm;rate=16000;channels=1;format=s16le"
 
 
 class _Clock:
+    def __init__(self, now_ms: int = 10_000) -> None:
+        self._now_ms = now_ms
+
     def now_ms(self) -> int:
-        return 10_000
+        return self._now_ms
 
 
 class _SessionTasks:
@@ -93,6 +97,9 @@ def _ingest(
     context: _Context | None = None,
     scheduler: _Scheduler | None = None,
     publisher: _Publisher | None = None,
+    clock: _Clock | None = None,
+    voice_turn_silence_ms: int = 1,
+    coordinated_turn_timeout_ms: int = 50,
 ) -> IngestService:
     service = IngestService(
         room_service=room or _Room(),
@@ -101,8 +108,9 @@ def _ingest(
         asr_provider=asr,
         scheduler=scheduler or _Scheduler(),
         session_tasks=_SessionTasks(),
-        clock=_Clock(),
-        voice_turn_silence_ms=1,
+        clock=clock or _Clock(),
+        voice_turn_silence_ms=voice_turn_silence_ms,
+        coordinated_turn_timeout_ms=coordinated_turn_timeout_ms,
         transcript_publisher=publisher,
     )
     service._active_session_id = "session"
@@ -160,7 +168,7 @@ async def test_audio_pending_commit_and_ordering_are_isolated_by_source() -> Non
 
 
 @pytest.mark.asyncio
-async def test_transcripts_room_events_realtime_and_voice_turns_are_source_isolated() -> None:
+async def test_transcripts_room_events_and_realtime_are_source_isolated() -> None:
     room = _Room()
     context = _Context()
     scheduler = _Scheduler()
@@ -205,16 +213,391 @@ async def test_transcripts_room_events_realtime_and_voice_turns_are_source_isola
     await asyncio.sleep(0.01)
 
     assert [event.source_id for event in room.events] == ["host", "system-audio"]
+    assert [event.source_type for event in room.events] == [
+        RoomEventSource.USER_VOICE,
+        RoomEventSource.SYSTEM_EVENT,
+    ]
     assert [event.payload["audio_source"] for event in room.events] == [
         "microphone",
         "system_audio",
     ]
-    assert len(scheduler.observations) == 2
+    assert len(scheduler.observations) == 1
     assert [event.final for event in publisher.events] == [False, True, False, True]
     assert ingest.partial_transcript_snapshot("session") is None
     assert (
         ingest.partial_transcript_snapshot("session", AudioSource.SYSTEM_AUDIO) is None
     )
+
+
+async def _commit_audio(
+    ingest: IngestService,
+    *,
+    input_id: str,
+    source: AudioSource,
+    turn_id: str,
+    captured_at_ms: int,
+    system_audio_required: bool = False,
+) -> None:
+    await ingest.submit_audio(
+        AudioInput(
+            session_id="session",
+            input_id=input_id,
+            captured_at_ms=captured_at_ms,
+            format=AUDIO_FORMAT,
+            body=b"\x00\x00" * 160,
+            source=source,
+        )
+    )
+    await ingest.commit_audio(
+        AudioCommit(
+            session_id="session",
+            input_id=input_id,
+            committed_at_ms=captured_at_ms + 10,
+            source=source,
+            turn_id=turn_id,
+            system_audio_required=system_audio_required,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_coordinated_turn_waits_for_system_final_and_schedules_once() -> None:
+    room = _Room()
+    context = _Context()
+    scheduler = _Scheduler()
+    ingest = _ingest(asr=_Asr(), room=room, context=context, scheduler=scheduler)
+
+    await _commit_audio(
+        ingest,
+        input_id="system-1",
+        source=AudioSource.SYSTEM_AUDIO,
+        turn_id="turn-1",
+        captured_at_ms=100,
+    )
+    await _commit_audio(
+        ingest,
+        input_id="mic-1",
+        source=AudioSource.MICROPHONE,
+        turn_id="turn-1",
+        captured_at_ms=200,
+        system_audio_required=True,
+    )
+
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.MICROPHONE,
+            text="主播的问题",
+            started_at_ms=200,
+            ended_at_ms=210,
+            final=True,
+            utterance_id="mic-1",
+        ),
+    )
+    await asyncio.sleep(0.01)
+
+    assert [event.text for event in room.events] == ["主播的问题"]
+    assert scheduler.observations == []
+
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.SYSTEM_AUDIO,
+            text="视频里的对白",
+            started_at_ms=100,
+            ended_at_ms=110,
+            final=True,
+            utterance_id="system-1",
+        ),
+    )
+    await asyncio.sleep(0.01)
+
+    assert [event.source_id for event in room.events] == ["host", "system-audio"]
+    assert len(scheduler.observations) == 1
+    assert context.calls[0]["trigger_event_ids"] == ("voice-1", "voice-2")
+
+
+@pytest.mark.asyncio
+async def test_system_final_never_schedules_without_a_microphone_turn() -> None:
+    room = _Room()
+    scheduler = _Scheduler()
+    ingest = _ingest(
+        asr=_Asr(),
+        room=room,
+        scheduler=scheduler,
+        coordinated_turn_timeout_ms=5,
+    )
+
+    await _commit_audio(
+        ingest,
+        input_id="system-1",
+        source=AudioSource.SYSTEM_AUDIO,
+        turn_id="turn-1",
+        captured_at_ms=100,
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.SYSTEM_AUDIO,
+            text="视频里的对白",
+            started_at_ms=100,
+            ended_at_ms=110,
+            final=True,
+            utterance_id="system-1",
+        ),
+    )
+    await asyncio.sleep(0.02)
+
+    assert [event.text for event in room.events] == ["视频里的对白"]
+    assert scheduler.observations == []
+
+
+@pytest.mark.asyncio
+async def test_empty_system_final_completes_a_required_turn() -> None:
+    room = _Room()
+    context = _Context()
+    scheduler = _Scheduler()
+    ingest = _ingest(asr=_Asr(), room=room, context=context, scheduler=scheduler)
+
+    await _commit_audio(
+        ingest,
+        input_id="system-1",
+        source=AudioSource.SYSTEM_AUDIO,
+        turn_id="turn-1",
+        captured_at_ms=100,
+    )
+    await _commit_audio(
+        ingest,
+        input_id="mic-1",
+        source=AudioSource.MICROPHONE,
+        turn_id="turn-1",
+        captured_at_ms=200,
+        system_audio_required=True,
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.MICROPHONE,
+            text="主播的问题",
+            started_at_ms=200,
+            ended_at_ms=210,
+            final=True,
+            utterance_id="mic-1",
+        ),
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.SYSTEM_AUDIO,
+            text="   ",
+            started_at_ms=100,
+            ended_at_ms=110,
+            final=True,
+            utterance_id="system-1",
+        ),
+    )
+    await asyncio.sleep(0.01)
+
+    assert [event.text for event in room.events] == ["主播的问题"]
+    assert len(scheduler.observations) == 1
+    assert context.calls[0]["trigger_event_ids"] == ("voice-1",)
+
+
+@pytest.mark.asyncio
+async def test_empty_microphone_final_never_schedules_ai() -> None:
+    room = _Room()
+    scheduler = _Scheduler()
+    ingest = _ingest(asr=_Asr(), room=room, scheduler=scheduler)
+
+    await _commit_audio(
+        ingest,
+        input_id="mic-1",
+        source=AudioSource.MICROPHONE,
+        turn_id="turn-1",
+        captured_at_ms=200,
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.MICROPHONE,
+            text="",
+            started_at_ms=200,
+            ended_at_ms=210,
+            final=True,
+            utterance_id="mic-1",
+        ),
+    )
+    await asyncio.sleep(0.01)
+
+    assert room.events == []
+    assert scheduler.observations == []
+
+
+@pytest.mark.asyncio
+async def test_required_system_audio_timeout_never_schedules_ai() -> None:
+    room = _Room()
+    scheduler = _Scheduler()
+    ingest = _ingest(
+        asr=_Asr(),
+        room=room,
+        scheduler=scheduler,
+        coordinated_turn_timeout_ms=5,
+    )
+
+    await _commit_audio(
+        ingest,
+        input_id="mic-1",
+        source=AudioSource.MICROPHONE,
+        turn_id="turn-1",
+        captured_at_ms=200,
+        system_audio_required=True,
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.MICROPHONE,
+            text="主播的问题",
+            started_at_ms=200,
+            ended_at_ms=210,
+            final=True,
+            utterance_id="mic-1",
+        ),
+    )
+    await asyncio.sleep(0.02)
+
+    assert [event.text for event in room.events] == ["主播的问题"]
+    assert scheduler.observations == []
+
+
+@pytest.mark.asyncio
+async def test_missing_microphone_final_never_schedules_ai() -> None:
+    room = _Room()
+    scheduler = _Scheduler()
+    ingest = _ingest(
+        asr=_Asr(),
+        room=room,
+        scheduler=scheduler,
+        coordinated_turn_timeout_ms=5,
+    )
+
+    await _commit_audio(
+        ingest,
+        input_id="system-1",
+        source=AudioSource.SYSTEM_AUDIO,
+        turn_id="turn-1",
+        captured_at_ms=100,
+    )
+    await _commit_audio(
+        ingest,
+        input_id="mic-1",
+        source=AudioSource.MICROPHONE,
+        turn_id="turn-1",
+        captured_at_ms=200,
+        system_audio_required=True,
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.SYSTEM_AUDIO,
+            text="视频里的对白",
+            started_at_ms=100,
+            ended_at_ms=110,
+            final=True,
+            utterance_id="system-1",
+        ),
+    )
+    await asyncio.sleep(0.02)
+
+    assert [event.text for event in room.events] == ["视频里的对白"]
+    assert scheduler.observations == []
+
+
+@pytest.mark.asyncio
+async def test_timed_out_turn_does_not_block_the_next_final_transcript() -> None:
+    scheduler = _Scheduler()
+    ingest = _ingest(
+        asr=_Asr(),
+        scheduler=scheduler,
+        coordinated_turn_timeout_ms=5,
+    )
+
+    await _commit_audio(
+        ingest,
+        input_id="mic-1",
+        source=AudioSource.MICROPHONE,
+        turn_id="turn-1",
+        captured_at_ms=100,
+        system_audio_required=True,
+    )
+    await asyncio.sleep(0.02)
+    await _commit_audio(
+        ingest,
+        input_id="mic-2",
+        source=AudioSource.MICROPHONE,
+        turn_id="turn-2",
+        captured_at_ms=200,
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.MICROPHONE,
+            text="下一句正常返回",
+            started_at_ms=200,
+            ended_at_ms=210,
+            final=True,
+            utterance_id="mic-2",
+        ),
+    )
+    await asyncio.sleep(0.01)
+
+    assert len(scheduler.observations) == 1
+
+
+@pytest.mark.asyncio
+async def test_coordinated_turn_waits_until_the_microphone_delay_has_elapsed() -> None:
+    room = _Room()
+    scheduler = _Scheduler()
+    ingest = _ingest(
+        asr=_Asr(),
+        room=room,
+        scheduler=scheduler,
+        clock=_Clock(1_000),
+        voice_turn_silence_ms=30,
+    )
+
+    await _commit_audio(
+        ingest,
+        input_id="mic-1",
+        source=AudioSource.MICROPHONE,
+        turn_id="turn-1",
+        captured_at_ms=1_000,
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.MICROPHONE,
+            text="主播的问题",
+            started_at_ms=1_000,
+            ended_at_ms=1_010,
+            final=True,
+            utterance_id="mic-1",
+        ),
+    )
+    await asyncio.sleep(0.01)
+    assert scheduler.observations == []
+
+    await asyncio.sleep(0.04)
+    assert len(scheduler.observations) == 1
 
 
 @pytest.mark.asyncio

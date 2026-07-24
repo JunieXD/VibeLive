@@ -665,6 +665,8 @@ export class BackendClient {
     capturedAtMs: number;
     body: Uint8Array;
     source: AudioSource;
+    turnId?: string;
+    systemAudioRequired?: boolean;
   }): Promise<void> {
     const send = async (): Promise<void> => {
       const sessionId = this.requireRunningSession();
@@ -689,7 +691,11 @@ export class BackendClient {
         session_id: sessionId,
         input_id: input.inputId,
         source: input.source,
-        committed_at_ms: Date.now()
+        committed_at_ms: Date.now(),
+        ...(input.turnId ? { turn_id: input.turnId } : {}),
+        ...(input.source === "microphone" && input.systemAudioRequired
+          ? { system_audio_required: true }
+          : {})
       });
       await committed;
     };

@@ -129,6 +129,8 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
                     "session_id": "session-1",
                     "input_id": "audio-1",
                     "committed_at_ms": 101,
+                    "turn_id": "turn-1",
+                    "system_audio_required": True,
                 }
             )
             assert websocket.receive_json()["stage"] == "committed"
@@ -146,6 +148,8 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
     assert isinstance(ingest.inputs[0], AudioInput)
     assert ingest.inputs[0].body == audio_body
     assert isinstance(ingest.inputs[1], AudioCommit)
+    assert ingest.inputs[1].turn_id == "turn-1"
+    assert ingest.inputs[1].system_audio_required
     assert isinstance(ingest.inputs[2], FrameInput)
     assert ingest.inputs[2].body == frame_body
     assert ingest.inputs[2].mime_type == "image/webp"

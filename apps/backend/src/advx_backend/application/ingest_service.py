@@ -1,8 +1,8 @@
 import asyncio
 import logging
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from advx_backend.application.context_builder import ContextBuilder
@@ -34,6 +34,8 @@ from advx_backend.domain.observation import Observation
 from advx_backend.domain.room import RoomEventSource
 
 logger = logging.getLogger(__name__)
+
+_COORDINATED_TURN_TIMEOUT_MS = 70_000
 
 
 class ObservationScheduler(Protocol):
@@ -86,6 +88,7 @@ class _TrackedInput:
     kind: IngestInputKind
     timestamp_ms: int
     source: AudioSource | None = None
+    ended_at_ms: int | None = None
     accepted: bool = False
 
 
@@ -96,6 +99,28 @@ class _VoiceTurn:
     target_persona_id: str | None
     last_ended_at_ms: int
     task: asyncio.Task[None] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _CommittedAudio:
+    input_id: str
+    source: AudioSource
+    started_at_ms: int
+    ended_at_ms: int
+    turn_id: str | None = None
+
+
+@dataclass(slots=True)
+class _CoordinatedVoiceTurn:
+    committed_sources: set[AudioSource] = field(default_factory=set)
+    completed_sources: set[AudioSource] = field(default_factory=set)
+    event_ids: list[str] = field(default_factory=list)
+    system_audio_required: bool | None = None
+    microphone_ended_at_ms: int | None = None
+    target_viewer_id: str | None = None
+    target_persona_id: str | None = None
+    timeout_task: asyncio.Task[None] | None = None
+    schedule_task: asyncio.Task[None] | None = None
 
 
 class IngestService:
@@ -116,6 +141,7 @@ class IngestService:
         max_final_transcript_attempts: int = 3,
         final_transcript_retry_backoff_ms: int = 25,
         voice_turn_silence_ms: int = 1_500,
+        coordinated_turn_timeout_ms: int = _COORDINATED_TURN_TIMEOUT_MS,
         ambient_enabled: Callable[[str], Awaitable[bool]] | None = None,
         ambient_interval_ms: int = 30_000,
         transcript_publisher: TranscriptPublisher | None = None,
@@ -128,6 +154,10 @@ class IngestService:
             raise ValueError("final_transcript_retry_backoff_ms must not be negative")
         if voice_turn_silence_ms < 1:
             raise ValueError("voice_turn_silence_ms must be positive")
+        if coordinated_turn_timeout_ms < voice_turn_silence_ms:
+            raise ValueError(
+                "coordinated_turn_timeout_ms must not be shorter than voice_turn_silence_ms"
+            )
         if ambient_interval_ms < 1:
             raise ValueError("ambient_interval_ms must be positive")
         self._room_service = room_service
@@ -142,6 +172,7 @@ class IngestService:
         self._max_final_transcript_attempts = max_final_transcript_attempts
         self._final_transcript_retry_backoff_ms = final_transcript_retry_backoff_ms
         self._voice_turn_silence_ms = voice_turn_silence_ms
+        self._coordinated_turn_timeout_ms = coordinated_turn_timeout_ms
         self._ambient_enabled = ambient_enabled
         self._ambient_interval_ms = ambient_interval_ms
         self._transcript_publisher = transcript_publisher
@@ -150,6 +181,11 @@ class IngestService:
         self._seen_utterances: OrderedDict[str, int] = OrderedDict()
         self._partial_transcripts: dict[tuple[str, AudioSource], TranscriptSegment] = {}
         self._voice_turns: dict[tuple[str, AudioSource], _VoiceTurn] = {}
+        self._pending_final_audio: dict[AudioSource, deque[_CommittedAudio]] = {
+            source: deque() for source in AudioSource
+        }
+        self._coordinated_turns: dict[str, _CoordinatedVoiceTurn] = {}
+        self._coordinated_utterance_keys: OrderedDict[str, None] = OrderedDict()
         self._timestamp_floors: dict[tuple[IngestInputKind, AudioSource | None], int] = {}
         self._pending_audio_ids: dict[AudioSource, str] = {}
         self._result_task: asyncio.Task[None] | None = None
@@ -220,6 +256,12 @@ class IngestService:
                 for turn in self._voice_turns.values()
                 if turn.task is not None
             )
+            coordinated_tasks = tuple(
+                task
+                for turn in self._coordinated_turns.values()
+                for task in (turn.timeout_task, turn.schedule_task)
+                if task is not None
+            )
             ambient_task = self._ambient_task
             self._ambient_task = None
             self._active_session_id = None
@@ -234,6 +276,10 @@ class IngestService:
             task.cancel()
         if voice_tasks:
             await asyncio.gather(*voice_tasks, return_exceptions=True)
+        for task in coordinated_tasks:
+            task.cancel()
+        if coordinated_tasks:
+            await asyncio.gather(*coordinated_tasks, return_exceptions=True)
         if ambient_task is not None:
             ambient_task.cancel()
             await asyncio.gather(ambient_task, return_exceptions=True)
@@ -308,12 +354,15 @@ class IngestService:
         sample_rate, channels, sample_width_bits = self._parse_audio_format(input.format)
         if len(input.body) % (channels * sample_width_bits // 8) != 0:
             raise UnsupportedIngestFormatError("audio body is not aligned to complete PCM samples")
+        frame_count = len(input.body) // (channels * sample_width_bits // 8)
+        duration_ms = (frame_count * 1_000) // sample_rate
         await self._require_running(input.session_id)
-        await self._reserve_audio(input)
+        await self._reserve_audio(
+            input,
+            ended_at_ms=input.captured_at_ms + duration_ms,
+        )
         pushed = False
         try:
-            frame_count = len(input.body) // (channels * sample_width_bits // 8)
-            duration_ms = (frame_count * 1_000) // sample_rate
             await self._asr_provider.push_audio(
                 AudioChunk(
                     session_id=input.session_id,
@@ -335,6 +384,7 @@ class IngestService:
 
     async def commit_audio(self, commit: AudioCommit) -> IngestReceipt:
         await self._require_running(commit.session_id)
+        committed_audio: _CommittedAudio | None = None
         async with self._lock:
             self._require_active_locked(commit.session_id)
             if self._pending_audio_ids.get(commit.source) != commit.input_id:
@@ -346,7 +396,27 @@ class IngestService:
                 )
             ) is not None and commit.committed_at_ms < last_audio_at_ms:
                 raise IngestInputOutOfOrderError("audio commit precedes its captured input")
-        await self._asr_provider.commit(commit.source)
+            tracked = self._seen_inputs.get(commit.input_id)
+            if tracked is None or tracked.source is not commit.source:
+                raise UnknownAudioInputError(commit.input_id)
+            committed_audio = _CommittedAudio(
+                input_id=commit.input_id,
+                source=commit.source,
+                started_at_ms=tracked.timestamp_ms,
+                ended_at_ms=tracked.ended_at_ms or tracked.timestamp_ms,
+                turn_id=commit.turn_id,
+            )
+            self._register_committed_audio_locked(
+                commit.session_id,
+                commit,
+                committed_audio,
+            )
+        try:
+            await self._asr_provider.commit(commit.source)
+        except BaseException:
+            assert committed_audio is not None
+            await self._discard_committed_audio(commit.session_id, committed_audio)
+            raise
         await self._release_audio(commit.input_id, commit.source)
         return self._receipt(
             commit.session_id,
@@ -415,20 +485,22 @@ class IngestService:
                     )
 
     async def _handle_transcript(self, session_id: str, segment: TranscriptSegment) -> None:
+        if segment.session_id != session_id:
+            return
         text = segment.text.strip()
-        if not text or segment.session_id != session_id:
-            return
-        if len(text) > MAX_TEXT_INPUT_LENGTH:
-            logger.warning(
-                "discarded ASR transcript exceeding the Room text limit",
-                extra={
-                    "session_id": session_id,
-                    "audio_source": segment.source.value,
-                    "text_length": len(text),
-                },
-            )
-            return
         if not segment.final:
+            if not text:
+                return
+            if len(text) > MAX_TEXT_INPUT_LENGTH:
+                logger.warning(
+                    "discarded ASR transcript exceeding the Room text limit",
+                    extra={
+                        "session_id": session_id,
+                        "audio_source": segment.source.value,
+                        "text_length": len(text),
+                    },
+                )
+                return
             async with self._lock:
                 if self._active_session_id == session_id:
                     self._partial_transcripts[(session_id, segment.source)] = segment
@@ -443,12 +515,52 @@ class IngestService:
         )
         utterance_key = f"{session_id}\0{segment.source.value}\0{utterance_id}"
         async with self._lock:
-            if self._seen_utterances.get(utterance_key, 0) >= segment.revision:
+            if (
+                self._seen_utterances.get(utterance_key, 0) >= segment.revision
+                or utterance_key in self._coordinated_utterance_keys
+            ):
                 return
+            committed_audio = self._committed_audio_for_segment_locked(segment)
+
+        if len(text) > MAX_TEXT_INPUT_LENGTH:
+            logger.warning(
+                "discarded ASR transcript exceeding the Room text limit",
+                extra={
+                    "session_id": session_id,
+                    "audio_source": segment.source.value,
+                    "text_length": len(text),
+                },
+            )
+            await self._finish_final_transcript(
+                session_id,
+                segment=segment,
+                utterance_key=utterance_key,
+                committed_audio=committed_audio,
+                event_id=None,
+                text_present=False,
+                valid=False,
+            )
+            return
+
+        if not text:
+            await self._finish_final_transcript(
+                session_id,
+                segment=segment,
+                utterance_key=utterance_key,
+                committed_audio=committed_audio,
+                event_id=None,
+                text_present=False,
+                valid=True,
+            )
+            return
+
         target_viewer_id: str | None = None
         target_persona_id: str | None = None
         target_payload: dict[str, object] = {}
-        if self._voice_target_resolver is not None:
+        if (
+            segment.source is AudioSource.MICROPHONE
+            and self._voice_target_resolver is not None
+        ):
             resolution = await self._voice_target_resolver.resolve(segment)
             target_payload = {
                 "target_resolver_id": resolution.resolver_id,
@@ -461,44 +573,315 @@ class IngestService:
                     target_payload["target_viewer_id"] = target_viewer_id
                 if target_persona_id is not None:
                     target_payload["target_persona_id"] = target_persona_id
+        payload: dict[str, object] = {
+            "final": True,
+            "started_at_ms": segment.started_at_ms,
+            "ended_at_ms": segment.ended_at_ms,
+            "utterance_id": utterance_id,
+            "revision": segment.revision,
+            "audio_source": segment.source.value,
+            **target_payload,
+        }
+        if committed_audio is not None and committed_audio.turn_id is not None:
+            payload["turn_id"] = committed_audio.turn_id
+        if segment.source is AudioSource.SYSTEM_AUDIO:
+            payload["event"] = "system_audio_transcript"
         event = await self._room_service.append_event(
             session_id,
-            source_type=RoomEventSource.USER_VOICE,
+            source_type=(
+                RoomEventSource.USER_VOICE
+                if segment.source is AudioSource.MICROPHONE
+                else RoomEventSource.SYSTEM_EVENT
+            ),
             source_id=(
                 "host"
                 if segment.source is AudioSource.MICROPHONE
                 else "system-audio"
             ),
-            text=segment.text.strip(),
-            payload={
-                "final": True,
-                "started_at_ms": segment.started_at_ms,
-                "ended_at_ms": segment.ended_at_ms,
-                "utterance_id": utterance_id,
-                "revision": segment.revision,
-                "audio_source": segment.source.value,
-                **target_payload,
-            },
+            text=text,
+            payload=payload,
         )
-        async with self._lock:
-            committed_revision = self._seen_utterances.get(utterance_key, 0)
-            if segment.revision > committed_revision:
-                self._seen_utterances[utterance_key] = segment.revision
-                self._seen_utterances.move_to_end(utterance_key)
-                while len(self._seen_utterances) > self._max_tracked_input_ids:
-                    self._seen_utterances.popitem(last=False)
-            self._partial_transcripts.pop((session_id, segment.source), None)
-        await self._publish_transcript(
-            segment.model_copy(update={"utterance_id": utterance_id})
-        )
-        await self._queue_voice_turn(
+        await self._finish_final_transcript(
             session_id,
-            source=segment.source,
+            segment=segment,
+            utterance_key=utterance_key,
+            committed_audio=committed_audio,
             event_id=event.event_id,
-            ended_at_ms=segment.ended_at_ms,
+            text_present=True,
+            valid=True,
             target_viewer_id=target_viewer_id,
             target_persona_id=target_persona_id,
         )
+        await self._publish_transcript(
+            segment.model_copy(update={"utterance_id": utterance_id})
+        )
+        if committed_audio is None or committed_audio.turn_id is None:
+            await self._queue_voice_turn(
+                session_id,
+                source=segment.source,
+                event_id=event.event_id,
+                ended_at_ms=segment.ended_at_ms,
+                target_viewer_id=target_viewer_id,
+                target_persona_id=target_persona_id,
+            )
+
+    async def _finish_final_transcript(
+        self,
+        session_id: str,
+        *,
+        segment: TranscriptSegment,
+        utterance_key: str,
+        committed_audio: _CommittedAudio | None,
+        event_id: str | None,
+        text_present: bool,
+        valid: bool,
+        target_viewer_id: str | None = None,
+        target_persona_id: str | None = None,
+    ) -> None:
+        tasks_to_cancel: list[asyncio.Task[None]] = []
+        async with self._lock:
+            self._consume_committed_audio_locked(segment.source, committed_audio)
+            self._remember_utterance_locked(utterance_key, segment.revision)
+            self._partial_transcripts.pop((session_id, segment.source), None)
+            if committed_audio is not None and committed_audio.turn_id is not None:
+                self._remember_coordinated_utterance_locked(utterance_key)
+                tasks_to_cancel.extend(
+                    self._complete_coordinated_turn_locked(
+                        session_id,
+                        turn_id=committed_audio.turn_id,
+                        source=segment.source,
+                        event_id=event_id,
+                        text_present=text_present,
+                        valid=valid,
+                        target_viewer_id=target_viewer_id,
+                        target_persona_id=target_persona_id,
+                    )
+                )
+        current_task = asyncio.current_task()
+        for task in tasks_to_cancel:
+            if task is not current_task and not task.done():
+                task.cancel()
+
+    def _register_committed_audio_locked(
+        self,
+        session_id: str,
+        commit: AudioCommit,
+        committed_audio: _CommittedAudio,
+    ) -> None:
+        if commit.turn_id is not None:
+            turn = self._coordinated_turns.get(commit.turn_id)
+            if turn is None:
+                turn = _CoordinatedVoiceTurn()
+                self._coordinated_turns[commit.turn_id] = turn
+                turn.timeout_task = asyncio.create_task(
+                    self._expire_coordinated_turn(session_id, commit.turn_id, turn),
+                    name=f"ingest-coordinated-turn-timeout:{session_id}:{commit.turn_id}",
+                )
+            if commit.source in turn.committed_sources:
+                raise IngestInputOutOfOrderError("audio source was already committed for this turn")
+            turn.committed_sources.add(commit.source)
+            if commit.source is AudioSource.MICROPHONE:
+                turn.system_audio_required = commit.system_audio_required
+                turn.microphone_ended_at_ms = committed_audio.ended_at_ms
+        self._pending_final_audio[commit.source].append(committed_audio)
+
+    async def _discard_committed_audio(
+        self,
+        session_id: str,
+        committed_audio: _CommittedAudio,
+    ) -> None:
+        tasks_to_cancel: list[asyncio.Task[None]] = []
+        async with self._lock:
+            self._remove_committed_audio_locked(committed_audio.source, committed_audio)
+            if committed_audio.turn_id is not None:
+                turn = self._coordinated_turns.get(committed_audio.turn_id)
+                if turn is not None:
+                    self._coordinated_turns.pop(committed_audio.turn_id, None)
+                    tasks_to_cancel.extend(
+                        task
+                        for task in (turn.timeout_task, turn.schedule_task)
+                        if task is not None
+                    )
+        current_task = asyncio.current_task()
+        for task in tasks_to_cancel:
+            if task is not current_task and not task.done():
+                task.cancel()
+
+    def _consume_committed_audio_locked(
+        self,
+        source: AudioSource,
+        committed_audio: _CommittedAudio | None,
+    ) -> None:
+        if committed_audio is None:
+            return
+        pending = self._pending_final_audio[source]
+        for index, item in enumerate(pending):
+            if item is committed_audio:
+                for _ in range(index + 1):
+                    pending.popleft()
+                return
+
+    def _remove_committed_audio_locked(
+        self,
+        source: AudioSource,
+        committed_audio: _CommittedAudio,
+    ) -> None:
+        pending = self._pending_final_audio[source]
+        for index, item in enumerate(pending):
+            if item is committed_audio:
+                del pending[index]
+                return
+
+    def _committed_audio_for_segment_locked(
+        self,
+        segment: TranscriptSegment,
+    ) -> _CommittedAudio | None:
+        pending = self._pending_final_audio[segment.source]
+        for committed_audio in pending:
+            if (
+                committed_audio.started_at_ms == segment.started_at_ms
+                and committed_audio.ended_at_ms == segment.ended_at_ms
+            ):
+                return committed_audio
+        for committed_audio in pending:
+            if (
+                segment.started_at_ms < committed_audio.ended_at_ms
+                and committed_audio.started_at_ms < segment.ended_at_ms
+            ):
+                return committed_audio
+        return pending[0] if pending else None
+
+    def _complete_coordinated_turn_locked(
+        self,
+        session_id: str,
+        *,
+        turn_id: str,
+        source: AudioSource,
+        event_id: str | None,
+        text_present: bool,
+        valid: bool,
+        target_viewer_id: str | None,
+        target_persona_id: str | None,
+    ) -> list[asyncio.Task[None]]:
+        turn = self._coordinated_turns.get(turn_id)
+        if turn is None or source not in turn.committed_sources:
+            return []
+        if not valid or (source is AudioSource.MICROPHONE and not text_present):
+            return self._discard_coordinated_turn_locked(turn_id, turn)
+
+        turn.completed_sources.add(source)
+        if event_id is not None:
+            turn.event_ids.append(event_id)
+        if source is AudioSource.MICROPHONE:
+            turn.target_viewer_id = target_viewer_id
+            turn.target_persona_id = target_persona_id
+        if not self._coordinated_turn_ready(turn) or turn.schedule_task is not None:
+            return []
+
+        turn.schedule_task = asyncio.create_task(
+            self._finalize_coordinated_turn(session_id, turn_id, turn),
+            name=f"ingest-coordinated-turn:{session_id}:{turn_id}",
+        )
+        return [] if turn.timeout_task is None else [turn.timeout_task]
+
+    @staticmethod
+    def _coordinated_turn_ready(turn: _CoordinatedVoiceTurn) -> bool:
+        if (
+            turn.system_audio_required is None
+            or turn.microphone_ended_at_ms is None
+            or AudioSource.MICROPHONE not in turn.completed_sources
+        ):
+            return False
+        return (
+            not turn.system_audio_required
+            or AudioSource.SYSTEM_AUDIO in turn.completed_sources
+        )
+
+    def _discard_coordinated_turn_locked(
+        self,
+        turn_id: str,
+        turn: _CoordinatedVoiceTurn,
+    ) -> list[asyncio.Task[None]]:
+        if self._coordinated_turns.get(turn_id) is turn:
+            self._coordinated_turns.pop(turn_id, None)
+        return [
+            task
+            for task in (turn.timeout_task, turn.schedule_task)
+            if task is not None
+        ]
+
+    async def _expire_coordinated_turn(
+        self,
+        session_id: str,
+        turn_id: str,
+        turn: _CoordinatedVoiceTurn,
+    ) -> None:
+        try:
+            await asyncio.sleep(self._coordinated_turn_timeout_ms / 1_000)
+            async with self._lock:
+                if (
+                    self._active_session_id != session_id
+                    or self._coordinated_turns.get(turn_id) is not turn
+                    or turn.timeout_task is not asyncio.current_task()
+                ):
+                    return
+                self._coordinated_turns.pop(turn_id, None)
+            logger.warning(
+                "coordinated ASR turn expired before all required results arrived",
+                extra={"session_id": session_id, "turn_id": turn_id},
+            )
+        except asyncio.CancelledError:
+            raise
+
+    async def _finalize_coordinated_turn(
+        self,
+        session_id: str,
+        turn_id: str,
+        turn: _CoordinatedVoiceTurn,
+    ) -> None:
+        try:
+            assert turn.microphone_ended_at_ms is not None
+            remaining_ms = max(
+                0,
+                turn.microphone_ended_at_ms
+                + self._voice_turn_silence_ms
+                - self._clock.now_ms(),
+            )
+            await asyncio.sleep(remaining_ms / 1_000)
+            async with self._lock:
+                if (
+                    self._active_session_id != session_id
+                    or self._coordinated_turns.get(turn_id) is not turn
+                    or turn.schedule_task is not asyncio.current_task()
+                ):
+                    return
+                self._coordinated_turns.pop(turn_id, None)
+                event_ids = tuple(turn.event_ids)
+                target_viewer_id = turn.target_viewer_id
+                target_persona_id = turn.target_persona_id
+            await self._schedule_observation(
+                session_id,
+                trigger_event_ids=event_ids,
+                target_viewer_id=target_viewer_id,
+                target_persona_id=target_persona_id,
+            )
+            await self._restart_ambient_timer(session_id)
+        except asyncio.CancelledError:
+            raise
+
+    def _remember_utterance_locked(self, utterance_key: str, revision: int) -> None:
+        committed_revision = self._seen_utterances.get(utterance_key, 0)
+        if revision > committed_revision:
+            self._seen_utterances[utterance_key] = revision
+            self._seen_utterances.move_to_end(utterance_key)
+            while len(self._seen_utterances) > self._max_tracked_input_ids:
+                self._seen_utterances.popitem(last=False)
+
+    def _remember_coordinated_utterance_locked(self, utterance_key: str) -> None:
+        self._coordinated_utterance_keys[utterance_key] = None
+        self._coordinated_utterance_keys.move_to_end(utterance_key)
+        while len(self._coordinated_utterance_keys) > self._max_tracked_input_ids:
+            self._coordinated_utterance_keys.popitem(last=False)
 
     async def _queue_voice_turn(
         self,
@@ -510,6 +893,8 @@ class IngestService:
         target_viewer_id: str | None,
         target_persona_id: str | None,
     ) -> None:
+        if source is AudioSource.SYSTEM_AUDIO:
+            return
         previous_task: asyncio.Task[None] | None = None
         async with self._lock:
             if self._active_session_id != session_id:
@@ -676,7 +1061,7 @@ class IngestService:
                 raise IngestInputOutOfOrderError(f"{kind.value} input is out of order")
             self._remember_locked(input_id, kind, timestamp_ms)
 
-    async def _reserve_audio(self, input: AudioInput) -> None:
+    async def _reserve_audio(self, input: AudioInput, *, ended_at_ms: int) -> None:
         async with self._lock:
             self._require_active_locked(input.session_id)
             self._require_unique_locked(input.input_id)
@@ -690,6 +1075,7 @@ class IngestService:
                 IngestInputKind.AUDIO,
                 input.captured_at_ms,
                 source=input.source,
+                ended_at_ms=ended_at_ms,
             )
             self._pending_audio_ids[input.source] = input.input_id
 
@@ -732,11 +1118,13 @@ class IngestService:
         kind: IngestInputKind,
         timestamp_ms: int,
         source: AudioSource | None = None,
+        ended_at_ms: int | None = None,
     ) -> None:
         self._seen_inputs[input_id] = _TrackedInput(
             kind=kind,
             timestamp_ms=timestamp_ms,
             source=source,
+            ended_at_ms=ended_at_ms,
         )
         while len(self._seen_inputs) > self._max_tracked_input_ids:
             evicted = next(
@@ -809,5 +1197,9 @@ class IngestService:
         self._seen_utterances.clear()
         self._partial_transcripts.clear()
         self._voice_turns.clear()
+        for pending in self._pending_final_audio.values():
+            pending.clear()
+        self._coordinated_turns.clear()
+        self._coordinated_utterance_keys.clear()
         self._timestamp_floors.clear()
         self._pending_audio_ids.clear()

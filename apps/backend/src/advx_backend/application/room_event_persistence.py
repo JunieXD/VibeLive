@@ -134,6 +134,11 @@ class _SystemEventPayload(_PayloadModel):
     mode_id: str | None = None
     round: int | None = Field(default=None, ge=0)
     tags: list[str] | None = None
+    audio_source: Literal[AudioSource.SYSTEM_AUDIO] | None = None
+    final: bool | None = None
+    started_at_ms: int | None = Field(default=None, ge=0)
+    ended_at_ms: int | None = Field(default=None, ge=0)
+    utterance_id: str | None = None
 
 
 class PersistentRuntimeRoomEventStore:

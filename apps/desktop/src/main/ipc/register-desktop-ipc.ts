@@ -1017,10 +1017,27 @@ export function registerDesktopIpc(
         capturedAtMs: number;
         body: Uint8Array;
         source: AudioSource;
+        turnId?: string;
+        systemAudioRequired?: boolean;
       }
     ) => {
       assertControlSender(event);
       if (!isAudioSource(input.source)) throw new Error("音频来源无效。");
+      if (input.turnId !== undefined && (!input.turnId || input.turnId.length > 128)) {
+        throw new Error("语音轮次无效。");
+      }
+      if (
+        input.systemAudioRequired !== undefined &&
+        typeof input.systemAudioRequired !== "boolean"
+      ) {
+        throw new Error("系统声音轮次标记无效。");
+      }
+      if (
+        input.systemAudioRequired &&
+        (input.source !== "microphone" || !input.turnId)
+      ) {
+        throw new Error("系统声音轮次必须由麦克风发起。");
+      }
       return backendClient.submitAudioSegment(input);
     }
   );

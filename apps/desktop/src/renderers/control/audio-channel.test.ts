@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendSystemAudioBuffer,
+  clearSystemAudioBuffer,
   createAudioChannelState,
+  markSystemAudioSubmitted,
+  pendingSystemAudioSnapshot,
   releaseFailedLoopbackCapture,
   resetAudioSegment,
   shouldReleaseLoopbackVideo,
@@ -100,5 +104,36 @@ describe('audio channel state', () => {
     updateAudioTransportError(microphone, null, (error) => { microphoneError = error })
     expect(systemAudioError).toBeNull()
     expect(microphoneError).toBeNull()
+  })
+
+  it('keeps only the most recent minute of system audio', () => {
+    const systemAudio = createAudioChannelState('system_audio')
+    for (let end = 10_000; end <= 70_000; end += 10_000) {
+      appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, end)
+    }
+
+    const snapshot = pendingSystemAudioSnapshot(systemAudio, 70_000)
+
+    expect(snapshot?.capturedAtMs).toBe(10_000)
+    expect(snapshot?.endedAtMs).toBe(70_000)
+    expect(snapshot?.chunks.reduce((total, chunk) => total + chunk.length, 0)).toBe(60_000)
+  })
+
+  it('submits only system audio that was not part of the previous microphone turn', () => {
+    const systemAudio = createAudioChannelState('system_audio')
+    appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, 10_000)
+    appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, 20_000)
+
+    const first = pendingSystemAudioSnapshot(systemAudio, 20_000)
+    markSystemAudioSubmitted(systemAudio, first?.endedAtMs ?? 0)
+    appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, 30_000)
+    const second = pendingSystemAudioSnapshot(systemAudio, 30_000)
+
+    expect(first?.capturedAtMs).toBe(0)
+    expect(second?.capturedAtMs).toBe(20_000)
+    expect(second?.chunks.reduce((total, chunk) => total + chunk.length, 0)).toBe(10_000)
+
+    clearSystemAudioBuffer(systemAudio)
+    expect(pendingSystemAudioSnapshot(systemAudio, 30_000)).toBeNull()
   })
 })

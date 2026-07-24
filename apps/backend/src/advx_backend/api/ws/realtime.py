@@ -456,6 +456,8 @@ async def _dispatch_ingest(
                 input_id=message.input_id,
                 committed_at_ms=message.committed_at_ms,
                 source=message.source,
+                turn_id=message.turn_id,
+                system_audio_required=message.system_audio_required,
             )
         )
 

@@ -22,7 +22,7 @@ const MAGIC = Buffer.from("ADVX", "ascii");
 const VERSION = 2;
 const FIXED_HEADER_BYTES = 25;
 const MAX_TEXT_BYTES = 128;
-const MAX_AUDIO_BYTES = 1_048_576;
+const MAX_AUDIO_BYTES = 2_097_152;
 const MAX_IMAGE_BYTES = 4_194_304;
 
 export function formatImageMimeType(mimeType: string, changeScore: number): string {

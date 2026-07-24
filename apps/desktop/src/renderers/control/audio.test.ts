@@ -3,7 +3,9 @@ import {
   concatenateFloat32,
   encodePcm16Mono,
   float32ToPcm16Le,
-  resampleMono
+  resampleMono,
+  speechThresholds,
+  updateNoiseFloor
 } from './audio'
 
 describe('desktop realtime audio encoding', () => {
@@ -29,5 +31,18 @@ describe('desktop realtime audio encoding', () => {
   it('combines resampling and PCM encoding', () => {
     const encoded = encodePcm16Mono([new Float32Array(44_100)], 44_100)
     expect(encoded).toHaveLength(32_000)
+  })
+
+  it('raises the speech gate above a sustained background level', () => {
+    let noiseFloor = 0.003
+    for (let index = 0; index < 20; index += 1) {
+      noiseFloor = updateNoiseFloor(noiseFloor, 0.08)
+    }
+
+    const thresholds = speechThresholds(noiseFloor)
+    expect(noiseFloor).toBeGreaterThan(0.003)
+    expect(thresholds.start).toBeGreaterThan(0.015)
+    expect(thresholds.continue).toBeLessThan(thresholds.start)
+    expect(thresholds.continue).toBeGreaterThanOrEqual(0.01)
   })
 })
