@@ -1,4 +1,4 @@
-import { AudioLines, Camera, CameraOff, KeyRound, Mic, Volume2 } from 'lucide-react'
+import { AudioLines, Camera, CameraOff, KeyRound, Mic, MicOff, Volume2 } from 'lucide-react'
 import { SelectDropdown } from '../../components/SelectDropdown'
 import type { LiveDeviceStripProps } from './liveTypes'
 
@@ -7,6 +7,7 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
     session,
     microphones,
     selectedMicrophoneId,
+    microphoneEnabled,
     microphoneReady,
     microphonePermission,
     systemAudioEnabled,
@@ -22,6 +23,7 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
     mediaTransitioning,
     onChangeMicrophone,
     onRequestMicrophoneAccess,
+    onToggleMicrophone,
     onToggleSystemAudio,
     onChangeCamera,
     onToggleCamera
@@ -53,18 +55,42 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
                     }))
               }
               onChange={(deviceId) => void onChangeMicrophone(deviceId)}
-              disabled={isSessionActive || mediaTransitioning}
+              disabled={
+                mediaTransitioning ||
+                session.status === 'starting' ||
+                session.status === 'stopping'
+              }
             />
           </div>
-          <button
-            className="ghost-button"
-            type="button"
-            disabled={isSessionActive || mediaTransitioning}
-            onClick={() => void onRequestMicrophoneAccess()}
-          >
-            <Volume2 size={15} />
-            {mediaTransitioning ? '检测中...' : microphoneReady ? '重新检测' : '授权并检测'}
-          </button>
+          <div className="device-actions">
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={microphoneReady ? '重新检测麦克风' : '授权并检测麦克风'}
+              title={microphoneReady ? '重新检测麦克风' : '授权并检测麦克风'}
+              disabled={!microphoneEnabled || isSessionActive || mediaTransitioning}
+              onClick={() => void onRequestMicrophoneAccess()}
+            >
+              <Volume2 size={15} />
+            </button>
+            <button
+              id="microphone-toggle"
+              className={`ghost-button ${microphoneReady ? 'camera-active' : ''}`}
+              type="button"
+              role="switch"
+              aria-checked={microphoneEnabled}
+              aria-label={microphoneEnabled ? '关闭麦克风' : '开启麦克风'}
+              disabled={
+                mediaTransitioning ||
+                session.status === 'starting' ||
+                session.status === 'stopping'
+              }
+              onClick={() => void onToggleMicrophone()}
+            >
+              {microphoneEnabled ? <MicOff size={15} /> : <Mic size={15} />}
+              {microphoneEnabled ? '关闭' : '开启'}
+            </button>
+          </div>
         </div>
 
         <div className="device-control">
@@ -123,7 +149,9 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
       <div className="privacy-stack">
         <div className="privacy-note">
           <KeyRound size={14} />
-          {microphonePermission === 'denied' || microphonePermission === 'restricted'
+          {!microphoneEnabled
+            ? '麦克风已关闭'
+            : microphonePermission === 'denied' || microphonePermission === 'restricted'
             ? '系统麦克风权限受限'
             : microphoneReady
               ? '正在进行本地音量检测'

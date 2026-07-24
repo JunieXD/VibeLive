@@ -371,6 +371,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               session,
               microphones: media.microphones,
               selectedMicrophoneId: media.selectedMicrophoneId,
+              microphoneEnabled: media.microphoneEnabled,
               microphoneReady: media.microphoneReady,
               microphonePermission: media.microphonePermission,
               systemAudioEnabled: media.systemAudioEnabled,
@@ -386,6 +387,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               mediaTransitioning: media.mediaTransitioning,
               onChangeMicrophone: media.changeMicrophone,
               onRequestMicrophoneAccess: media.requestMicrophoneAccess,
+              onToggleMicrophone: media.toggleMicrophone,
               onToggleSystemAudio: media.toggleSystemAudio,
               onChangeCamera: media.changeCamera,
               onToggleCamera: media.toggleCamera

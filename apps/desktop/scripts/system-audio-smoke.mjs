@@ -42,11 +42,40 @@ try {
   const page = await electronApp.firstWindow()
   await page.getByRole('heading', { name: '直播控制台', exact: true }).waitFor()
   await page.waitForFunction(() => document.body.textContent?.includes('后端 · 已连接'))
-  await page.locator('.screen-video').waitFor({ timeout: 15_000 })
+  await page.locator('.screen-video').waitFor({ timeout: 45_000 })
 
+  const microphoneSelect = page.getByRole('combobox', { name: '麦克风', exact: true })
+  const microphoneToggle = page.locator('#microphone-toggle')
   const systemAudioToggle = page.locator('#system-audio-toggle')
+  await microphoneSelect.waitFor()
+  await microphoneToggle.waitFor()
   await systemAudioToggle.waitFor()
+  assert.equal(await microphoneToggle.getAttribute('aria-checked'), 'true')
   assert.equal(await systemAudioToggle.getAttribute('aria-checked'), 'true')
+  await page.waitForFunction(() => {
+    const toggle = document.querySelector('#microphone-toggle')
+    return toggle instanceof HTMLButtonElement && !toggle.disabled
+  })
+  await microphoneToggle.click()
+  assert.equal(await microphoneToggle.getAttribute('aria-checked'), 'false')
+  assert.equal(
+    JSON.parse(
+      (await page.evaluate(() => localStorage.getItem('advx.audio-settings'))) ?? 'null'
+    )?.microphoneEnabled,
+    false
+  )
+  await page.waitForFunction(() => {
+    const toggle = document.querySelector('#microphone-toggle')
+    return toggle instanceof HTMLButtonElement && !toggle.disabled
+  })
+  await microphoneToggle.click()
+  assert.equal(await microphoneToggle.getAttribute('aria-checked'), 'true')
+  await page.waitForFunction(() => {
+    const raw = localStorage.getItem('advx.audio-settings')
+    if (!raw) return false
+    const settings = JSON.parse(raw)
+    return settings.version === 2 && Boolean(settings.selectedMicrophoneId)
+  })
   await page.getByText('系统声音 · 推荐', { exact: true }).waitFor()
   if (process.platform !== 'win32') {
     assert.equal(await systemAudioToggle.isDisabled(), true)
@@ -82,6 +111,7 @@ try {
       const channels = [
         'backend:get-status',
         'backend:restart',
+        'backend:audience-query',
         'backend:session-start',
         'backend:session-pause',
         'backend:session-resume',
@@ -134,6 +164,15 @@ try {
 
       ipcMain.handle('backend:get-status', status)
       ipcMain.handle('backend:restart', status)
+      ipcMain.handle('backend:audience-query', (_event, requestedSessionId) => ({
+        session_id: requestedSessionId,
+        room_id: 'system-audio-smoke-room',
+        audience_epoch: 1,
+        population_revision: 1,
+        target_concurrent_viewers: 0,
+        active_count: 0,
+        viewers: []
+      }))
       ipcMain.handle('backend:session-start', () => transition('running'))
       ipcMain.handle('backend:session-pause', () => transition('paused'))
       ipcMain.handle('backend:session-resume', () => transition('running'))
@@ -147,8 +186,11 @@ try {
 
     await page.evaluate(() => {
       const original = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices)
+      const originalUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
       globalThis.__advxSystemAudioTracks = []
       globalThis.__advxLoopbackRequests = 0
+      globalThis.__advxMicrophoneTracks = []
+      globalThis.__advxMicrophoneRequests = 0
       navigator.mediaDevices.getDisplayMedia = async (constraints) => {
         const stream = await original(constraints)
         if (constraints?.audio) {
@@ -158,16 +200,32 @@ try {
         }
         return stream
       }
+      navigator.mediaDevices.getUserMedia = async (constraints) => {
+        const stream = await originalUserMedia(constraints)
+        if (constraints?.audio && !constraints?.video) {
+          globalThis.__advxMicrophoneRequests += 1
+          const track = stream.getAudioTracks()[0]
+          if (track) globalThis.__advxMicrophoneTracks.push(track)
+        }
+        return stream
+      }
     })
 
     await page.getByRole('button', { name: '开始直播', exact: true }).click()
     await page.waitForFunction(() => document.body.textContent?.includes('直播中'))
     await page.waitForFunction(
       () =>
+        globalThis.__advxMicrophoneRequests > 0 &&
+        globalThis.__advxMicrophoneTracks.at(-1)?.readyState === 'live'
+    )
+    await page.waitForFunction(
+      () =>
         globalThis.__advxLoopbackRequests > 0 &&
         globalThis.__advxSystemAudioTracks.at(-1)?.readyState === 'live'
     )
+    await page.waitForFunction(() => document.body.textContent?.includes('麦克风 正常'))
     await page.waitForFunction(() => document.body.textContent?.includes('系统声音 正常'))
+    assert.equal(await microphoneSelect.isDisabled(), false)
 
     await electronApp.evaluate(({ BrowserWindow }) => {
       const controlWindow = BrowserWindow.getAllWindows().find((window) =>
@@ -249,30 +307,74 @@ try {
       activeTrackIndex + 1
     )
 
+    const activeMicrophoneTrackIndex = await page.evaluate(
+      () => globalThis.__advxMicrophoneTracks.length - 1
+    )
+    await microphoneToggle.click()
+    await page.waitForFunction(
+      (index) => globalThis.__advxMicrophoneTracks[index]?.readyState === 'ended',
+      activeMicrophoneTrackIndex
+    )
+    await page.waitForFunction(() => document.body.textContent?.includes('麦克风 已关闭'))
+    assert.equal(await microphoneSelect.isDisabled(), false)
+    await page.screenshot({
+      path: resolve(artifactDirectory, 'microphone-disabled.png'),
+      fullPage: true
+    })
+    await microphoneToggle.click()
+    await page.waitForFunction(
+      (previousCount) =>
+        globalThis.__advxMicrophoneTracks.length > previousCount &&
+        globalThis.__advxMicrophoneTracks.at(-1)?.readyState === 'live',
+      activeMicrophoneTrackIndex + 1
+    )
+
     const beforePauseTrackIndex = await page.evaluate(
       () => globalThis.__advxSystemAudioTracks.length - 1
     )
+    const beforePauseMicrophoneTrackIndex = await page.evaluate(
+      () => globalThis.__advxMicrophoneTracks.length - 1
+    )
     await page.getByRole('button', { name: '暂停', exact: true }).click()
+    await page.waitForFunction(
+      (index) => globalThis.__advxMicrophoneTracks[index]?.readyState === 'ended',
+      beforePauseMicrophoneTrackIndex
+    )
     await page.waitForFunction(
       (index) => globalThis.__advxSystemAudioTracks[index]?.readyState === 'ended',
       beforePauseTrackIndex
     )
+    await page.waitForFunction(() => document.body.textContent?.includes('麦克风 已暂停'))
     await page.waitForFunction(() => document.body.textContent?.includes('系统声音 已暂停'))
 
     await page.getByRole('button', { name: '恢复', exact: true }).click()
+    await page.waitForFunction(
+      (previousCount) =>
+        globalThis.__advxMicrophoneTracks.length > previousCount &&
+        globalThis.__advxMicrophoneTracks.at(-1)?.readyState === 'live',
+      beforePauseMicrophoneTrackIndex + 1
+    )
     await page.waitForFunction(
       (previousCount) =>
         globalThis.__advxSystemAudioTracks.length > previousCount &&
         globalThis.__advxSystemAudioTracks.at(-1)?.readyState === 'live',
       beforePauseTrackIndex + 1
     )
+    await page.waitForFunction(() => document.body.textContent?.includes('麦克风 正常'))
     await page.waitForFunction(() => document.body.textContent?.includes('系统声音 正常'))
 
     const beforeStopTrackIndex = await page.evaluate(
       () => globalThis.__advxSystemAudioTracks.length - 1
     )
+    const beforeStopMicrophoneTrackIndex = await page.evaluate(
+      () => globalThis.__advxMicrophoneTracks.length - 1
+    )
     await page.getByRole('button', { name: '结束直播', exact: true }).click()
     await page.waitForFunction(() => document.body.textContent?.includes('未开播'))
+    await page.waitForFunction(
+      (index) => globalThis.__advxMicrophoneTracks[index]?.readyState === 'ended',
+      beforeStopMicrophoneTrackIndex
+    )
     await page.waitForFunction(
       (index) => globalThis.__advxSystemAudioTracks[index]?.readyState === 'ended',
       beforeStopTrackIndex
@@ -285,9 +387,12 @@ try {
     console.log(
       `System audio smoke passed: ${await page.evaluate(
         () => globalThis.__advxLoopbackRequests
-      )} loopback captures, independent transcript labels, toggle, pause/resume, and stop cleanup.`
+      )} loopback captures and ${await page.evaluate(
+        () => globalThis.__advxMicrophoneRequests
+      )} microphone captures, independent transcript labels, toggles, pause/resume, and stop cleanup.`
     )
     console.log(`Screenshot: ${resolve(artifactDirectory, 'system-audio-asr.png')}`)
+    console.log(`Screenshot: ${resolve(artifactDirectory, 'microphone-disabled.png')}`)
   }
 } finally {
   await electronApp.close()

@@ -46,6 +46,7 @@ export type MediaDevicesController = {
   setVisualSettings: Dispatch<SetStateAction<VisualSettings>>
   microphones: MediaDeviceInfo[]
   selectedMicrophoneId: string
+  microphoneEnabled: boolean
   microphoneLevel: number
   microphoneReady: boolean
   microphonePermission: MediaAccessStatus
@@ -68,6 +69,7 @@ export type MediaDevicesController = {
   operation: MediaOperation
   chooseSource: (source: DesktopSource) => Promise<void>
   requestMicrophoneAccess: () => Promise<void>
+  toggleMicrophone: () => Promise<void>
   toggleCamera: () => Promise<void>
   changeCamera: (deviceId: string) => Promise<void>
   changeVisualMode: (mode: VisualMode) => Promise<void>
@@ -96,6 +98,7 @@ export type MediaController = {
   setVisualSettings: Dispatch<SetStateAction<VisualSettings>>
   microphones: MediaDeviceInfo[]
   selectedMicrophoneId: string
+  microphoneEnabled: boolean
   microphoneLevel: number
   microphoneReady: boolean
   microphonePermission: MediaAccessStatus
@@ -129,6 +132,7 @@ export type MediaController = {
   visualSettingsRef: MutableRefObject<VisualSettings>
   chooseSource: (source: DesktopSource) => Promise<void>
   requestMicrophoneAccess: () => Promise<void>
+  toggleMicrophone: () => Promise<void>
   toggleCamera: () => Promise<void>
   changeCamera: (deviceId: string) => Promise<void>
   changeVisualMode: (mode: VisualMode) => Promise<void>

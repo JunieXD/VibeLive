@@ -1,13 +1,17 @@
 const AUDIO_SETTINGS_STORAGE_KEY = 'advx.audio-settings'
-const AUDIO_SETTINGS_VERSION = 1
+const AUDIO_SETTINGS_VERSION = 2
 
 export type AudioSettings = {
-  version: 1
+  version: 2
+  microphoneEnabled: boolean
+  selectedMicrophoneId: string
   systemAudioEnabled: boolean
 }
 
 export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   version: AUDIO_SETTINGS_VERSION,
+  microphoneEnabled: true,
+  selectedMicrophoneId: '',
   systemAudioEnabled: true
 }
 
@@ -16,15 +20,30 @@ export function loadAudioSettings(storage: Pick<Storage, 'getItem'>): AudioSetti
   if (!raw) return DEFAULT_AUDIO_SETTINGS
 
   try {
-    const parsed = JSON.parse(raw) as Partial<AudioSettings>
+    const parsed = JSON.parse(raw) as {
+      version?: unknown
+      microphoneEnabled?: unknown
+      selectedMicrophoneId?: unknown
+      systemAudioEnabled?: unknown
+    }
+    if (parsed.version === 1 && typeof parsed.systemAudioEnabled === 'boolean') {
+      return {
+        ...DEFAULT_AUDIO_SETTINGS,
+        systemAudioEnabled: parsed.systemAudioEnabled
+      }
+    }
     if (
       parsed.version !== AUDIO_SETTINGS_VERSION ||
+      typeof parsed.microphoneEnabled !== 'boolean' ||
+      typeof parsed.selectedMicrophoneId !== 'string' ||
       typeof parsed.systemAudioEnabled !== 'boolean'
     ) {
       return DEFAULT_AUDIO_SETTINGS
     }
     return {
       version: AUDIO_SETTINGS_VERSION,
+      microphoneEnabled: parsed.microphoneEnabled,
+      selectedMicrophoneId: parsed.selectedMicrophoneId,
       systemAudioEnabled: parsed.systemAudioEnabled
     }
   } catch {

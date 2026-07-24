@@ -6,7 +6,7 @@ import {
 } from './audio-settings'
 
 describe('audio settings', () => {
-  it('defaults system audio on without reading visual settings', () => {
+  it('defaults both audio sources on without reading visual settings', () => {
     expect(loadAudioSettings({ getItem: () => null })).toEqual(DEFAULT_AUDIO_SETTINGS)
   })
 
@@ -14,10 +14,30 @@ describe('audio settings', () => {
     let saved = ''
     saveAudioSettings(
       { setItem: (_key, value) => { saved = value } },
-      { version: 1, systemAudioEnabled: false }
+      {
+        version: 2,
+        microphoneEnabled: false,
+        selectedMicrophoneId: 'microphone-2',
+        systemAudioEnabled: false
+      }
     )
     expect(loadAudioSettings({ getItem: () => saved })).toEqual({
-      version: 1,
+      version: 2,
+      microphoneEnabled: false,
+      selectedMicrophoneId: 'microphone-2',
+      systemAudioEnabled: false
+    })
+  })
+
+  it('migrates the previous system-audio-only setting', () => {
+    expect(
+      loadAudioSettings({
+        getItem: () => JSON.stringify({ version: 1, systemAudioEnabled: false })
+      })
+    ).toEqual({
+      version: 2,
+      microphoneEnabled: true,
+      selectedMicrophoneId: '',
       systemAudioEnabled: false
     })
   })
@@ -25,7 +45,7 @@ describe('audio settings', () => {
   it('falls back when stored data has an unsupported version', () => {
     expect(
       loadAudioSettings({
-        getItem: () => JSON.stringify({ version: 2, systemAudioEnabled: false })
+        getItem: () => JSON.stringify({ version: 3, systemAudioEnabled: false })
       })
     ).toEqual(DEFAULT_AUDIO_SETTINGS)
   })

@@ -1200,6 +1200,12 @@
   min-width: 0;
 }
 
+.device-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .device-status {
   display: block;
   overflow: hidden;

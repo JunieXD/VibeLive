@@ -135,18 +135,21 @@ export function useMediaController({
         : devices.cameraEnabled
           ? '待启动'
           : '已关闭'
-  const microphoneStatus = resolveAudioChannelStatus({
-    paused: sessionStatus === 'paused',
-    ready: devices.microphoneReady,
-    transportError: devices.microphoneTransportError,
-    idleStatus:
-      devices.microphonePermission === 'denied' ||
-      devices.microphonePermission === 'restricted'
-        ? '权限受限'
-        : devices.selectedMicrophoneId
-          ? '待检测'
-          : '待授权'
-  })
+  const microphoneStatus =
+    !devices.microphoneEnabled
+      ? '已关闭'
+      : resolveAudioChannelStatus({
+          paused: sessionStatus === 'paused',
+          ready: devices.microphoneReady,
+          transportError: devices.microphoneTransportError,
+          idleStatus:
+            devices.microphonePermission === 'denied' ||
+            devices.microphonePermission === 'restricted'
+              ? '权限受限'
+              : devices.selectedMicrophoneId
+                ? '待检测'
+                : '待授权'
+        })
   const systemAudioStatus =
     !devices.systemAudioSupported
       ? '当前平台不可用'
@@ -195,6 +198,7 @@ export function useMediaController({
     setVisualSettings: devices.setVisualSettings,
     microphones: devices.microphones,
     selectedMicrophoneId: devices.selectedMicrophoneId,
+    microphoneEnabled: devices.microphoneEnabled,
     microphoneLevel: devices.microphoneLevel,
     microphoneReady: devices.microphoneReady,
     microphonePermission: devices.microphonePermission,
@@ -228,6 +232,7 @@ export function useMediaController({
     visualSettingsRef: devices.visualSettingsRef,
     chooseSource,
     requestMicrophoneAccess: devices.requestMicrophoneAccess,
+    toggleMicrophone: devices.toggleMicrophone,
     toggleCamera: devices.toggleCamera,
     changeCamera: devices.changeCamera,
     changeVisualMode: devices.changeVisualMode,

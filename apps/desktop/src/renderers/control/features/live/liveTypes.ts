@@ -126,6 +126,7 @@ export type LiveDeviceStripProps = {
   session: SessionState
   microphones: readonly MediaDeviceInfo[]
   selectedMicrophoneId: string
+  microphoneEnabled: boolean
   microphoneReady: boolean
   microphonePermission: MediaAccessStatus
   systemAudioEnabled: boolean
@@ -141,6 +142,7 @@ export type LiveDeviceStripProps = {
   mediaTransitioning: boolean
   onChangeMicrophone: (deviceId: string) => void | Promise<void>
   onRequestMicrophoneAccess: () => void | Promise<void>
+  onToggleMicrophone: () => void | Promise<void>
   onToggleSystemAudio: () => void | Promise<void>
   onChangeCamera: (deviceId: string) => void | Promise<void>
   onToggleCamera: () => void | Promise<void>

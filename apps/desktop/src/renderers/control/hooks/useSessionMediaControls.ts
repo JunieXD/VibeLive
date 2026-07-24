@@ -63,7 +63,6 @@ export function useSessionMediaControls({
   const audienceAvailableRef = useRef(audienceAvailable)
   const onAudienceSessionActiveChangeRef = useRef(onAudienceSessionActiveChange)
   const backendSessionActiveRef = useRef(false)
-  const restoreMicrophoneOnResumeRef = useRef(false)
   const startClientRequestIdRef = useRef<string | null>(null)
   devicesRef.current = devices
   onSystemActivityRef.current = onSystemActivity
@@ -151,7 +150,11 @@ export function useSessionMediaControls({
       }
       if (!devices.operation.isCurrent(operationId)) return
 
-      if (!microphoneStream && audienceAvailableRef.current && devices.selectedMicrophoneId) {
+      if (
+        !microphoneStream &&
+        devices.microphoneEnabled &&
+        devices.selectedMicrophoneId
+      ) {
         try {
           microphoneStream = await devices.startMicrophone(
             operationId,
@@ -377,7 +380,6 @@ export function useSessionMediaControls({
     let microphoneStream: MediaStream | null = null
     let failureKind: FatalMediaKind = 'display'
     if (sessionStatus === 'running') {
-      restoreMicrophoneOnResumeRef.current = devices.microphoneStreamRef.current !== null
       sessionStatusRef.current = 'paused'
       dispatchSession({ type: 'pause' })
       try {
@@ -437,7 +439,10 @@ export function useSessionMediaControls({
           }
           if (!devices.operation.isCurrent(operationId)) return
         }
-        if (restoreMicrophoneOnResumeRef.current) {
+        if (
+          devices.microphoneEnabled &&
+          devices.selectedMicrophoneId
+        ) {
           failureKind = 'microphone'
           try {
             microphoneStream = await devices.startMicrophone(

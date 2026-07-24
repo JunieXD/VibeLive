@@ -55,16 +55,16 @@ export function useMediaDevices({
   const [visualSettings, setVisualSettings] = useState<VisualSettings>(() =>
     loadVisualSettings(window.localStorage)
   )
+  const [audioSettings, setAudioSettings] = useState(() =>
+    loadAudioSettings(window.localStorage)
+  )
   const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([])
-  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState('')
+  const selectedMicrophoneId = audioSettings.selectedMicrophoneId
   const [microphoneLevel, setMicrophoneLevel] = useState(0)
   const [microphoneReady, setMicrophoneReady] = useState(false)
   const [microphonePermission, setMicrophonePermission] =
     useState<MediaAccessStatus>('unknown')
   const [microphoneTransportError, setMicrophoneTransportError] = useState<string | null>(null)
-  const [audioSettings, setAudioSettings] = useState(() =>
-    loadAudioSettings(window.localStorage)
-  )
   const [systemAudioSupported, setSystemAudioSupported] = useState(false)
   const [systemAudioLevel, setSystemAudioLevel] = useState(0)
   const [systemAudioReady, setSystemAudioReady] = useState(false)
@@ -81,6 +81,7 @@ export function useMediaDevices({
   const captureStreamRef = useRef<MediaStream | null>(null)
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
+  const pendingMicrophoneStreamRef = useRef<MediaStream | null>(null)
   const visualSettingsRef = useRef(visualSettings)
   const microphoneChannelRef = useRef(createAudioChannelState('microphone'))
   const systemAudioChannelRef = useRef(createAudioChannelState('system_audio'))
@@ -227,8 +228,15 @@ export function useMediaDevices({
     return observed
   }, [])
 
-  const stopMicrophone = useCallback(async (): Promise<void> => {
+  const stopMicrophone = useCallback(async (
+    preservePendingStream?: MediaStream
+  ): Promise<void> => {
     const channel = microphoneChannelRef.current
+    const pendingStream = pendingMicrophoneStreamRef.current
+    if (pendingStream !== preservePendingStream) {
+      pendingMicrophoneStreamRef.current = null
+      stopMediaStream(pendingStream)
+    }
     if (channel.meterFrame !== null) cancelAnimationFrame(channel.meterFrame)
     channel.meterFrame = null
     const processor = channel.processor
@@ -285,10 +293,17 @@ export function useMediaDevices({
     if (id !== undefined) assertCurrent(id)
     const inputs = devices.filter((device) => device.kind === 'audioinput')
     setMicrophones(inputs)
-    setSelectedMicrophoneId((current) => {
-      if (inputs.some((device) => device.deviceId === current)) return current
-      if (preferred && inputs.some((device) => device.deviceId === preferred)) return preferred
-      return inputs[0]?.deviceId ?? ''
+    setAudioSettings((current) => {
+      if (inputs.some((device) => device.deviceId === current.selectedMicrophoneId)) {
+        return current
+      }
+      const selectedMicrophoneId =
+        preferred && inputs.some((device) => device.deviceId === preferred)
+          ? preferred
+          : inputs[0]?.deviceId ?? ''
+      return selectedMicrophoneId === current.selectedMicrophoneId
+        ? current
+        : { ...current, selectedMicrophoneId }
     })
   }, [assertCurrent])
   const refreshCameras = useCallback(async (preferred?: string, id?: number) => {
@@ -492,7 +507,6 @@ export function useMediaDevices({
   }, [assertCurrent, flushAudioSegment, sessionStatusRef])
 
   const startMicrophone = useCallback(async (id: number, deviceId?: string): Promise<MediaStream> => {
-    await stopMicrophone()
     assertCurrent(id)
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -501,14 +515,22 @@ export function useMediaDevices({
         noiseSuppression: true
       }
     })
+    pendingMicrophoneStreamRef.current = stream
+    let previousStreamReleased = false
     try {
       assertCurrent(id)
       const track = stream.getAudioTracks()[0]
       if (!track) throw new DOMException('No microphone audio track was created.', 'NotReadableError')
+      await stopMicrophone(stream)
+      previousStreamReleased = true
+      assertCurrent(id)
       await attachAudioProcessing(id, stream, microphoneChannelRef.current, setMicrophoneLevel)
       await refreshMicrophones(track.getSettings().deviceId, id)
       assertCurrent(id)
       microphoneStreamRef.current = stream
+      if (pendingMicrophoneStreamRef.current === stream) {
+        pendingMicrophoneStreamRef.current = null
+      }
       setMicrophoneReady(true)
       setMicrophonePermission('granted')
       track.addEventListener('ended', () => {
@@ -520,8 +542,13 @@ export function useMediaDevices({
       }, { once: true })
       return stream
     } catch (error) {
+      if (pendingMicrophoneStreamRef.current === stream) {
+        pendingMicrophoneStreamRef.current = null
+      }
       stopMediaStream(stream)
-      await stopMicrophone()
+      if (previousStreamReleased || microphoneStreamRef.current === stream) {
+        await stopMicrophone()
+      }
       throw error
     }
   }, [assertCurrent, attachAudioProcessing, refreshMicrophones, sessionStatusRef, stopMicrophone])
@@ -668,6 +695,7 @@ export function useMediaDevices({
   }, [begin, finish, isCurrent, selectedSource, startCapture])
 
   const requestMicrophoneAccess = useCallback(async () => {
+    if (!audioSettings.microphoneEnabled) return
     const id = begin()
     if (id === null) return
     try {
@@ -685,7 +713,15 @@ export function useMediaDevices({
     } finally {
       finish(id)
     }
-  }, [begin, finish, isCurrent, selectedMicrophoneId, startMicrophone, stopMicrophone])
+  }, [
+    audioSettings.microphoneEnabled,
+    begin,
+    finish,
+    isCurrent,
+    selectedMicrophoneId,
+    startMicrophone,
+    stopMicrophone
+  ])
 
   const toggleCamera = useCallback(async () => {
     const id = begin(true)
@@ -791,20 +827,99 @@ export function useMediaDevices({
   }, [assertCurrent, begin, cameraEnabled, finish, isCurrent, selectedSource, startCamera, startCapture, stopCamera, stopCapture, systemAudioReady])
 
   const changeMicrophone = useCallback(async (deviceId: string) => {
-    setSelectedMicrophoneId(deviceId)
-    if (!microphoneReady) return
+    const previousDeviceId = selectedMicrophoneId
+    setAudioSettings((current) => ({ ...current, selectedMicrophoneId: deviceId }))
+    if (
+      !audioSettings.microphoneEnabled ||
+      (!microphoneReady && sessionStatusRef.current !== 'running')
+    ) {
+      return
+    }
     const id = begin()
     if (id === null) return
     try {
       await startMicrophone(id, deviceId)
     } catch (error) {
       if (!isCurrent(id)) return
-      await stopMicrophone()
+      setAudioSettings((current) => ({
+        ...current,
+        selectedMicrophoneId: previousDeviceId
+      }))
+      if (!microphoneStreamRef.current && previousDeviceId) {
+        try {
+          await startMicrophone(id, previousDeviceId)
+        } catch {
+          await stopMicrophone()
+        }
+      }
       onSystemActivityRef.current(describeMediaError(error, 'microphone'))
     } finally {
       finish(id)
     }
-  }, [begin, finish, isCurrent, microphoneReady, startMicrophone, stopMicrophone])
+  }, [
+    audioSettings.microphoneEnabled,
+    begin,
+    finish,
+    isCurrent,
+    microphoneReady,
+    selectedMicrophoneId,
+    sessionStatusRef,
+    startMicrophone,
+    stopMicrophone
+  ])
+
+  const toggleMicrophone = useCallback(async () => {
+    const enabled = !audioSettings.microphoneEnabled
+    setAudioSettings((current) => ({ ...current, microphoneEnabled: enabled }))
+    setMicrophoneTransportError(null)
+
+    if (!enabled) {
+      const id = begin(true)
+      if (id === null) return
+      try {
+        await stopMicrophone()
+        if (sessionStatusRef.current === 'running') {
+          onSystemActivityRef.current('麦克风已关闭，系统声音和直播继续运行。')
+        }
+      } finally {
+        finish(id)
+      }
+      return
+    }
+    if (sessionStatusRef.current !== 'running') return
+
+    const id = begin(true)
+    if (id === null) return
+    try {
+      const status = await window.advx.requestMicrophonePermission()
+      if (!isCurrent(id)) return
+      setMicrophonePermission(status)
+      if (status === 'denied' || status === 'restricted') {
+        throw new DOMException(
+          'Microphone access is denied by the operating system.',
+          'NotAllowedError'
+        )
+      }
+      await startMicrophone(id, selectedMicrophoneId || undefined)
+    } catch (error) {
+      if (!isCurrent(id)) return
+      await stopMicrophone()
+      onSystemActivityRef.current(
+        `麦克风未能启用：${describeMediaError(error, 'microphone')} 系统声音和直播继续运行。`
+      )
+    } finally {
+      finish(id)
+    }
+  }, [
+    audioSettings.microphoneEnabled,
+    begin,
+    finish,
+    isCurrent,
+    selectedMicrophoneId,
+    sessionStatusRef,
+    startMicrophone,
+    stopMicrophone
+  ])
 
   const toggleSystemAudio = useCallback(async () => {
     if (!systemAudioSupported) return
@@ -852,6 +967,7 @@ export function useMediaDevices({
   return {
     selectedSource, setSelectedSource, captureStream, cameraStream, cameras, cameraEnabled,
     cameraPermission, visualSettings, setVisualSettings, microphones, selectedMicrophoneId,
+    microphoneEnabled: audioSettings.microphoneEnabled,
     microphoneLevel, microphoneReady, microphonePermission, microphoneTransportError,
     systemAudioEnabled: audioSettings.systemAudioEnabled, systemAudioSupported,
     systemAudioLevel, systemAudioReady, systemAudioError, systemAudioTransportError,
@@ -859,7 +975,7 @@ export function useMediaDevices({
     cameraVideoRef, capturePipelineVideoRef, cameraPipelineVideoRef, captureStreamRef,
     cameraStreamRef, microphoneStreamRef, visualSettingsRef,
     operation: { begin, finish, assertCurrent, isCurrent, invalidate, transitioning },
-    chooseSource, requestMicrophoneAccess, toggleCamera, changeCamera, changeVisualMode,
+    chooseSource, requestMicrophoneAccess, toggleMicrophone, toggleCamera, changeCamera, changeVisualMode,
     changeMicrophone, startCapture, startCamera, startMicrophone, startSystemAudio,
     stopCapture, stopCamera, stopMicrophone, stopSystemAudio, toggleSystemAudio
   }
