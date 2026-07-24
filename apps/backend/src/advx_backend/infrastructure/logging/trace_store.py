@@ -17,6 +17,7 @@ from advx_backend.contracts.debug import (
     TraceQueryResponse,
     ViewerRequestTrace,
 )
+from advx_backend.domain.observation_wave import MAX_FRAME_BUNDLE_SIZE
 
 _FORBIDDEN_KEYS = {
     "access_token",
@@ -231,12 +232,22 @@ class TraceStore:
             del migrated["director_budget"]
             was_migrated = True
         decision = migrated.get("decision")
-        if isinstance(decision, dict) and decision.get("decision_source") == "director":
-            migrated["decision"] = {
-                **decision,
-                "decision_source": "legacy_director",
-            }
-            was_migrated = True
+        if isinstance(decision, dict):
+            updated_decision = dict(decision)
+            if updated_decision.get("decision_source") == "director":
+                updated_decision["decision_source"] = "legacy_director"
+                was_migrated = True
+            evidence_frame_indexes = updated_decision.get("evidence_frame_indexes")
+            if (
+                isinstance(evidence_frame_indexes, list)
+                and len(evidence_frame_indexes) > MAX_FRAME_BUNDLE_SIZE
+            ):
+                updated_decision["evidence_frame_indexes"] = evidence_frame_indexes[
+                    :MAX_FRAME_BUNDLE_SIZE
+                ]
+                was_migrated = True
+            if updated_decision != decision:
+                migrated["decision"] = updated_decision
         return migrated, was_migrated
 
     def _persist(self) -> None:
