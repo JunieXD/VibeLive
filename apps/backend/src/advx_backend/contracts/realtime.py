@@ -79,8 +79,16 @@ class ClientAudioCommit(RealtimeMessage):
     committed_at_ms: int = Field(ge=0)
 
 
+class ClientVoiceActivity(RealtimeMessage):
+    """Signals that the host resumed speaking before an utterance is final."""
+
+    type: Literal["client.voice.activity"] = "client.voice.activity"
+    session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
+    occurred_at_ms: int = Field(ge=0)
+
+
 ClientMessage = Annotated[
-    ClientHello | ClientPing | ClientTextSubmit | ClientAudioCommit,
+    ClientHello | ClientPing | ClientTextSubmit | ClientAudioCommit | ClientVoiceActivity,
     Field(discriminator="type"),
 ]
 

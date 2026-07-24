@@ -61,7 +61,6 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
   const [providerProfileId, setProviderProfileId] = useState('default')
   const [model, setModel] = useState('')
-  const [directorModel, setDirectorModel] = useState('')
   const [viewerModel, setViewerModel] = useState('')
   const [memoryModel, setMemoryModel] = useState('')
   const [visualSummaryModel, setVisualSummaryModel] = useState('')
@@ -83,7 +82,6 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
         if (nextStatus.baseUrl) setBaseUrl(nextStatus.baseUrl)
         if (nextStatus.providerProfileId) setProviderProfileId(nextStatus.providerProfileId)
         if (nextStatus.model) setModel(nextStatus.model)
-        setDirectorModel(nextStatus.directorModel ?? '')
         setViewerModel(nextStatus.viewerModel ?? '')
         setMemoryModel(nextStatus.memoryModel ?? '')
         setVisualSummaryModel(nextStatus.visualSummaryModel ?? '')
@@ -132,7 +130,6 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
         baseUrl,
         providerProfileId,
         model,
-        directorModel,
         viewerModel,
         memoryModel,
         visualSummaryModel,
@@ -145,7 +142,6 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
         baseUrl: baseUrl.trim(),
         providerProfileId: result.providerProfileId,
         model: model.trim(),
-        directorModel: directorModel.trim() || null,
         viewerModel: viewerModel.trim() || null,
         memoryModel: memoryModel.trim() || null,
         visualSummaryModel: visualSummaryModel.trim() || null,
@@ -167,7 +163,6 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
     asrApiKey,
     baseUrl,
     canSave,
-    directorModel,
     memoryModel,
     model,
     onBackendStatus,
@@ -183,8 +178,6 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
     setProviderProfileId,
     model,
     setModel,
-    directorModel,
-    setDirectorModel,
     viewerModel,
     setViewerModel,
     memoryModel,

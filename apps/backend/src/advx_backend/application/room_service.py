@@ -35,13 +35,13 @@ class RoomService:
         *,
         clock: Clock,
         id_generator: IdGenerator,
-        event_capacity: int,
-        event_ttl_ms: int,
+        event_capacity: int | None,
+        event_ttl_ms: int | None,
         event_persister: Callable[[RoomEvent], Awaitable[None]] | None = None,
     ) -> None:
-        if event_capacity < 1:
+        if event_capacity is not None and event_capacity < 1:
             raise ValueError("event_capacity must be at least one")
-        if event_ttl_ms < 1:
+        if event_ttl_ms is not None and event_ttl_ms < 1:
             raise ValueError("event_ttl_ms must be at least one")
 
         self._clock = clock
@@ -184,8 +184,11 @@ class RoomService:
             retained = [
                 event
                 for event in events
-                if now - event.created_at_ms < self._event_ttl_ms
-            ][-self._event_capacity :]
+                if self._event_ttl_ms is None
+                or now - event.created_at_ms < self._event_ttl_ms
+            ]
+            if self._event_capacity is not None:
+                retained = retained[-self._event_capacity :]
             self._events = deque(retained, maxlen=self._event_capacity)
             self._next_sequence = previous_sequence + 1 if previous_sequence else 1
 
@@ -199,6 +202,8 @@ class RoomService:
             raise RoomSessionNotActiveError(session_id, self._active_session_id)
 
     def _evict_expired(self, now_ms: int) -> None:
+        if self._event_ttl_ms is None:
+            return
         retained = (
             event for event in self._events if now_ms - event.created_at_ms < self._event_ttl_ms
         )

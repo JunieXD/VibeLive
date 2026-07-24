@@ -151,7 +151,6 @@ async function saveModelConfig(
     storedConfig.baseUrl = normalized.baseUrl;
     storedConfig.providerProfileId = normalized.providerProfileId;
     storedConfig.model = normalized.model;
-    storedConfig.directorModel = normalized.directorModel;
     storedConfig.viewerModel = normalized.viewerModel;
     storedConfig.memoryModel = normalized.memoryModel;
     storedConfig.visualSummaryModel = normalized.visualSummaryModel;
@@ -191,7 +190,6 @@ function parseModelConfigRecord(config: Record<string, unknown>): ModelConfig | 
     providerProfileId:
       typeof config.providerProfileId === "string" ? config.providerProfileId : "default",
     model: config.model,
-    directorModel: typeof config.directorModel === "string" ? config.directorModel : "",
     viewerModel: typeof config.viewerModel === "string" ? config.viewerModel : "",
     memoryModel: typeof config.memoryModel === "string" ? config.memoryModel : "",
     visualSummaryModel:
@@ -259,7 +257,6 @@ async function loadStoredModelConfigStore(): Promise<ModelConfigStore | null> {
       baseUrl: parsed.baseUrl,
       providerProfileId: "default",
       model: parsed.model,
-      directorModel: "",
       viewerModel: "",
       memoryModel: "",
       visualSummaryModel: "",
@@ -293,7 +290,6 @@ async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
       baseUrl: null,
       providerProfileId: null,
       model: null,
-      directorModel: null,
       viewerModel: null,
       memoryModel: null,
       visualSummaryModel: null,
@@ -305,7 +301,6 @@ async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
     baseUrl: config.baseUrl,
     providerProfileId: config.providerProfileId,
     model: config.model,
-    directorModel: config.directorModel || null,
     viewerModel: config.viewerModel || null,
     memoryModel: config.memoryModel || null,
     visualSummaryModel: config.visualSummaryModel || null,
@@ -336,7 +331,6 @@ async function compileAudienceRuntime(
     configRevision,
     provider: {
       providerProfileId: provider.providerProfileId,
-      directorModel: provider.directorModel,
       viewerModel: provider.viewerModel,
       memoryModel: provider.memoryModel,
       visualSummaryModel: provider.visualSummaryModel
@@ -920,6 +914,11 @@ export function registerDesktopIpc(
       return backendClient.submitAudioSegment(input);
     }
   );
+  ipcMain.on("backend:voice-activity", (event, occurredAtMs: number) => {
+    assertControlSender(event);
+    if (!Number.isInteger(occurredAtMs) || occurredAtMs < 0) return;
+    backendClient.notifyVoiceActivity(occurredAtMs);
+  });
   ipcMain.handle(
     "backend:submit-frame",
     (

@@ -7,6 +7,8 @@
 > 范围：Electron 控制端、FastAPI Viewer Runtime、实时合同、SQLite 恢复、测试与调试
 >
 > 相关文档：[PRODUCT.md](./PRODUCT.md)、[ARCHITECTURE.md](./ARCHITECTURE.md)、[BACKEND_DESIGN.md](./BACKEND_DESIGN.md)、[VIEWER_RUNTIME_INTEGRATION_PLAN.md](./VIEWER_RUNTIME_INTEGRATION_PLAN.md)
+>
+> 发言机制说明：本文中关于 Director、候选观众筛选、发言数量限制和观众接话的旧设计，已由 [AI 观众发言产品规格](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) 覆盖；该规格具有更高优先级。
 
 ## 1. 文档目的
 

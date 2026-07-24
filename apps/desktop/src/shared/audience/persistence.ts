@@ -211,9 +211,14 @@ function parseMode(
   const revision = sourceVersion === 1
     ? 1
     : boundedInteger(value.revision, `${path}.revision`, 1, Number.MAX_SAFE_INTEGER, issues)
-  const visualSettings = sourceVersion === 1
+  const parsedVisualSettings = sourceVersion === 1
     ? { ...DEFAULT_VISUAL_SETTINGS }
     : parseVisualSettings(value.visualSettings, `${path}.visualSettings`, issues)
+  // Version 3 originally shipped this exact default as a short 3-frame
+  // window. It was never a deliberate per-room choice, so upgrade it.
+  const visualSettings = isLegacyVisualDefault(parsedVisualSettings)
+    ? { ...DEFAULT_VISUAL_SETTINGS }
+    : parsedVisualSettings
 
   if (issues.some((issue) => issue.startsWith(path))) return null
   return {
@@ -234,6 +239,13 @@ function parseMode(
     baseActivity: normalResponseRange,
     burstLimit: highlightResponseRange
   }
+}
+
+function isLegacyVisualDefault(settings: AudienceVisualSettings): boolean {
+  return settings.viewerVisualInputMode === 'direct_frames' &&
+    settings.frameBundleSize === 3 &&
+    settings.frameWindowMs === 10_000 &&
+    settings.frameSelectionStrategy === 'change_peaks'
 }
 
 function parsePersonaWeights(
@@ -304,7 +316,7 @@ function parseVisualSettings(
   )) {
     issues.push(`${path}.frameSelectionStrategy is invalid`)
   }
-  const frameBundleSize = boundedInteger(value.frameBundleSize, `${path}.frameBundleSize`, 1, 16, issues)
+  const frameBundleSize = boundedInteger(value.frameBundleSize, `${path}.frameBundleSize`, 1, 60, issues)
   const frameWindowMs = boundedInteger(value.frameWindowMs, `${path}.frameWindowMs`, 1, 300_000, issues)
   const frameMaxDimension = boundedInteger(
     value.frameMaxDimension,

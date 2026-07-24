@@ -54,6 +54,7 @@ from advx_backend.contracts.realtime import (
     ClientMessageEnvelope,
     ClientPing,
     ClientTextSubmit,
+    ClientVoiceActivity,
     IngestAck,
     IngestAckStage,
     IngestInputKind,
@@ -184,6 +185,19 @@ def create_realtime_router(
                             BackendPong(request_id=message.request_id),
                             send_lock=send_lock,
                         )
+                    elif isinstance(message, ClientVoiceActivity):
+                        try:
+                            await ingest_gateway.notify_voice_activity(
+                                message.session_id,
+                                message.occurred_at_ms,
+                            )
+                        except Exception as error:
+                            # Speech activity is advisory. A late signal must
+                            # not tear down the media connection after stop.
+                            logger.info(
+                                "ignored voice activity notification",
+                                extra={"error_type": type(error).__name__},
+                            )
                     elif isinstance(message, (ClientTextSubmit, ClientAudioCommit)):
                         await _handle_ingest(
                             websocket,

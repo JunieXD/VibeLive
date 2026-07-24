@@ -44,13 +44,6 @@ class MemoryReferenceTrace(DebugContractModel):
     memory_ids: list[str] = Field(default_factory=list, max_length=128)
 
 
-class DirectorBudgetTrace(DebugContractModel):
-    minimum: int = Field(ge=0, le=32)
-    maximum: int = Field(ge=0, le=32)
-    available_viewer_ids: list[str] = Field(default_factory=list, max_length=32)
-    forced_viewer_ids: list[str] = Field(default_factory=list, max_length=32)
-
-
 class PromptManifest(DebugContractModel):
     template_id: str = Field(min_length=1, max_length=128)
     template_revision: int = Field(ge=1)
@@ -86,8 +79,7 @@ class ViewerRequestTrace(DebugContractModel):
     audience_epoch: int = Field(ge=1)
     config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     observation_id: str = Field(min_length=1, max_length=128)
-    director_budget: DirectorBudgetTrace
-    director_decision: CrowdDecision
+    decision: CrowdDecision
     viewer_instance_id: str = Field(min_length=1, max_length=128)
     viewer_sequence: int = Field(ge=1)
     persona_revision: int = Field(ge=1)
@@ -139,7 +131,7 @@ class ObservationWaveTrace(DebugContractModel):
     trigger_event_ids: list[str] = Field(default_factory=list, max_length=128)
     frame_hashes: list[str] = Field(default_factory=list, max_length=32)
     memory: MemoryReferenceTrace
-    director_status: ObservationWaveStatus
+    status: ObservationWaveStatus
     selected_viewer_ids: list[str] = Field(default_factory=list, max_length=32)
     decision_id: str | None = Field(default=None, min_length=1, max_length=128)
     decision_source: DecisionSource | None = None
@@ -317,10 +309,6 @@ class DebugRuntimeSnapshot(DebugContractModel):
     config: CanonicalRuntimeSpec
     pool: DebugViewerPoolSnapshot
     waves: list[ObservationWaveTrace] = Field(default_factory=list, max_length=1024)
-    director_budgets: list[DirectorBudgetTrace] = Field(
-        default_factory=list,
-        max_length=1024,
-    )
     queue: DebugQueueSnapshot | None = None
     telemetry: ViewerRuntimeTelemetry | None = None
     context_refs: DebugContextReferences = Field(default_factory=DebugContextReferences)

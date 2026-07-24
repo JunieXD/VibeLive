@@ -124,7 +124,6 @@ def runtime_spec() -> CanonicalRuntimeSpec:
         modes=[mode],
         provider=ProviderRuntimeSpec(
             provider_profile_id="provider-1",
-            director_model="director",
             viewer_model="viewer",
             memory_model="memory",
             visual_summary_model="visual",
@@ -138,7 +137,6 @@ def install_runtime_provider(runtime, spec: CanonicalRuntimeSpec) -> None:
             provider_profile_id=spec.provider.provider_profile_id,
             model_base_url="https://models.example/v1",
             model_name=spec.provider.viewer_model,
-            director_model=spec.provider.director_model,
             viewer_model=spec.provider.viewer_model,
             memory_model=spec.provider.memory_model,
             visual_summary_model=spec.provider.visual_summary_model,

@@ -27,11 +27,13 @@ class ObservationTrigger(StrEnum):
 
 
 class FrameBundleSettings(ObservationDomainModel):
-    frame_bundle_size: int = Field(default=3, ge=1, le=32)
-    frame_window_ms: int = Field(default=10_000, ge=1)
+    frame_bundle_size: int = Field(default=60, ge=1, le=60)
+    frame_window_ms: int = Field(default=120_000, ge=1)
     frame_selection_strategy: FrameSelectionStrategy = FrameSelectionStrategy.CHANGE_PEAKS
     frame_max_dimension: int = Field(default=1280, ge=64, le=8192)
     frame_quality: int = Field(default=80, ge=1, le=100)
+    frame_similarity_threshold: float = Field(default=0.9, ge=0, le=1)
+    frame_anchor_interval_ms: int = Field(default=5_000, ge=1)
 
 
 class FrameBundleItem(ObservationDomainModel):
@@ -49,7 +51,7 @@ class FrameBundleItem(ObservationDomainModel):
 class FrameBundle(ObservationDomainModel):
     bundle_id: str = Field(min_length=1, max_length=128)
     settings: FrameBundleSettings
-    frames: list[FrameBundleItem] = Field(min_length=1, max_length=32)
+    frames: list[FrameBundleItem] = Field(min_length=1, max_length=60)
 
     @model_validator(mode="after")
     def validate_frames(self) -> "FrameBundle":
@@ -72,9 +74,9 @@ class ObservationWave(ObservationDomainModel):
     created_at_ms: int = Field(ge=0)
     deadline_at_ms: int = Field(gt=0)
     triggers: list[ObservationTrigger] = Field(min_length=1, max_length=4)
-    event_ids: list[str] = Field(default_factory=list, max_length=128)
-    trigger_event_ids: list[str] = Field(default_factory=list, max_length=128)
-    trigger_frame_ids: list[str] = Field(default_factory=list, max_length=32)
+    event_ids: list[str] = Field(default_factory=list, max_length=4_096)
+    trigger_event_ids: list[str] = Field(default_factory=list, max_length=4_096)
+    trigger_frame_ids: list[str] = Field(default_factory=list, max_length=120)
     trigger_screen_change_score: float = Field(default=0.0, ge=0, le=1)
     frame_bundle: FrameBundle | None = None
     visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES

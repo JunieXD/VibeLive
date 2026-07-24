@@ -21,7 +21,6 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerGenerationRequest,
     ViewerGenerationResponse,
 )
-from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.observation_wave import FrameBundle, ObservationWave
 from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeConfig,
@@ -47,8 +46,6 @@ class RuntimeProviderState(Protocol):
 
 
 class ViewerRuntimeProvider(Protocol):
-    async def decide(self, request: object) -> CrowdDecision: ...
-
     async def generate(
         self,
         request: ViewerGenerationRequest,
@@ -59,6 +56,15 @@ class ViewerRuntimeProvider(Protocol):
         wave: ObservationWave,
         frame_bundle: FrameBundle,
         runtime: object,
+    ) -> str: ...
+
+    async def summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
     ) -> str: ...
 
     async def aclose(self) -> None: ...
@@ -247,20 +253,10 @@ class RuntimeProviderController:
 
 
 class RuntimeProviderRouter:
-    """Route all four model roles through the generation bound to an epoch."""
+    """Route viewer, visual, history, and memory work through one generation."""
 
     def __init__(self, runtime_state: RuntimeProviderState) -> None:
         self._runtime_state = runtime_state
-
-    async def decide(self, request: object) -> CrowdDecision:
-        wave = getattr(request, "wave", None)
-        if not isinstance(wave, ObservationWave):
-            raise RuntimeProviderError("Director request is missing its runtime scope")
-        async with self._runtime_state.provider_lease(
-            session_id=wave.session_id,
-            audience_epoch=wave.audience_epoch,
-        ) as generation:
-            return await generation.viewer_provider.decide(request)
 
     async def generate(
         self,
@@ -288,6 +284,25 @@ class RuntimeProviderRouter:
                 runtime,
             )
 
+    async def summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
+    ) -> str:
+        async with self._runtime_state.provider_lease(
+            session_id=session_id,
+            audience_epoch=audience_epoch,
+        ) as generation:
+            return await generation.viewer_provider.summarize_history(
+                session_id=session_id,
+                audience_epoch=audience_epoch,
+                existing_summary=existing_summary,
+                older_history=older_history,
+            )
+
     async def extract(self, **kwargs: object) -> object:
         session_id = kwargs.get("session_id")
         audience_epoch = kwargs.get("audience_epoch")
@@ -309,7 +324,6 @@ def _provider_spec(
     models = request.role_models()
     return ProviderRuntimeSpec(
         provider_profile_id=request.provider_profile_id,
-        director_model=models["director"],
         viewer_model=models["viewer"],
         memory_model=models["memory"],
         visual_summary_model=models["visual_summary"],

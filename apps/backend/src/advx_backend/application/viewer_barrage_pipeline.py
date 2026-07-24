@@ -67,6 +67,9 @@ class ViewerBarragePipeline:
             persona_id = request.viewer_instance_id
         if not isinstance(display_name, str) or not display_name:
             display_name = request.viewer_instance_id
+        text = (response.text or "").strip()[:160]
+        if not text:
+            return ViewerBarrageValidation(accepted=True)
         return ViewerBarrageValidation(
             accepted=True,
             event=ViewerBarrageEvent(
@@ -84,7 +87,7 @@ class ViewerBarragePipeline:
                 intent=response.intent,
                 target=response.target,
                 evidence_refs=response.evidence_refs,
-                text=response.text or "",
+                text=text,
                 created_at_ms=now_ms,
                 expires_at_ms=request.deadline_at_ms,
             ),

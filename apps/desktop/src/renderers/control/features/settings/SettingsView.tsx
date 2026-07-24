@@ -17,7 +17,6 @@ export type SettingsViewProps = {
   modelBaseUrl: string
   providerProfileId: string
   modelName: string
-  directorModel: string
   viewerModel: string
   memoryModel: string
   visualSummaryModel: string
@@ -34,7 +33,6 @@ export type SettingsViewProps = {
   onModelBaseUrlChange: (value: string) => void
   onProviderProfileIdChange: (value: string) => void
   onModelNameChange: (value: string) => void
-  onDirectorModelChange: (value: string) => void
   onViewerModelChange: (value: string) => void
   onMemoryModelChange: (value: string) => void
   onVisualSummaryModelChange: (value: string) => void
@@ -143,7 +141,6 @@ export function SettingsView({
   modelBaseUrl,
   providerProfileId,
   modelName,
-  directorModel,
   viewerModel,
   memoryModel,
   visualSummaryModel,
@@ -160,7 +157,6 @@ export function SettingsView({
   onModelBaseUrlChange,
   onProviderProfileIdChange,
   onModelNameChange,
-  onDirectorModelChange,
   onViewerModelChange,
   onMemoryModelChange,
   onVisualSummaryModelChange,
@@ -214,15 +210,6 @@ export function SettingsView({
                   value={providerProfileId}
                   onChange={(event) => onProviderProfileIdChange(event.target.value)}
                   placeholder="default"
-                />
-              </label>
-              <label className={labelClassName}>
-                Director 模型
-                <input
-                  className={controlClassName}
-                  value={directorModel}
-                  onChange={(event) => onDirectorModelChange(event.target.value)}
-                  placeholder={`继承 ${modelName || '默认模型'}`}
                 />
               </label>
               <label className={labelClassName}>

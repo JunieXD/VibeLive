@@ -32,7 +32,6 @@ from advx_backend.providers.model.viewer_runtime import (
 
 PROVIDER_PROFILE_ID = "runtime-smoke-recorded"
 MODEL_BASE_URL = "https://recorded.invalid/v1"
-DIRECTOR_MODEL = "recorded-director"
 VIEWER_MODEL = "recorded-viewer"
 MEMORY_MODEL = "recorded-memory"
 VISUAL_SUMMARY_MODEL = "recorded-visual"
@@ -78,14 +77,12 @@ def _bundle() -> ReplayBundle:
         modes=[mode],
         provider=ProviderRuntimeSpec(
             provider_profile_id=PROVIDER_PROFILE_ID,
-            director_model=DIRECTOR_MODEL,
             viewer_model=VIEWER_MODEL,
             memory_model=MEMORY_MODEL,
             visual_summary_model=VISUAL_SUMMARY_MODEL,
         ),
     )
     outputs = {
-        "director": {"reason_codes": ["runtime_smoke_recorded"]},
         "viewer": {
             "action": "barrage",
             "text": BARRAGE_TEXT,
@@ -168,7 +165,6 @@ def main() -> None:
             "sqlite_path": str(fixture.runtime.database.path),
             "sqlite_started": fixture.runtime.database.started,
             "capability_probe_calls": fixture.capability_probe.calls,
-            "director_calls": fixture.viewer_provider.director_calls,
             "viewer_calls": fixture.viewer_provider.viewer_calls,
             "memory_extractor_calls": fixture.memory_extractor.calls,
             "session": SessionSnapshot.from_domain(session).model_dump(mode="json"),
@@ -246,7 +242,6 @@ def main() -> None:
                     base_url=MODEL_BASE_URL,
                     provider=ProviderRuntimeSpec(
                         provider_profile_id=PROVIDER_PROFILE_ID,
-                        director_model=DIRECTOR_MODEL,
                         viewer_model=VIEWER_MODEL,
                         memory_model=MEMORY_MODEL,
                         visual_summary_model=VISUAL_SUMMARY_MODEL,
@@ -313,7 +308,6 @@ def main() -> None:
                     "baseUrl": MODEL_BASE_URL,
                     "providerProfileId": PROVIDER_PROFILE_ID,
                     "model": VIEWER_MODEL,
-                    "directorModel": DIRECTOR_MODEL,
                     "viewerModel": VIEWER_MODEL,
                     "memoryModel": MEMORY_MODEL,
                     "visualSummaryModel": VISUAL_SUMMARY_MODEL,

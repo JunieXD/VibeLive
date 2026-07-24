@@ -16,7 +16,6 @@ const storedConfig: ModelConfig = {
   baseUrl: "https://stored.example/v1",
   providerProfileId: "stored-profile",
   model: "stored-model",
-  directorModel: "",
   viewerModel: "stored-viewer",
   memoryModel: "",
   visualSummaryModel: "",
@@ -46,7 +45,6 @@ describe("model configuration", () => {
     );
     const selected = selectRuntimeProviderConfig(snapshots, {
       provider_profile_id: "profile-a",
-      director_model: "model-a",
       viewer_model: "model-a",
       memory_model: "model-a",
       visual_summary_model: "model-a"
@@ -67,7 +65,6 @@ describe("model configuration", () => {
     };
     expect(() => selectRuntimeProviderConfig([profileB], {
       provider_profile_id: "profile-a",
-      director_model: "model-a",
       viewer_model: "model-a",
       memory_model: "model-a",
       visual_summary_model: "model-a"
@@ -81,7 +78,6 @@ describe("model configuration", () => {
           baseUrl: " https://new.example/v1 ",
           providerProfileId: " profile-a ",
           model: " new-model ",
-          directorModel: " director-model ",
           viewerModel: "",
           memoryModel: " ",
           visualSummaryModel: "summary-model",
@@ -94,7 +90,6 @@ describe("model configuration", () => {
       baseUrl: "https://new.example/v1",
       providerProfileId: "profile-a",
       model: "new-model",
-      directorModel: "director-model",
       viewerModel: "",
       memoryModel: "",
       visualSummaryModel: "summary-model",
@@ -110,7 +105,6 @@ describe("model configuration", () => {
           baseUrl: "https://new.example/v1",
           providerProfileId: "default",
           model: "new-model",
-          directorModel: "",
           viewerModel: "",
           memoryModel: "",
           visualSummaryModel: "",
@@ -132,7 +126,6 @@ describe("model configuration", () => {
           baseUrl: "https://new.example/v1",
           providerProfileId: "",
           model: "new-model",
-          directorModel: "",
           viewerModel: "",
           memoryModel: "",
           visualSummaryModel: "",
@@ -148,7 +141,6 @@ describe("model configuration", () => {
     expect(resolveModelProvider(storedConfig)).toMatchObject({
       providerProfileId: "stored-profile",
       defaultModel: "stored-model",
-      directorModel: "stored-model",
       viewerModel: "stored-viewer",
       memoryModel: "stored-model",
       visualSummaryModel: "stored-model"
@@ -160,7 +152,6 @@ describe("model configuration", () => {
       provider_profile_id: "stored-profile",
       model_base_url: "https://stored.example/v1",
       model_name: "stored-model",
-      director_model: "stored-model",
       viewer_model: "stored-viewer",
       memory_model: "stored-model",
       visual_summary_model: "stored-model",

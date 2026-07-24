@@ -7,7 +7,6 @@ export type ResolvedModelProvider = {
   providerProfileId: string;
   baseUrl: string;
   defaultModel: string;
-  directorModel: string;
   viewerModel: string;
   memoryModel: string;
   visualSummaryModel: string;
@@ -16,7 +15,6 @@ export type ResolvedModelProvider = {
 
 export type RuntimeProviderIdentity = {
   provider_profile_id: string;
-  director_model: string;
   viewer_model: string;
   memory_model: string;
   visual_summary_model: string;
@@ -30,7 +28,6 @@ export function resolveModelConfig(
     baseUrl: input.baseUrl.trim(),
     providerProfileId: input.providerProfileId.trim() || "default",
     model: input.model.trim(),
-    directorModel: input.directorModel.trim(),
     viewerModel: input.viewerModel.trim(),
     memoryModel: input.memoryModel.trim(),
     visualSummaryModel: input.visualSummaryModel.trim(),
@@ -77,7 +74,6 @@ export function modelProviderChanged(
     config.baseUrl !== stored.baseUrl ||
     config.providerProfileId !== stored.providerProfileId ||
     config.model !== stored.model ||
-    config.directorModel !== stored.directorModel ||
     config.viewerModel !== stored.viewerModel ||
     config.memoryModel !== stored.memoryModel ||
     config.visualSummaryModel !== stored.visualSummaryModel ||
@@ -118,7 +114,6 @@ export function resolveModelProvider(config: ModelConfig): ResolvedModelProvider
     providerProfileId: config.providerProfileId.trim() || "default",
     baseUrl: config.baseUrl.trim(),
     defaultModel,
-    directorModel: config.directorModel.trim() || defaultModel,
     viewerModel: config.viewerModel.trim() || defaultModel,
     memoryModel: config.memoryModel.trim() || defaultModel,
     visualSummaryModel: config.visualSummaryModel.trim() || defaultModel,
@@ -134,7 +129,6 @@ export function createRuntimeProviderCandidate(
     provider_profile_id: provider.providerProfileId,
     model_base_url: provider.baseUrl,
     model_name: provider.defaultModel,
-    director_model: provider.directorModel,
     viewer_model: provider.viewerModel,
     memory_model: provider.memoryModel,
     visual_summary_model: provider.visualSummaryModel,
@@ -160,7 +154,6 @@ export function selectRuntimeProviderConfig(
     const provider = resolveModelProvider(snapshot);
     return (
       provider.providerProfileId === target.provider_profile_id &&
-      provider.directorModel === target.director_model &&
       provider.viewerModel === target.viewer_model &&
       provider.memoryModel === target.memory_model &&
       provider.visualSummaryModel === target.visual_summary_model

@@ -402,7 +402,6 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             modelBaseUrl={modelConfig.baseUrl}
             providerProfileId={modelConfig.providerProfileId}
             modelName={modelConfig.model}
-            directorModel={modelConfig.directorModel}
             viewerModel={modelConfig.viewerModel}
             memoryModel={modelConfig.memoryModel}
             visualSummaryModel={modelConfig.visualSummaryModel}
@@ -419,7 +418,6 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             onModelBaseUrlChange={modelConfig.setBaseUrl}
             onProviderProfileIdChange={modelConfig.setProviderProfileId}
             onModelNameChange={modelConfig.setModel}
-            onDirectorModelChange={modelConfig.setDirectorModel}
             onViewerModelChange={modelConfig.setViewerModel}
             onMemoryModelChange={modelConfig.setMemoryModel}
             onVisualSummaryModelChange={modelConfig.setVisualSummaryModel}

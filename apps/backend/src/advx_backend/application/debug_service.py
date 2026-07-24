@@ -184,7 +184,6 @@ class DebugService:
             config=spec,
             pool=pool,
             waves=traces.waves,
-            director_budgets=[item.director_budget for item in traces.items],
             queue=queue,
             telemetry=extension.telemetry,
             context_refs=context_refs,

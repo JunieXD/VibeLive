@@ -19,7 +19,7 @@ class ContextBuilder:
         frame_capacity: int,
         frame_ttl_ms: int,
         max_frames_per_observation: int,
-        max_events_per_observation: int,
+        max_events_per_observation: int | None,
     ) -> None:
         if frame_capacity < 1:
             raise ValueError("frame_capacity must be at least one")
@@ -27,7 +27,7 @@ class ContextBuilder:
             raise ValueError("frame_ttl_ms must be at least one")
         if max_frames_per_observation < 0:
             raise ValueError("max_frames_per_observation must not be negative")
-        if max_events_per_observation < 0:
+        if max_events_per_observation is not None and max_events_per_observation < 0:
             raise ValueError("max_events_per_observation must not be negative")
 
         self._room_service = room_service

@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import math
-import unicodedata
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
@@ -120,7 +119,7 @@ class _WorkItem:
 class _ViewerMailbox:
     task: asyncio.Task[None] | None = None
     current: _WorkItem | None = None
-    pending: _WorkItem | None = None
+    pending: deque[_WorkItem] = field(default_factory=deque)
 
 
 @dataclass(slots=True)
@@ -137,6 +136,7 @@ class _RequestContext:
     mode_context: dict[str, Any] = field(default_factory=dict)
     public_context_event_ids: list[str] = field(default_factory=list)
     public_context: list[ViewerPublicEvent] = field(default_factory=list)
+    conversation_history_summary: str | None = None
     room_memory_slice: RoomMemorySlice | None = None
 
 
@@ -151,7 +151,7 @@ class ViewerBehaviorStateSink(Protocol):
 
 
 class ViewerRuntime:
-    """Dispatch independent Viewer requests through bounded, latest-wins mailboxes."""
+    """Dispatch independent Viewer requests through bounded FIFO mailboxes."""
 
     def __init__(
         self,
@@ -194,12 +194,7 @@ class ViewerRuntime:
         self._mailboxes: dict[str, _ViewerMailbox] = {}
         self._sequences: dict[str, int] = {}
         self._sequence_epochs: dict[str, int] = {}
-        self._semantic_outputs: dict[
-            tuple[str, int, str],
-            dict[str, tuple[int, str]],
-        ] = {}
         self._lock = asyncio.Lock()
-        self._semantic_lock = asyncio.Lock()
         self._active_session_id: str | None = None
         self._generation = 0
 
@@ -232,7 +227,7 @@ class ViewerRuntime:
                             if mailbox.current is not None and mailbox.current.queued
                             else None
                         ),
-                        mailbox.pending,
+                        *mailbox.pending,
                     )
                     if item is not None
                 }.values()
@@ -250,10 +245,6 @@ class ViewerRuntime:
             self._lanes.clear()
             self._sequences.clear()
             self._sequence_epochs.clear()
-        async with self._semantic_lock:
-            for scope in tuple(self._semantic_outputs):
-                if scope[0] == session_id:
-                    self._semantic_outputs.pop(scope, None)
         for task in tasks:
             task.cancel()
         if tasks:
@@ -274,7 +265,7 @@ class ViewerRuntime:
             items = tuple(
                 {
                     id(item): item
-                    for item in (mailbox.current, mailbox.pending)
+                    for item in (mailbox.current, *mailbox.pending)
                     if item is not None
                 }.values()
             )
@@ -419,27 +410,8 @@ class ViewerRuntime:
             item.lane = lane
             mailbox = self._mailboxes.setdefault(viewer.viewer_instance_id, _ViewerMailbox())
             mailbox_busy = mailbox.task is not None and not mailbox.task.done()
-            queued_current = (
-                mailbox.current
-                if mailbox_busy
-                and mailbox.current is not None
-                and mailbox.current.queued
-                else None
-            )
-            replacement = mailbox.pending or queued_current
-            replacing_pending = mailbox_busy and replacement is not None
-            inherits_queue_slot = (
-                replacing_pending
-                and replacement is not None
-                and replacement.lane is lane
-                and replacement.queued
-            )
             needs_queue = mailbox_busy or lane.active >= lane.max_in_flight
-            if (
-                needs_queue
-                and not inherits_queue_slot
-                and lane.queued >= lane.queue_capacity
-            ):
+            if needs_queue and lane.queued >= lane.queue_capacity:
                 self._record_trace(
                     item,
                     status=TraceResponseStatus.CANCELLED,
@@ -448,16 +420,6 @@ class ViewerRuntime:
                     validation_codes=("queue_capacity_exceeded",),
                 )
                 self._resolve(item, "cancelled")
-                return future
-            if not await self._claim_sequence(request):
-                self._record_trace(
-                    item,
-                    status=TraceResponseStatus.STALE,
-                    accepted=False,
-                    reason="viewer_sequence_claim_rejected",
-                    validation_codes=("viewer_sequence_claim_rejected",),
-                )
-                self._resolve(item, "stale")
                 return future
             self._sequences[viewer.viewer_instance_id] = sequence
             self._sequence_epochs[viewer.viewer_instance_id] = viewer.audience_epoch
@@ -476,41 +438,10 @@ class ViewerRuntime:
                 )
                 self._promote_locked(lane)
             else:
-                if replacement is not None:
-                    previous_pending = replacement
-                    self._record_trace(
-                        previous_pending,
-                        status=TraceResponseStatus.CANCELLED,
-                        accepted=False,
-                        reason="superseded_by_newer_request",
-                        validation_codes=("superseded",),
-                    )
-                    self._resolve(previous_pending, "superseded")
-                    if queued_current is previous_pending:
-                        if inherits_queue_slot:
-                            position = lane.eligible.index(previous_pending)
-                            lane.eligible[position] = item
-                        else:
-                            self._discard_item_locked(previous_pending)
-                            lane.queued += 1
-                            lane.eligible.append(item)
-                        previous_pending.queued = False
-                        previous_pending.replacement = item
-                        previous_pending.ready.set()
-                        item.queued = True
-                        item.was_queued = True
-                        mailbox.current = item
-                        self._promote_locked(lane)
-                        return future
-                    if inherits_queue_slot:
-                        previous_pending.queued = False
-                    else:
-                        self._discard_item_locked(previous_pending)
-                if not inherits_queue_slot:
-                    lane.queued += 1
+                lane.queued += 1
                 item.queued = True
                 item.was_queued = True
-                mailbox.pending = item
+                mailbox.pending.append(item)
         return future
 
     async def _claim_sequence(self, request: ViewerGenerationRequest) -> bool:
@@ -529,8 +460,6 @@ class ViewerRuntime:
         try:
             while current is not None:
                 while True:
-                    while current.replacement is not None:
-                        current = current.replacement
                     if current.slot_reserved:
                         break
                     await current.ready.wait()
@@ -542,8 +471,7 @@ class ViewerRuntime:
                     if mailbox is None:
                         current = None
                     else:
-                        current = mailbox.pending
-                        mailbox.pending = None
+                        current = mailbox.pending.popleft() if mailbox.pending else None
                         mailbox.current = current
                         if current is None:
                             mailbox.task = None
@@ -566,16 +494,18 @@ class ViewerRuntime:
                 if current is not None:
                     self._discard_item_locked(current)
                 mailbox = self._mailboxes.pop(viewer_id, None)
-                if mailbox is not None and mailbox.pending is not None:
-                    self._record_trace(
-                        mailbox.pending,
-                        status=TraceResponseStatus.CANCELLED,
-                        accepted=False,
-                        reason="session_stopped",
-                        validation_codes=("cancelled",),
-                    )
-                    self._discard_item_locked(mailbox.pending)
-                    self._resolve(mailbox.pending, "cancelled")
+                if mailbox is not None:
+                    while mailbox.pending:
+                        pending = mailbox.pending.popleft()
+                        self._record_trace(
+                            pending,
+                            status=TraceResponseStatus.CANCELLED,
+                            accepted=False,
+                            reason="session_stopped",
+                            validation_codes=("cancelled",),
+                        )
+                        self._discard_item_locked(pending)
+                        self._resolve(pending, "cancelled")
             raise
 
     async def _execute(self, item: _WorkItem) -> str:
@@ -585,6 +515,15 @@ class ViewerRuntime:
         try:
             if not self._is_current(item) or self._expired(request):
                 return self._finalize_pre_dispatch(item)
+            if not await self._claim_sequence(request):
+                self._record_trace(
+                    item,
+                    status=TraceResponseStatus.STALE,
+                    accepted=False,
+                    reason="viewer_sequence_claim_rejected",
+                    validation_codes=("viewer_sequence_claim_rejected",),
+                )
+                return "stale"
             item.dispatched_at_ms = self._clock.now_ms()
             response = await self._generate_with_retry(item)
             item.completed_at_ms = self._clock.now_ms()
@@ -682,17 +621,7 @@ class ViewerRuntime:
         outcome, delivery_failed = await self._commit_published_event(
             item,
             validation.event,
-            semantic_text=response.text or "",
         )
-        if outcome == "duplicate":
-            self._record_trace(
-                item,
-                status=TraceResponseStatus.REJECTED,
-                accepted=False,
-                reason="semantic_duplicate",
-                validation_codes=("semantic_duplicate",),
-            )
-            return "rejected"
         if outcome == "stale":
             return self._finalize_after_provider(item, phase="publish_commit")
         if outcome == "failed":
@@ -757,18 +686,13 @@ class ViewerRuntime:
         self,
         item: _WorkItem,
         event: object,
-        *,
-        semantic_text: str,
     ) -> tuple[str, bool]:
         async def commit_once() -> tuple[str, bool]:
             if self._expired(item.request) or not self._is_current(item):
                 return "stale", False
-            if not await self._claim_semantic_output(item, semantic_text):
-                return "duplicate", False
             try:
                 await self._room_service.append_published_barrage(event)
             except Exception:
-                await self._release_semantic_output(item, semantic_text)
                 return "failed", False
             return "published", await self._deliver_realtime(item, event)
 
@@ -793,7 +717,7 @@ class ViewerRuntime:
             viewer_sequence=item.request.viewer_sequence,
             presence_revision=item.request.presence_revision,
             moderation_revision=item.request.moderation_revision,
-            behavior_revision=item.request.behavior_revision,
+            behavior_revision=None,
             operation=commit_to_completion,
         )
         if not accepted or result is None:
@@ -833,7 +757,7 @@ class ViewerRuntime:
             viewer_sequence=request.viewer_sequence,
             presence_revision=request.presence_revision,
             moderation_revision=request.moderation_revision,
-            behavior_revision=request.behavior_revision,
+            behavior_revision=None,
             deadline_at_ms=request.deadline_at_ms,
         ):
             self._record_trace(
@@ -944,66 +868,6 @@ class ViewerRuntime:
             self._remaining_ttl_seconds(request),
             monotonic_deadline - asyncio.get_running_loop().time(),
         )
-
-    async def _claim_semantic_output(
-        self,
-        item: _WorkItem,
-        text: str,
-    ) -> bool:
-        semantic_key = self._semantic_key(text)
-        scope = (
-            item.request.session_id,
-            item.request.audience_epoch,
-            item.request.observation_id,
-        )
-        now_ms = self._clock.now_ms()
-        async with self._semantic_lock:
-            for candidate_scope, entries in tuple(self._semantic_outputs.items()):
-                for key, (expires_at_ms, _) in tuple(entries.items()):
-                    if expires_at_ms <= now_ms:
-                        entries.pop(key, None)
-                if not entries:
-                    self._semantic_outputs.pop(candidate_scope, None)
-            entries = self._semantic_outputs.setdefault(scope, {})
-            if semantic_key in entries:
-                return False
-            entries[semantic_key] = (
-                item.request.deadline_at_ms,
-                item.request.generation_request_id,
-            )
-            return True
-
-    async def _release_semantic_output(
-        self,
-        item: _WorkItem,
-        text: str,
-    ) -> None:
-        scope = (
-            item.request.session_id,
-            item.request.audience_epoch,
-            item.request.observation_id,
-        )
-        semantic_key = self._semantic_key(text)
-        async with self._semantic_lock:
-            entries = self._semantic_outputs.get(scope)
-            if (
-                entries is not None
-                and entries.get(semantic_key, (None, None))[1]
-                == item.request.generation_request_id
-            ):
-                entries.pop(semantic_key, None)
-                if not entries:
-                    self._semantic_outputs.pop(scope, None)
-
-    @staticmethod
-    def _semantic_key(text: str) -> str:
-        folded = text.casefold()
-        semantic = "".join(
-            character
-            for character in folded
-            if unicodedata.category(character)[0] in {"L", "N"}
-        )
-        return semantic or " ".join(folded.split())
 
     def _finalize_pre_dispatch(self, item: _WorkItem) -> str:
         expired = self._expired(item.request)
@@ -1125,6 +989,7 @@ class ViewerRuntime:
             input_event_ids=wave.trigger_event_ids,
             public_context_event_ids=context.public_context_event_ids,
             public_context=context.public_context,
+            conversation_history_summary=context.conversation_history_summary,
             viewer_private_state=viewer.private_state,
             room_memory_slice=memory,
             deadline_at_ms=self._deadline(wave, runtime),
@@ -1180,6 +1045,11 @@ class ViewerRuntime:
             mode_context=mode_context,
             public_context_event_ids=list(public_ids),
             public_context=public_events,
+            conversation_history_summary=(
+                getattr(runtime, "conversation_history_summary", None)
+                if isinstance(getattr(runtime, "conversation_history_summary", None), str)
+                else None
+            ),
             room_memory_slice=memory,
         )
 
@@ -1321,8 +1191,6 @@ class ViewerRuntime:
         return (
             item.generation == self._generation
             and self._active_session_id == item.request.session_id
-            and self._sequences.get(item.request.viewer_instance_id)
-            == item.request.viewer_sequence
             and item.viewer.lifecycle_state is ViewerLifecycleState.ACTIVE
             and item.viewer.room_id == item.request.room_id
             and item.viewer.session_id == item.request.session_id

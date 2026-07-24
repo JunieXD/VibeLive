@@ -62,7 +62,6 @@ export type ModelConfig = {
   baseUrl: string
   providerProfileId: string
   model: string
-  directorModel: string
   viewerModel: string
   memoryModel: string
   visualSummaryModel: string
@@ -74,7 +73,6 @@ export type ModelConfigStatus = {
   baseUrl: string | null
   providerProfileId: string | null
   model: string | null
-  directorModel: string | null
   viewerModel: string | null
   memoryModel: string | null
   visualSummaryModel: string | null
@@ -321,6 +319,7 @@ export type ControlApi = {
   queryAiCalls: (query: AiCallQuery) => Promise<AiCallQueryResponse>
   submitUserText: (text: string, target?: TextSubmitTarget) => Promise<void>
   submitAudioSegment: (input: RealtimeMediaInput) => Promise<void>
+  notifyVoiceActivity: (occurredAtMs: number) => void
   submitVisualFrame: (input: RealtimeFrameInput) => Promise<void>
   listRoomMemories: (roomId: string) => Promise<RoomLongTermMemory[]>
   getRoomMemoryHead: (roomId: string) => Promise<RoomMemoryHead>

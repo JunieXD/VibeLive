@@ -73,7 +73,6 @@ def _spec(*, target: int) -> CanonicalRuntimeSpec:
         modes=[mode],
         provider=ProviderRuntimeSpec(
             provider_profile_id="provider-1",
-            director_model="director",
             viewer_model="viewer",
             memory_model="memory",
             visual_summary_model="visual",

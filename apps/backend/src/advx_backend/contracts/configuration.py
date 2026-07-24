@@ -11,7 +11,6 @@ class ProviderConfigurationRequest(BaseModel):
     provider_profile_id: str = Field(default="default", min_length=1, max_length=128)
     model_base_url: str = Field(min_length=1, max_length=2_048)
     model_name: str = Field(min_length=1, max_length=256)
-    director_model: str | None = Field(default=None, min_length=1, max_length=256)
     viewer_model: str | None = Field(default=None, min_length=1, max_length=256)
     memory_model: str | None = Field(default=None, min_length=1, max_length=256)
     visual_summary_model: str | None = Field(default=None, min_length=1, max_length=256)
@@ -22,7 +21,6 @@ class ProviderConfigurationRequest(BaseModel):
         "provider_profile_id",
         "model_base_url",
         "model_name",
-        "director_model",
         "viewer_model",
         "memory_model",
         "visual_summary_model",
@@ -36,7 +34,6 @@ class ProviderConfigurationRequest(BaseModel):
 
     def role_models(self) -> dict[str, str]:
         return {
-            "director": self.director_model or self.model_name,
             "viewer": self.viewer_model or self.model_name,
             "memory": self.memory_model or self.model_name,
             "visual_summary": self.visual_summary_model or self.model_name,
@@ -49,7 +46,6 @@ class RuntimeModelProviderCandidate(BaseModel):
     provider_profile_id: str = Field(default="default", min_length=1, max_length=128)
     model_base_url: str = Field(min_length=1, max_length=2_048)
     model_name: str = Field(min_length=1, max_length=256)
-    director_model: str | None = Field(default=None, min_length=1, max_length=256)
     viewer_model: str | None = Field(default=None, min_length=1, max_length=256)
     memory_model: str | None = Field(default=None, min_length=1, max_length=256)
     visual_summary_model: str | None = Field(default=None, min_length=1, max_length=256)
@@ -59,7 +55,6 @@ class RuntimeModelProviderCandidate(BaseModel):
         "provider_profile_id",
         "model_base_url",
         "model_name",
-        "director_model",
         "viewer_model",
         "memory_model",
         "visual_summary_model",
@@ -72,7 +67,6 @@ class RuntimeModelProviderCandidate(BaseModel):
 
     def role_models(self) -> dict[str, str]:
         return {
-            "director": self.director_model or self.model_name,
             "viewer": self.viewer_model or self.model_name,
             "memory": self.memory_model or self.model_name,
             "visual_summary": self.visual_summary_model or self.model_name,
@@ -84,7 +78,6 @@ class ProviderConfigurationStatus(BaseModel):
     provider_profile_id: str | None = None
     model_base_url: str | None = None
     model_name: str | None = None
-    director_model: str | None = None
     viewer_model: str | None = None
     memory_model: str | None = None
     visual_summary_model: str | None = None

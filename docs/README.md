@@ -74,6 +74,7 @@
 | [DECISIONS.md](./DECISIONS.md) | 已接受决定、候选方案和开放问题 |
 | [VIEWER_RUNTIME_INTEGRATION_PLAN.md](./VIEWER_RUNTIME_INTEGRATION_PLAN.md) | AI 观众实例、Director、独立请求、记忆与成长梗的前后端联动执行计划 |
 | [VIEWER_RUNTIME_REQUIREMENTS_LOG.md](./VIEWER_RUNTIME_REQUIREMENTS_LOG.md) | 需求访谈中锁定的产品语义、纠偏结论和首版边界 |
+| [AUDIENCE_SPEAKING_PRODUCT_SPEC.md](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) | AI 观众发言的已确认产品规则、固定参数与验收场景；其发言机制规则优先于旧设计文档 |
 
 ## 文档原则
 

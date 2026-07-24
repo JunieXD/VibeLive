@@ -8,11 +8,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
-from advx_backend.application.director_service import (
-    DirectorDecisionError,
-    DirectorOutcome,
-    validate_meme_candidate,
-)
 from advx_backend.application.observation_wave_builder import select_frame_bundle
 from advx_backend.application.ports.session import Clock
 from advx_backend.application.runtime_state import CommittedRuntime, RuntimeStateStore
@@ -26,7 +21,7 @@ from advx_backend.contracts.viewer_runtime import (
     CanonicalRuntimeSpec,
     ViewerRuntimeTelemetry,
 )
-from advx_backend.domain.crowd_decision import CrowdDecision
+from advx_backend.domain.crowd_decision import CrowdDecision, DecisionSource
 from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemorySlice, RoomWorkingMemory
 from advx_backend.domain.observation import FrameRef, Observation
@@ -42,16 +37,6 @@ from advx_backend.domain.room import RoomEvent, RoomEventSource
 from advx_backend.domain.scene_assessment import SceneAssessment
 
 logger = logging.getLogger(__name__)
-
-
-class WaveDirector(Protocol):
-    async def decide(
-        self,
-        *,
-        wave: ObservationWave,
-        pool: object,
-        runtime: object,
-    ) -> DirectorOutcome: ...
 
 
 class ViewerPopulationController(Protocol):
@@ -89,6 +74,17 @@ class WaveVisualSummarizer(Protocol):
         wave: ObservationWave,
         frame_bundle: FrameBundle,
         runtime: FrozenWaveRuntime,
+    ) -> str: ...
+
+
+class ConversationHistorySummarizer(Protocol):
+    async def summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
     ) -> str: ...
 
 
@@ -136,7 +132,7 @@ class FrozenWaveRuntime:
     user_context: tuple[tuple[str, str], ...]
     working_memory: RoomWorkingMemory
     room_memory_slice: RoomMemorySlice
-    director_budget: DirectorBudgetContext
+    conversation_history_summary: str | None = None
     scene_assessment: SceneAssessment | None = None
 
     @property
@@ -153,19 +149,12 @@ class ViewerCoordinatorResult:
     wave: ObservationWave | None = None
     decision: CrowdDecision | None = None
     dispatch: ViewerDispatchSummary = ViewerDispatchSummary()
-    director_failed: bool = False
     runtime_missing: bool = False
     visual_failed: bool = False
     memory_failed: bool = False
     meme_failed: bool = False
     skipped: bool = False
     semantic_duplicate: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class DirectorBudgetContext:
-    forced_viewer_ids: tuple[str, ...] = ()
-    forced_persona_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -179,6 +168,12 @@ class _WavePolicyState:
     )
 
 
+@dataclass(slots=True)
+class _ConversationHistoryState:
+    summary: str | None = None
+    covered_event_ids: set[str] = field(default_factory=set)
+
+
 class ViewerRuntimeCoordinator:
     """Adapt legacy Observations to one frozen Viewer v2 reaction wave."""
 
@@ -186,13 +181,13 @@ class ViewerRuntimeCoordinator:
         self,
         *,
         runtime_state: RuntimeStateStore,
-        director: WaveDirector,
         viewer_runtime: ViewerRuntime,
         viewer_behavior: ViewerBehaviorService | None = None,
         population_controller: ViewerPopulationController | None = None,
         frame_metadata: FrameMetadataResolver | None = None,
         memory_reader: RoomMemorySliceReader | None = None,
         visual_summarizer: WaveVisualSummarizer | None = None,
+        history_summarizer: ConversationHistorySummarizer | None = None,
         meme_sink: MemeCandidateSink | None = None,
         memory_extraction_sink: WaveMemoryExtractionSink | None = None,
         memory_slice_limit: int = 32,
@@ -210,13 +205,13 @@ class ViewerRuntimeCoordinator:
         if background_task_timeout_ms < 1:
             raise ValueError("background_task_timeout_ms must be at least one")
         self._runtime_state = runtime_state
-        self._director = director
         self._viewer_runtime = viewer_runtime
         self._viewer_behavior = viewer_behavior or ViewerBehaviorService()
         self._population_controller = population_controller
         self._frame_metadata = frame_metadata
         self._memory_reader = memory_reader
         self._visual_summarizer = visual_summarizer
+        self._history_summarizer = history_summarizer
         self._meme_sink = meme_sink
         self._memory_extraction_sink = memory_extraction_sink
         self._memory_slice_limit = memory_slice_limit
@@ -227,6 +222,7 @@ class ViewerRuntimeCoordinator:
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._background_task_scopes: dict[asyncio.Task[None], tuple[str, int]] = {}
         self._policy_state: dict[str, _WavePolicyState] = {}
+        self._conversation_history: dict[str, _ConversationHistoryState] = {}
         self._telemetry: dict[str, ViewerRuntimeTelemetry] = {}
 
     async def react(self, observation: Observation) -> ViewerCoordinatorResult:
@@ -276,19 +272,17 @@ class ViewerRuntimeCoordinator:
                 wave=core_wave,
                 memory_failed=True,
             )
-        runtime = self._freeze_runtime(committed.spec, observation, memory_slice)
-        if isinstance(runtime, FrozenWaveRuntime):
-            runtime = replace(
-                runtime,
-                director_budget=DirectorBudgetContext(
-                    forced_viewer_ids=(
-                        (core_wave.target_viewer_id,)
-                        if core_wave.target_viewer_id is not None
-                        else ()
-                    ),
-                    forced_persona_id=core_wave.target_persona_id,
-                ),
-            )
+        public_context, history_summary = await self._compact_history(
+            observation,
+            committed,
+        )
+        runtime = self._freeze_runtime(
+            committed.spec,
+            observation,
+            memory_slice,
+            public_context=public_context,
+            history_summary=history_summary,
+        )
         wave = await self._prepare_visual_wave(core_wave, runtime)
         if wave is None:
             self._record_observation_trace(
@@ -300,13 +294,14 @@ class ViewerRuntimeCoordinator:
             return ViewerCoordinatorResult(wave=core_wave, visual_failed=True)
         retained_frames = await self._retain_wave_frames(wave)
         if retained_frames is None:
-            self._record_observation_trace(
-                wave=wave,
-                runtime=runtime,
-                status=ObservationWaveStatus.FAILED,
-                failure_reason="direct_frames_unavailable",
+            # A capture failure must not suppress text or ASR reactions.
+            wave = replace(
+                wave,
+                visual_input_mode=ViewerVisualInputMode.TEXT_ONLY,
+                frame_bundle=None,
+                shared_visual_summary=None,
             )
-            return ViewerCoordinatorResult(wave=wave, visual_failed=True)
+            retained_frames = ()
         try:
             return await self._react_with_prepared_wave(
                 wave=wave,
@@ -325,49 +320,12 @@ class ViewerRuntimeCoordinator:
         committed: CommittedRuntime,
         proposed_policy: _WavePolicyState | None,
     ) -> ViewerCoordinatorResult:
-        try:
-            outcome = await self._director.decide(
-                wave=wave,
-                pool=committed.pool,
-                runtime=runtime,
-            )
-        except Exception:
-            logger.exception(
-                "Director failed for observation %s",
-                wave.observation_id,
-            )
-            self._record_observation_trace(
-                wave=wave,
-                runtime=runtime,
-                status=ObservationWaveStatus.FAILED,
-                failure_reason="director_failed",
-            )
-            return ViewerCoordinatorResult(wave=wave, director_failed=True)
-        try:
-            validate_meme_candidate(
-                outcome.meme_candidate,
-                wave=wave,
-                runtime=runtime,
-            )
-        except DirectorDecisionError:
-            self._record_observation_trace(
-                wave=wave,
-                runtime=runtime,
-                status=ObservationWaveStatus.FAILED,
-                failure_reason="meme_candidate_invalid",
-            )
-            return ViewerCoordinatorResult(
-                wave=wave,
-                meme_failed=True,
-            )
-
+        assessment = self._independent_assessment(wave, committed)
         decision = self._decide_speakers(
             wave=wave,
             committed=committed,
-            runtime=runtime,
-            outcome=outcome,
         )
-        runtime = replace(runtime, scene_assessment=outcome.assessment)
+        runtime = replace(runtime, scene_assessment=assessment)
 
         self._record_observation_trace(
             wave=wave,
@@ -394,12 +352,7 @@ class ViewerRuntimeCoordinator:
             session_id=wave.session_id,
             dispatch=dispatch,
         )
-        meme_failed = False
         if self._allows_wave_side_effects(decision, dispatch):
-            meme_failed = await self._commit_meme_candidate(
-                wave=wave,
-                candidate=outcome.meme_candidate,
-            )
             self._schedule_memory_extraction(
                 wave=wave,
                 decision=decision,
@@ -410,7 +363,7 @@ class ViewerRuntimeCoordinator:
             wave=wave,
             decision=decision,
             dispatch=dispatch,
-            meme_failed=meme_failed,
+            meme_failed=False,
         )
 
     async def _retain_wave_frames(
@@ -468,54 +421,71 @@ class ViewerRuntimeCoordinator:
         *,
         wave: ObservationWave,
         committed: CommittedRuntime,
-        runtime: FrozenWaveRuntime,
-        outcome: DirectorOutcome,
     ) -> CrowdDecision:
-        assessment = outcome.assessment
-        viewers = tuple(committed.pool.viewers)
-        active_count = sum(viewer.is_active() for viewer in viewers)
-        recent_speakers = sum(
-            viewer.private_state.last_spoke_at_ms is not None
-            and viewer.private_state.last_spoke_at_ms >= wave.created_at_ms - 10_000
-            for viewer in viewers
-        )
-        crowd_pressure = recent_speakers / max(1, active_count)
-        desires = []
-        for viewer in viewers:
-            persona = self._resolved_persona(runtime, viewer.persona_id)
-            desires.append(
-                self._viewer_behavior.evaluate(
-                    viewer=viewer,
-                    persona=persona,
-                    wave=wave,
-                    assessment=assessment,
-                    recent_speaker_count=viewer.private_state.speech_streak,
-                    crowd_pressure=crowd_pressure,
-                    session_seed=committed.pool.session_seed,
-                )
-            )
-        selected = self._viewer_behavior.choose(
-            desires,
-            maximum=assessment.maximum_responses,
-            forced_viewer_id=wave.target_viewer_id,
-            forced_persona_id=wave.target_persona_id,
-        )
+        eligible = [
+            viewer.viewer_instance_id
+            for viewer in committed.pool.viewers
+            if viewer.is_active() and not viewer.is_muted(wave.created_at_ms)
+        ]
+        if ObservationTrigger.AMBIENT_TICK in wave.triggers:
+            by_id = {viewer.viewer_instance_id: viewer for viewer in committed.pool.viewers}
+            selected = sorted(
+                eligible,
+                key=lambda viewer_id: (
+                    by_id[viewer_id].private_state.last_spoke_at_ms is not None,
+                    by_id[viewer_id].private_state.last_spoke_at_ms or 0,
+                    viewer_id,
+                ),
+            )[:2]
+        else:
+            selected = eligible
         return CrowdDecision(
-            decision_id=assessment.assessment_id,
-            room_id=assessment.room_id,
-            session_id=assessment.session_id,
-            audience_epoch=assessment.audience_epoch,
-            observation_id=assessment.observation_id,
-            selected_viewer_ids=list(selected),
-            reason_codes=[
-                *assessment.reason_codes,
-                "per_viewer_behavior_v1",
-            ],
-            evidence_event_ids=assessment.evidence_event_ids,
-            evidence_frame_indexes=assessment.evidence_frame_indexes,
-            decision_source=assessment.decision_source,
-            created_at_ms=assessment.created_at_ms,
-            expires_at_ms=assessment.expires_at_ms,
+            decision_id=f"autonomous-{wave.observation_id}",
+            room_id=wave.room_id,
+            session_id=wave.session_id,
+            audience_epoch=wave.audience_epoch,
+            observation_id=wave.observation_id,
+            selected_viewer_ids=selected,
+            reason_codes=["per_viewer_independent_decision"],
+            evidence_event_ids=list(wave.trigger_event_ids),
+            evidence_frame_indexes=list(
+                range(0 if wave.frame_bundle is None else len(wave.frame_bundle.frames))
+            ),
+            decision_source=DecisionSource.AUTONOMOUS,
+            created_at_ms=wave.created_at_ms,
+            expires_at_ms=wave.deadline_at_ms,
+        )
+
+    @staticmethod
+    def _independent_assessment(
+        wave: ObservationWave,
+        committed: CommittedRuntime,
+    ) -> SceneAssessment:
+        return SceneAssessment(
+            assessment_id=f"autonomous-{wave.observation_id}",
+            room_id=wave.room_id,
+            session_id=wave.session_id,
+            audience_epoch=wave.audience_epoch,
+            observation_id=wave.observation_id,
+            salience=1.0,
+            novelty=1.0,
+            emotional_intensity=0.0,
+            topics=[],
+            emotional_tone=[],
+            replyable_event_ids=list(wave.event_ids),
+            evidence_event_ids=list(wave.trigger_event_ids),
+            evidence_frame_indexes=list(
+                range(0 if wave.frame_bundle is None else len(wave.frame_bundle.frames))
+            ),
+            suggested_reaction_types=[],
+            maximum_responses=sum(
+                viewer.is_active() and not viewer.is_muted(wave.created_at_ms)
+                for viewer in committed.pool.viewers
+            ),
+            reason_codes=["per_viewer_independent_decision"],
+            decision_source=DecisionSource.AUTONOMOUS,
+            created_at_ms=wave.created_at_ms,
+            expires_at_ms=wave.deadline_at_ms,
         )
 
     @staticmethod
@@ -562,6 +532,7 @@ class ViewerRuntimeCoordinator:
 
     async def start_session(self, session_id: str) -> None:
         self._policy_state.pop(session_id, None)
+        self._conversation_history.pop(session_id, None)
         self._telemetry.pop(session_id, None)
 
     async def stop_session(self, session_id: str) -> None:
@@ -572,6 +543,7 @@ class ViewerRuntimeCoordinator:
         )
         await self._drain_background_tasks(tasks, cancel=True)
         self._policy_state.pop(session_id, None)
+        self._conversation_history.pop(session_id, None)
         self._telemetry.pop(session_id, None)
 
     def telemetry_snapshot(self, session_id: str) -> ViewerRuntimeTelemetry:
@@ -681,59 +653,22 @@ class ViewerRuntimeCoordinator:
             semantic_inputs=OrderedDict(current.semantic_inputs),
         )
 
-        settings = committed.spec.settings
-        triggers = [
-            trigger
-            for trigger in wave.triggers
-            if trigger is not ObservationTrigger.SCREEN_CHANGE
-        ]
         has_real_input = any(
             trigger in {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
-            for trigger in triggers
+            for trigger in wave.triggers
         )
-        screen_score = wave.trigger_screen_change_score
-        significant_screen = (
-            bool(wave.trigger_frame_ids)
-            and screen_score >= settings.screen_change_threshold
-        )
-        if significant_screen:
-            cooldown_elapsed = (
-                state.last_screen_at_ms is None
-                or wave.created_at_ms
-                >= state.last_screen_at_ms + settings.screen_change_cooldown_ms
-            )
-            if cooldown_elapsed:
-                triggers.append(ObservationTrigger.SCREEN_CHANGE)
-                state.last_screen_at_ms = wave.created_at_ms
-                has_real_input = True
-
         if has_real_input:
             state.consecutive_ambient_waves = 0
             state.last_ambient_at_ms = None
+        elif ObservationTrigger.AMBIENT_TICK not in wave.triggers:
+            return None, False, None
         elif not self._ambient_allowed(committed, wave, state):
             return None, False, None
         else:
-            triggers = [ObservationTrigger.AMBIENT_TICK]
             state.consecutive_ambient_waves += 1
             state.last_ambient_at_ms = wave.created_at_ms
 
-        admitted = wave.model_copy(update={"triggers": triggers})
-        fingerprint = self._semantic_fingerprint(admitted)
-        cutoff = admitted.created_at_ms - self._semantic_dedup_ttl_ms
-        state.semantic_inputs = OrderedDict(
-            (key, value)
-            for key, value in state.semantic_inputs.items()
-            if value[1] > cutoff
-        )
-        if fingerprint in state.semantic_inputs:
-            return None, True, None
-        state.semantic_inputs[fingerprint] = (
-            admitted.input_revision,
-            admitted.created_at_ms,
-        )
-        while len(state.semantic_inputs) > self._max_semantic_inputs_per_session:
-            state.semantic_inputs.popitem(last=False)
-        return admitted, False, state
+        return wave, False, state
 
     @staticmethod
     def _ambient_allowed(
@@ -976,7 +911,13 @@ class ViewerRuntimeCoordinator:
                 }
             )
         if wave.frame_bundle is None or self._visual_summarizer is None:
-            return None
+            return wave.model_copy(
+                update={
+                    "visual_input_mode": ViewerVisualInputMode.TEXT_ONLY,
+                    "frame_bundle": None,
+                    "shared_visual_summary": None,
+                }
+            )
         try:
             summary = await self._visual_summarizer.summarize(
                 wave=wave,
@@ -1001,8 +942,10 @@ class ViewerRuntimeCoordinator:
         spec: CanonicalRuntimeSpec,
         observation: Observation,
         memory_slice: RoomMemorySlice,
+        *,
+        public_context: tuple[RoomEvent, ...],
+        history_summary: str | None,
     ) -> FrozenWaveRuntime:
-        public_context = tuple(observation.room_events)
         event_ids = tuple(dict.fromkeys(event.event_id for event in public_context))
         return FrozenWaveRuntime(
             canonical_runtime_spec=spec,
@@ -1020,8 +963,104 @@ class ViewerRuntimeCoordinator:
                 updated_at_ms=observation.created_at_ms,
             ),
             room_memory_slice=memory_slice,
-            director_budget=DirectorBudgetContext(),
+            conversation_history_summary=history_summary,
         )
+
+    async def _compact_history(
+        self,
+        observation: Observation,
+        committed: CommittedRuntime,
+    ) -> tuple[tuple[RoomEvent, ...], str | None]:
+        events = tuple(observation.room_events)
+        rendered = self._render_history(events)
+        if len(rendered) <= 24_000:
+            self._conversation_history.pop(observation.session_id, None)
+            return events, None
+
+        state = self._conversation_history.setdefault(
+            observation.session_id,
+            _ConversationHistoryState(),
+        )
+        recent = [event for event in events if event.event_id not in state.covered_event_ids]
+        if len(self._render_history(tuple(recent))) > 18_000:
+            older, newer = self._split_history(tuple(recent))
+            if older:
+                try:
+                    state.summary = await self._summarize_history(
+                        session_id=observation.session_id,
+                        audience_epoch=committed.audience_epoch,
+                        existing_summary=state.summary,
+                        older_history=self._render_history(older),
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "Could not summarize conversation history for session %s: %s",
+                        observation.session_id,
+                        error,
+                    )
+                # Each wave calls the summary model at most once. On failure,
+                # retain the latest events and let a future wave compact again.
+                state.covered_event_ids.update(event.event_id for event in older)
+                recent = list(newer)
+        return tuple(recent), state.summary
+
+    async def _summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
+    ) -> str:
+        if self._history_summarizer is not None:
+            summary = await self._history_summarizer.summarize_history(
+                session_id=session_id,
+                audience_epoch=audience_epoch,
+                existing_summary=existing_summary,
+                older_history=older_history,
+            )
+            summary = summary.strip()
+            if summary:
+                return summary[:6_000]
+        # Tests and offline adapters may not install a history model. Preserve
+        # the most recent part of the compacted history rather than dropping it.
+        fallback = "\n".join(part for part in (existing_summary, older_history) if part)
+        return fallback[-6_000:]
+
+    @staticmethod
+    def _split_history(
+        events: tuple[RoomEvent, ...],
+    ) -> tuple[tuple[RoomEvent, ...], tuple[RoomEvent, ...]]:
+        if len(events) < 2:
+            return (), events
+        total = len(ViewerRuntimeCoordinator._render_history(events))
+        threshold = max(1, total // 2)
+        used = 0
+        for index, event in enumerate(events[:-1], start=1):
+            used += len(ViewerRuntimeCoordinator._render_history((event,)))
+            if used >= threshold:
+                return events[:index], events[index:]
+        midpoint = len(events) // 2
+        return events[:midpoint], events[midpoint:]
+
+    @staticmethod
+    def _render_history(events: tuple[RoomEvent, ...]) -> str:
+        rows: list[str] = []
+        for event in events:
+            text = (event.text or "").strip()
+            if not text:
+                continue
+            payload = event.payload
+            display_name = payload.get("display_name")
+            source = (
+                display_name
+                if isinstance(display_name, str) and display_name
+                else event.source_id or event.source_type.value
+            )
+            target = payload.get("target_viewer_id")
+            target_text = f" -> {target}" if isinstance(target, str) and target else ""
+            rows.append(f"[{event.sequence}][{source}{target_text}] {text}")
+        return "\n".join(rows)
 
     def _schedule_memory_extraction(
         self,
@@ -1230,11 +1269,6 @@ class ViewerRuntimeCoordinator:
             triggers.append(ObservationTrigger.USER_TEXT)
         if RoomEventSource.USER_VOICE in sources:
             triggers.append(ObservationTrigger.FINAL_VOICE)
-        if (
-            ViewerRuntimeCoordinator._trigger_frame_ids(observation)
-            or RoomEventSource.SCREEN_OBSERVATION in sources
-        ):
-            triggers.append(ObservationTrigger.SCREEN_CHANGE)
-        if not triggers:
+        if observation.user_context.get("ambient") == "true":
             triggers.append(ObservationTrigger.AMBIENT_TICK)
         return triggers

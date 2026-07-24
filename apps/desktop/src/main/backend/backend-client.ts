@@ -182,7 +182,6 @@ export class BackendClient {
       model_base_url: config.baseUrl,
       provider_profile_id: config.providerProfileId,
       model_name: config.model,
-      director_model: config.directorModel || undefined,
       viewer_model: config.viewerModel || undefined,
       memory_model: config.memoryModel || undefined,
       visual_summary_model: config.visualSummaryModel || undefined,
@@ -682,6 +681,16 @@ export class BackendClient {
     return queued;
   }
 
+  notifyVoiceActivity(occurredAtMs: number): void {
+    const sessionId = this.requireRunningSession();
+    this.sendJson({
+      type: "client.voice.activity",
+      protocol_version: PROTOCOL_VERSION,
+      session_id: sessionId,
+      occurred_at_ms: occurredAtMs
+    });
+  }
+
   private async sessionCommand(
     command: "pause" | "resume" | "stop"
   ): Promise<BackendSessionSnapshot> {
@@ -1035,7 +1044,6 @@ function sameRuntimeProvider(
 ): boolean {
   return (
     left.provider_profile_id === right.provider_profile_id &&
-    left.director_model === right.director_model &&
     left.viewer_model === right.viewer_model &&
     left.memory_model === right.memory_model &&
     left.visual_summary_model === right.visual_summary_model
@@ -1048,7 +1056,6 @@ function sameRuntimeProviderCandidate(
 ): boolean {
   return (
     provider.provider_profile_id === candidate.provider_profile_id &&
-    provider.director_model === (candidate.director_model ?? candidate.model_name) &&
     provider.viewer_model === (candidate.viewer_model ?? candidate.model_name) &&
     provider.memory_model === (candidate.memory_model ?? candidate.model_name) &&
     provider.visual_summary_model ===

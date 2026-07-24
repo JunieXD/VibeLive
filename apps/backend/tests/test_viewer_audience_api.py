@@ -60,7 +60,6 @@ def spec() -> CanonicalRuntimeSpec:
         modes=[mode],
         provider=ProviderRuntimeSpec(
             provider_profile_id="provider-1",
-            director_model="director",
             viewer_model="viewer",
             memory_model="memory",
             visual_summary_model="visual",
@@ -80,7 +79,6 @@ def test_moderation_and_new_session_identity(tmp_path) -> None:
             provider_profile_id="provider-1",
             model_base_url="https://models.example/v1",
             model_name="viewer",
-            director_model="director",
             viewer_model="viewer",
             memory_model="memory",
             visual_summary_model="visual",

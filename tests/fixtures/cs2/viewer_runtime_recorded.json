@@ -16,8 +16,8 @@
     "audience_contract_version": 2,
     "bundle_id": "cs2-6657-desktop-preset-recorded-v2",
     "canonical_runtime_spec": {
-    "protocol_version": 3,
-    "audience_contract_version": 2,
+      "protocol_version": 3,
+      "audience_contract_version": 2,
       "config_revision": 2,
       "room": {
         "room_id": "cs2-synthetic-room",
@@ -1405,32 +1405,32 @@
       ],
       "provider": {
         "provider_profile_id": "synthetic-no-credentials",
-        "director_model": "fake-director-v1",
         "viewer_model": "fake-viewer-v1",
         "memory_model": "fake-memory-v1",
         "visual_summary_model": "fake-visual-v1"
       },
       "settings": {
         "frame_bundle": {
-          "frame_bundle_size": 3,
-          "frame_window_ms": 10000,
+          "frame_bundle_size": 60,
+          "frame_window_ms": 120000,
           "frame_selection_strategy": "change_peaks",
           "frame_max_dimension": 1280,
-          "frame_quality": 82
+          "frame_quality": 82,
+          "frame_similarity_threshold": 0.9,
+          "frame_anchor_interval_ms": 5000
         },
         "viewer_visual_input_mode": "direct_frames",
-        "director_failure_mode": "resilient",
         "max_in_flight_viewer_requests": 12,
-        "viewer_request_ttl_ms": 90000,
-        "viewer_queue_capacity": 64,
-        "observation_merge_window_ms": 250,
+        "viewer_request_ttl_ms": 900000,
+        "viewer_queue_capacity": 8192,
+        "observation_merge_window_ms": 0,
         "screen_change_threshold": 0.2,
         "screen_change_cooldown_ms": 2000,
-        "ambient_tick_cooldown_ms": 5000,
-        "max_consecutive_ambient_waves": 2
+        "ambient_tick_cooldown_ms": 30000,
+        "max_consecutive_ambient_waves": 1
       }
     },
-    "config_hash": "45d5507833061409fcf51fabce63170a9e4e8f148efdcadebc8f8b46b8b887f2",
+    "config_hash": "7233ac151c411e7c71aa3d222f75bde5f8154e9d5dc8e7baa6dda8a6a400800d",
     "created_at_ms": 2000,
     "events": [
       {
@@ -1457,21 +1457,6 @@
         "sequence": 2
       },
       {
-        "event_type": "director.completed",
-        "occurred_at_ms": 1250,
-        "payload": {
-          "decision_id": "decision-cs2-1",
-          "generation_request_ids": [
-            "fake-director-call-3"
-          ],
-          "selected_persona_ids": [
-            "instigator",
-            "reaction_qmark"
-          ]
-        },
-        "sequence": 3
-      },
-      {
         "event_type": "viewer.completed",
         "occurred_at_ms": 1300,
         "payload": {
@@ -1483,7 +1468,7 @@
             "fake-viewer-call-1"
           ]
         },
-        "sequence": 4
+        "sequence": 3
       },
       {
         "event_type": "visual_summary.completed",
@@ -1491,7 +1476,7 @@
         "payload": {
           "generation_request_id": "fake-visual-call-1"
         },
-        "sequence": 5
+        "sequence": 4
       },
       {
         "event_type": "memory.completed",
@@ -1501,7 +1486,7 @@
             "fake-memory-call-3"
           ]
         },
-        "sequence": 6
+        "sequence": 5
       },
       {
         "event_type": "asr.completed",
@@ -1509,7 +1494,7 @@
         "payload": {
           "generation_request_id": "fake-asr-call-1"
         },
-        "sequence": 7
+        "sequence": 6
       }
     ],
     "input_refs": [
@@ -1518,17 +1503,6 @@
     ],
     "protocol_version": 3,
     "recorded_provider_outputs": [
-      {
-        "generation_request_id": "fake-director-call-3",
-        "output": {
-          "assessment_id": "assessment-cs2-frame",
-          "maximum_responses": 1,
-          "reason_codes": [
-            "recorded_frame"
-          ]
-        },
-        "provider_role": "director"
-      },
       {
         "generation_request_id": "fake-viewer-call-1",
         "output": {
@@ -2816,7 +2790,7 @@
         "mode_id": "room-6657",
         "namespace_id": "room-6657",
         "revision": 1,
-          "target_concurrent_viewers": 28,
+        "target_concurrent_viewers": 28,
         "persona_ids": [
           "reaction_qmark",
           "hardmouth_antifan",
@@ -2862,7 +2836,7 @@
         "mode_id": "newcomer-friendly",
         "namespace_id": "newcomer-friendly",
         "revision": 1,
-          "target_concurrent_viewers": 16,
+        "target_concurrent_viewers": 16,
         "persona_ids": [
           "newcomer",
           "newbie_host",
@@ -2906,7 +2880,7 @@
         "mode_id": "gentle-company",
         "namespace_id": "gentle-company",
         "revision": 1,
-          "target_concurrent_viewers": 14,
+        "target_concurrent_viewers": 14,
         "persona_ids": [
           "comfort_voice",
           "question_catcher",
@@ -2992,7 +2966,7 @@
         "mode_id": "just-for-laughs",
         "namespace_id": "just-for-laughs",
         "revision": 1,
-          "target_concurrent_viewers": 14,
+        "target_concurrent_viewers": 14,
         "persona_ids": [
           "abstract_radio",
           "fun_seeker",
@@ -3027,29 +3001,29 @@
     ],
     "provider": {
       "provider_profile_id": "synthetic-no-credentials",
-      "director_model": "fake-director-v1",
       "viewer_model": "fake-viewer-v1",
       "memory_model": "fake-memory-v1",
       "visual_summary_model": "fake-visual-v1"
     },
     "settings": {
       "frame_bundle": {
-        "frame_bundle_size": 3,
-        "frame_window_ms": 10000,
+        "frame_bundle_size": 60,
+        "frame_window_ms": 120000,
         "frame_selection_strategy": "change_peaks",
         "frame_max_dimension": 1280,
-        "frame_quality": 82
+        "frame_quality": 82,
+        "frame_similarity_threshold": 0.9,
+        "frame_anchor_interval_ms": 5000
       },
       "viewer_visual_input_mode": "direct_frames",
-      "director_failure_mode": "resilient",
       "max_in_flight_viewer_requests": 12,
-      "viewer_request_ttl_ms": 90000,
-      "viewer_queue_capacity": 64,
-      "observation_merge_window_ms": 250,
+      "viewer_request_ttl_ms": 900000,
+      "viewer_queue_capacity": 8192,
+      "observation_merge_window_ms": 0,
       "screen_change_threshold": 0.2,
       "screen_change_cooldown_ms": 2000,
-      "ambient_tick_cooldown_ms": 5000,
-      "max_consecutive_ambient_waves": 2
+      "ambient_tick_cooldown_ms": 30000,
+      "max_consecutive_ambient_waves": 1
     }
   },
   "hot_update": {

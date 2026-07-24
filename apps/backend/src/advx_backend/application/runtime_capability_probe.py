@@ -182,7 +182,6 @@ class ProductionRuntimeCapabilityProbe:
             )
 
         expected_models = {
-            "director": spec.provider.director_model,
             "viewer": spec.provider.viewer_model,
             "memory": spec.provider.memory_model,
             "visual_summary": spec.provider.visual_summary_model,

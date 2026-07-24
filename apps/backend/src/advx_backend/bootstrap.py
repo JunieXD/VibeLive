@@ -7,7 +7,6 @@ from advx_backend.application.audience_service import AudienceService
 from advx_backend.application.barrage_pipeline import BarragePipeline
 from advx_backend.application.context_builder import ContextBuilder
 from advx_backend.application.debug_service import DebugService
-from advx_backend.application.director_service import DirectorService
 from advx_backend.application.frame_metadata import StoredFrameMetadataResolver
 from advx_backend.application.frame_store import InMemoryFrameStore
 from advx_backend.application.generation_policies import (
@@ -61,10 +60,6 @@ from advx_backend.application.transcript_target_resolver import (
 from advx_backend.application.viewer_audience_service import ViewerAudienceService
 from advx_backend.application.viewer_barrage_pipeline import ViewerBarragePipeline
 from advx_backend.application.viewer_behavior_service import ViewerBehaviorService
-from advx_backend.application.viewer_policies import (
-    ActiveModeDirectorBudgetPolicy,
-    DeterministicDirectorFallbackPolicy,
-)
 from advx_backend.application.viewer_pool_service import ViewerPoolService
 from advx_backend.application.viewer_runtime import ViewerRuntime
 from advx_backend.application.viewer_runtime_adapters import (
@@ -101,14 +96,14 @@ DEFAULT_DATA_DIRECTORY = Path.cwd() / ".advx-data"
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    room_event_capacity: int = 256
-    room_event_ttl_ms: int = 120_000
-    frame_capacity: int = 8
-    frame_ttl_ms: int = 10_000
-    max_frames_per_observation: int = 3
-    max_events_per_observation: int = 64
+    room_event_capacity: int | None = None
+    room_event_ttl_ms: int | None = None
+    frame_capacity: int = 120
+    frame_ttl_ms: int = 120_000
+    max_frames_per_observation: int = 120
+    max_events_per_observation: int | None = None
     frame_max_bytes: int = 4_194_304
-    frame_total_bytes: int = 16_777_216
+    frame_total_bytes: int = 536_870_912
     audience_max_memories: int = 12
     ingest_max_tracked_input_ids: int = 1_024
     barrage_max_text_length: int = 200
@@ -320,6 +315,21 @@ class BackendRuntime:
             return 0
         return committed.spec.settings.observation_merge_window_ms
 
+    async def ambient_enabled(self, session_id: str) -> bool:
+        try:
+            committed = await self.runtime_state.snapshot(session_id)
+        except KeyError:
+            return False
+        mode = next(
+            (
+                item
+                for item in committed.spec.modes
+                if item.mode_id == committed.spec.active_mode_id
+            ),
+            None,
+        )
+        return mode is not None and mode.ambience.value == "continuous"
+
     def configure_ingest_pipeline(
         self,
         *,
@@ -349,6 +359,7 @@ class BackendRuntime:
             clock=self.clock,
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
             voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
+            ambient_enabled=self.ambient_enabled,
         )
         self.session_resources.add_resource(ingest_service)
         self.ingest_gateway.configure(ingest_service)
@@ -454,15 +465,8 @@ class BackendRuntime:
         self.viewer_audience_service.bind_cancel_viewer(
             viewer_runtime.cancel_viewer
         )
-        director = DirectorService(
-            provider=viewer_provider,
-            budget_policy=ActiveModeDirectorBudgetPolicy(),
-            fallback=DeterministicDirectorFallbackPolicy(),
-            clock=self.clock,
-        )
         coordinator = ViewerRuntimeCoordinator(
             runtime_state=self.runtime_state,
-            director=director,
             viewer_runtime=viewer_runtime,
             viewer_behavior=ViewerBehaviorService(),
             population_controller=self.viewer_audience_service,
@@ -471,6 +475,7 @@ class BackendRuntime:
             ),
             memory_reader=self.shared_brain_service,
             visual_summarizer=viewer_provider,
+            history_summarizer=viewer_provider,
             meme_sink=SharedBrainMemeCandidateSink(self.shared_brain_service),
             memory_extraction_sink=SharedBrainMemoryExtractionSink(
                 extractor=memory_extractor,
@@ -494,6 +499,7 @@ class BackendRuntime:
             clock=self.clock,
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
             voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
+            ambient_enabled=self.ambient_enabled,
         )
         self.session_resources.add_resource(viewer_runtime)
         self.session_resources.add_resource(coordinator)

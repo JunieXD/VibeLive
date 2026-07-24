@@ -139,14 +139,14 @@ class PersistentRuntimeRoomEventStore:
         *,
         session_factory: async_sessionmaker[AsyncSession],
         runtime_state: RuntimeStateStore,
-        max_events: int,
-        event_ttl_ms: int,
+        max_events: int | None,
+        event_ttl_ms: int | None,
         max_text_chars: int = 4_000,
         max_content_bytes: int = 32_768,
     ) -> None:
-        if max_events < 1:
+        if max_events is not None and max_events < 1:
             raise ValueError("max_events must be at least one")
-        if event_ttl_ms < 1:
+        if event_ttl_ms is not None and event_ttl_ms < 1:
             raise ValueError("event_ttl_ms must be at least one")
         if max_text_chars < 1 or max_content_bytes < 1:
             raise ValueError("room event size limits must be positive")
@@ -184,11 +184,12 @@ class PersistentRuntimeRoomEventStore:
         )
         repository = SQLiteRoomEventRepository(session)
         await repository.append(persisted)
-        await repository.prune(
-            persisted.room_id,
-            keep_after_ms=event.created_at_ms - self._event_ttl_ms,
-            max_events=self._max_events,
-        )
+        if self._event_ttl_ms is not None and self._max_events is not None:
+            await repository.prune(
+                persisted.room_id,
+                keep_after_ms=event.created_at_ms - self._event_ttl_ms,
+                max_events=self._max_events,
+            )
 
     async def load_for_recovery(
         self,

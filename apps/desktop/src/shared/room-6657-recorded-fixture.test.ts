@@ -31,7 +31,6 @@ const secondaryPersonaIds = [
 ] as const
 const provider = {
   providerProfileId: 'synthetic-no-credentials',
-  directorModel: 'fake-director-v1',
   viewerModel: 'fake-viewer-v1',
   memoryModel: 'fake-memory-v1',
   visualSummaryModel: 'fake-visual-v1'

@@ -158,6 +158,96 @@ describe('viewer pool v2', () => {
 })
 
 describe('workspace persistence', () => {
+  it('migrates v1 modes once and preserves the exact built-in viewer counts', () => {
+    const v2 = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    const v1 = {
+      ...v2,
+      version: 1,
+      personas: v2.personas.map((persona: Record<string, unknown>) => {
+        const { documentVersion, revision, contentHash, ...legacy } = persona
+        return legacy
+      }),
+      modeState: {
+        ...v2.modeState,
+        modes: v2.modeState.modes.map((mode: Record<string, unknown>) => {
+          const {
+            namespaceId,
+            revision,
+            targetConcurrentViewers,
+            normalResponseRange,
+            highlightResponseRange,
+            visualSettings,
+            ...legacy
+          } = mode
+          return legacy
+        })
+      }
+    }
+    const parsed = parseAudienceWorkspaceState(v1)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.migratedFromVersion).toBe(1)
+    expect(parsed.workspace.version).toBe(3)
+    expect(parsed.workspace.modeState.modes.map((mode) => mode.targetConcurrentViewers))
+      .toEqual([24, 28, 16, 14, 24, 14])
+    expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
+      viewerVisualInputMode: 'direct_frames',
+      frameBundleSize: 60,
+      frameSelectionStrategy: 'change_peaks'
+    })
+  })
+
+  it('extracts v1 local memes for one-time Shared Brain migration', () => {
+    const v1 = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    v1.version = 1
+    v1.memes = [{
+      id: 'legacy-joke',
+      text: '这波属于是',
+      createdAt: '2025-01-02T03:04:05.000Z'
+    }]
+    for (const persona of v1.personas) {
+      delete persona.documentVersion
+      delete persona.revision
+      delete persona.contentHash
+    }
+    for (const mode of v1.modeState.modes) {
+      delete mode.namespaceId
+      delete mode.revision
+      delete mode.targetConcurrentViewers
+      delete mode.normalResponseRange
+      delete mode.highlightResponseRange
+      delete mode.visualSettings
+    }
+
+    const parsed = parseAudienceWorkspaceState(v1)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.legacyMemes).toEqual([{
+      id: 'legacy-joke',
+      text: '这波属于是',
+      createdAt: '2025-01-02T03:04:05.000Z'
+    }])
+    expect(parsed.workspace).not.toHaveProperty('memes')
+  })
+
+  it('upgrades the former short visual default in an existing workspace', () => {
+    const workspace = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    workspace.modeState.modes[0].visualSettings = {
+      ...workspace.modeState.modes[0].visualSettings,
+      frameBundleSize: 3,
+      frameWindowMs: 10_000,
+      frameSelectionStrategy: 'change_peaks'
+    }
+
+    const parsed = parseAudienceWorkspaceState(workspace)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
+      frameBundleSize: 60,
+      frameWindowMs: 120_000
+    })
+  })
+
   it('strictly hydrates a JSON round trip and rejects damaged references', () => {
     const jsonValue: unknown = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
     expect(parseAudienceWorkspaceState(jsonValue).ok).toBe(true)

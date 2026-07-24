@@ -10,7 +10,6 @@ import {
   releaseVisualFrames,
   requiredVisualSources,
   sampleCanvasChangeSignature,
-  selectVisualBatchFrames,
   type VisualBatchSink,
   type VisualFrame,
   type VisualPipelineStatus,
@@ -191,11 +190,8 @@ export function useVisualPipeline({
       batchBusyRef.current = runId
       const pending = pendingFramesRef.current
       pendingFramesRef.current = []
-      const selected = selectVisualBatchFrames(pending)
-      const selectedIds = new Set(selected.map((frame) => frame.frameId))
-      releaseVisualFrames(pending.filter((frame) => !selectedIds.has(frame.frameId)))
       if (runRef.current !== runId) {
-        releaseVisualFrames(selected)
+        releaseVisualFrames(pending)
         batchBusyRef.current = null
         return
       }
@@ -207,7 +203,7 @@ export function useVisualPipeline({
           {
             batchId: `visual-batch-${createdAt}`,
             createdAt,
-            frames: selected
+            frames: pending
           },
           batchAbortController.signal
         )

@@ -56,7 +56,6 @@ def test_provider_configuration_is_authenticated_idempotent_and_secret_safe(
         "provider_profile_id": None,
         "model_base_url": None,
         "model_name": None,
-        "director_model": None,
         "viewer_model": None,
         "memory_model": None,
         "visual_summary_model": None,
@@ -68,7 +67,6 @@ def test_provider_configuration_is_authenticated_idempotent_and_secret_safe(
         "provider_profile_id": "default",
         "model_base_url": "https://models.example/v1",
         "model_name": "test-model",
-        "director_model": "test-model",
         "viewer_model": "test-model",
         "memory_model": "test-model",
         "visual_summary_model": "test-model",
@@ -119,7 +117,7 @@ def test_provider_role_models_and_redacted_capability_endpoints(
 ) -> None:
     class FakeProvider:
         async def discover_models(self) -> tuple[str, ...]:
-            return ("director-v1", "viewer-v1")
+            return ("viewer-v1",)
 
         async def probe_capabilities(
             self,
@@ -127,19 +125,18 @@ def test_provider_role_models_and_redacted_capability_endpoints(
             role_models: dict[str, str],
         ) -> CapabilityProbeResult:
             assert role_models == {
-                "director": "director-v1",
                 "viewer": "viewer-v1",
                 "memory": "shared-v1",
                 "visual_summary": "shared-v1",
             }
             return CapabilityProbeResult(
                 status=CapabilityProbeStatus.PASSED,
-                discovered_model_ids=("director-v1", "viewer-v1"),
+                discovered_model_ids=("viewer-v1",),
                 checks=(
                     CapabilityProbeCheck(
-                        capability="director_structured_output",
+                        capability="viewer_structured_output",
                         status=CapabilityProbeStatus.PASSED,
-                        model_id="director-v1",
+                        model_id="viewer-v1",
                     ),
                 ),
             )
@@ -155,7 +152,6 @@ def test_provider_role_models_and_redacted_capability_endpoints(
     app = create_app(runtime=runtime)
     payload = provider_payload(model_name="shared-v1") | {
         "provider_profile_id": "active-profile",
-        "director_model": "director-v1",
         "viewer_model": "viewer-v1",
     }
 
@@ -169,12 +165,11 @@ def test_provider_role_models_and_redacted_capability_endpoints(
         probe = client.post("/configuration/providers/probe", headers=headers())
 
     assert configured.json()["provider_profile_id"] == "active-profile"
-    assert configured.json()["director_model"] == "director-v1"
     assert configured.json()["viewer_model"] == "viewer-v1"
     assert configured.json()["memory_model"] == "shared-v1"
     assert models.json() == {
         "provider_profile_id": "active-profile",
-        "model_ids": ["director-v1", "viewer-v1"],
+        "model_ids": ["viewer-v1"],
     }
     assert probe.status_code == 200
     assert probe.json()["status"] == "passed"

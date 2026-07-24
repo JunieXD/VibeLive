@@ -12,7 +12,6 @@ const providerCandidate: RuntimeModelProviderCandidate = {
   provider_profile_id: "default",
   model_base_url: "https://api.example.com/v1",
   model_name: "viewer-model",
-  director_model: "viewer-model",
   viewer_model: "viewer-model",
   memory_model: "viewer-model",
   visual_summary_model: "viewer-model",
@@ -305,7 +304,6 @@ describe("BackendClient runtime v2", () => {
       baseUrl: "https://api.example.com/v1",
       providerProfileId: "profile-a",
       model: "default-model",
-      directorModel: "director-model",
       viewerModel: "",
       memoryModel: "memory-model",
       visualSummaryModel: "",
@@ -318,7 +316,6 @@ describe("BackendClient runtime v2", () => {
       provider_profile_id: "profile-a",
       model_base_url: "https://api.example.com/v1",
       model_name: "default-model",
-      director_model: "director-model",
       memory_model: "memory-model",
       model_api_key: "model-key",
       asr_api_key: "asr-key"
@@ -369,7 +366,6 @@ describe("BackendClient runtime v2", () => {
       configRevision: 1,
       provider: {
         providerProfileId: "default",
-        directorModel: "viewer-model",
         viewerModel: "viewer-model",
         memoryModel: "viewer-model",
         visualSummaryModel: "viewer-model"
@@ -413,7 +409,6 @@ describe("BackendClient runtime v2", () => {
       configRevision: 1,
       provider: {
         providerProfileId: "default",
-        directorModel: "viewer-model",
         viewerModel: "viewer-model",
         memoryModel: "viewer-model",
         visualSummaryModel: "viewer-model"
@@ -518,7 +513,6 @@ describe("BackendClient runtime v2", () => {
       configRevision: 2,
       provider: {
         providerProfileId: "default",
-        directorModel: "viewer-model",
         viewerModel: "viewer-model",
         memoryModel: "viewer-model",
         visualSummaryModel: "viewer-model"
@@ -566,7 +560,6 @@ describe("BackendClient runtime v2", () => {
       configRevision: 2,
       provider: {
         providerProfileId: "default",
-        directorModel: "viewer-model",
         viewerModel: "viewer-model",
         memoryModel: "viewer-model",
         visualSummaryModel: "viewer-model"
@@ -773,7 +766,6 @@ describe("BackendClient runtime v2", () => {
 
 const runtimeProvider = {
   provider_profile_id: "default",
-  director_model: "viewer-model",
   viewer_model: "viewer-model",
   memory_model: "viewer-model",
   visual_summary_model: "viewer-model"

@@ -1,5 +1,6 @@
 export const PCM_SAMPLE_RATE = 16_000
-export const AUDIO_SEGMENT_SECONDS = 2
+export const AUDIO_SENTENCE_SILENCE_SECONDS = 0.8
+export const AUDIO_SPEECH_THRESHOLD = 0.015
 
 export function concatenateFloat32(chunks: readonly Float32Array[]): Float32Array {
   const length = chunks.reduce((total, chunk) => total + chunk.length, 0)

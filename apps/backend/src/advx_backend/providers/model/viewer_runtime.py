@@ -1,9 +1,7 @@
 import asyncio
 import base64
-import hashlib
 import json
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass, field, is_dataclass
 from dataclasses import fields as dataclass_fields
 from enum import Enum
@@ -19,7 +17,6 @@ from advx_backend.application.ai_call_logging import (
     build_http_response_summary,
     build_openai_request_summary,
 )
-from advx_backend.application.director_service import DirectorOutcome, DirectorRequest
 from advx_backend.application.ports.ingest import FrameResolver
 from advx_backend.contracts.debug import AiCallRole
 from advx_backend.contracts.viewer_runtime import (
@@ -27,14 +24,12 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerGenerationRequest,
     ViewerGenerationResponse,
 )
-from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.observation import FrameRef
 from advx_backend.domain.observation_wave import (
     FrameBundle,
     ObservationWave,
     ViewerVisualInputMode,
 )
-from advx_backend.domain.scene_assessment import SceneAssessment
 from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleConfig,
     OpenAICompatibleHttpError,
@@ -96,121 +91,6 @@ class OpenAICompatibleViewerRuntimeConfig:
     provider: ProviderRuntimeSpec
     api_key: str | None = field(default=None, repr=False)
     request_timeout_seconds: float = 30.0
-
-
-_DIRECTOR_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "assessment_id",
-        "salience",
-        "novelty",
-        "emotional_intensity",
-        "topics",
-        "emotional_tone",
-        "replyable_event_ids",
-        "reason_codes",
-        "evidence_event_ids",
-        "evidence_frame_indexes",
-        "suggested_reaction_types",
-        "maximum_responses",
-        "meme_candidate",
-    ],
-    "properties": {
-        "assessment_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "salience": {"type": "number", "minimum": 0, "maximum": 1},
-        "novelty": {"type": "number", "minimum": 0, "maximum": 1},
-        "emotional_intensity": {"type": "number", "minimum": 0, "maximum": 1},
-        "topics": {
-            "type": "array",
-            "maxItems": 32,
-            "items": {"type": "string", "minLength": 1, "maxLength": 128},
-        },
-        "emotional_tone": {
-            "type": "array",
-            "maxItems": 16,
-            "items": {"type": "string", "minLength": 1, "maxLength": 128},
-        },
-        "replyable_event_ids": {
-            "type": "array",
-            "maxItems": 128,
-            "items": {"type": "string", "minLength": 1, "maxLength": 128},
-        },
-        "reason_codes": {
-            "type": "array",
-            "maxItems": 32,
-            "items": {"type": "string", "minLength": 1},
-        },
-        "evidence_event_ids": {
-            "type": "array",
-            "maxItems": 128,
-            "items": {"type": "string", "minLength": 1, "maxLength": 128},
-        },
-        "evidence_frame_indexes": {
-            "type": "array",
-            "maxItems": 32,
-            "items": {"type": "integer", "minimum": 0},
-        },
-        "suggested_reaction_types": {
-            "type": "array",
-            "maxItems": 32,
-            "items": {"type": "string", "minLength": 1, "maxLength": 64},
-        },
-        "maximum_responses": {"type": "integer", "minimum": 0, "maximum": 32},
-        "meme_candidate": {
-            "anyOf": [
-                {"type": "null"},
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": [
-                        "text",
-                        "evidence_event_ids",
-                        "evidence_frame_indexes",
-                    ],
-                    "properties": {
-                        "text": {"type": "string", "minLength": 1, "maxLength": 500},
-                        "evidence_event_ids": {
-                            "type": "array",
-                            "minItems": 1,
-                            "maxItems": 128,
-                            "items": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 128,
-                            },
-                        },
-                        "evidence_frame_indexes": {
-                            "type": "array",
-                            "maxItems": 32,
-                            "items": {"type": "integer", "minimum": 0},
-                        },
-                    },
-                },
-            ]
-        },
-    },
-}
-
-
-def _director_schema(frame_count: int) -> dict[str, object]:
-    schema = deepcopy(_DIRECTOR_SCHEMA)
-    properties = cast(dict[str, object], schema["properties"])
-    meme_candidate = cast(dict[str, object], properties["meme_candidate"])
-    meme_alternatives = cast(list[object], meme_candidate["anyOf"])
-    meme_schema = cast(dict[str, object], meme_alternatives[1])
-    meme_properties = cast(dict[str, object], meme_schema["properties"])
-    frame_index_schemas = [
-        cast(dict[str, object], properties["evidence_frame_indexes"]),
-        cast(dict[str, object], meme_properties["evidence_frame_indexes"]),
-    ]
-    for frame_index_schema in frame_index_schemas:
-        if frame_count == 0:
-            frame_index_schema["maxItems"] = 0
-            continue
-        items = cast(dict[str, object], frame_index_schema["items"])
-        items["maximum"] = frame_count - 1
-    return schema
 
 
 _EVIDENCE_REF_SCHEMA: Final[dict[str, object]] = {
@@ -292,7 +172,7 @@ _VIEWER_SCHEMA: Final[dict[str, object]] = {
         },
         "text": {
             "anyOf": [
-                {"type": "string", "minLength": 1, "maxLength": 200},
+                {"type": "string", "minLength": 1, "maxLength": 4000},
                 {"type": "null"},
             ]
         },
@@ -312,32 +192,38 @@ _VISUAL_SUMMARY_SCHEMA: Final[dict[str, object]] = {
         "summary": {"type": "string", "minLength": 1, "maxLength": 8_000},
     },
 }
-_DIRECTOR_SYSTEM_PROMPT: Final = (
-    "Assess the supplied live scene without selecting any viewer or writing barrage text. "
-    "Use only event IDs and evidence references present in the input, and never exceed maximum. "
-    "If the same non-empty phrase appears at least three times "
-    "inside a visible public event, you MUST emit meme_candidate, copy the shortest "
-    "repeated phrase verbatim as its text without paraphrasing, and cite that event. "
-    "Otherwise set meme_candidate to null. "
-    "Return only the required JSON object."
-)
+_HISTORY_SUMMARY_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["summary"],
+    "properties": {
+        "summary": {"type": "string", "minLength": 1, "maxLength": 6000},
+    },
+}
 _VIEWER_SYSTEM_PROMPT: Final = (
     "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
     "is only a behavioral tendency and is not your name or a system role. Produce zero or one "
     "natural barrage reaction. You may react to the host, scene, or a replyable public Viewer "
     "event, but may target only IDs explicitly allowed by the request. Shared room memory is "
     "public background, not proof that you personally attended an earlier stream. Use only "
-    "evidence references present in the input. Return only the required JSON object."
+    "evidence references present in the input. Prefer a natural Chinese message of "
+    "20 characters or fewer. Return only the required JSON object."
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
     "Summarize only visible, decision-relevant changes across the ordered frame bundle. "
     "Do not invent events or identities. Return only the required JSON object."
 )
+_HISTORY_SUMMARY_SYSTEM_PROMPT: Final = (
+    "Compress the supplied earlier live-room history into a factual chronological "
+    "summary. Preserve names, direct questions, unresolved requests, important game "
+    "events, agreements, disagreements, and running context. Do not invent details. "
+    "Return only the required JSON object."
+)
 _ROLE_OUTPUT_TOKEN_BUDGET: Final = 4_096
 
 
 class OpenAICompatibleViewerRuntimeProvider:
-    """Role-aware Director and per-Viewer adapter for one active provider profile."""
+    """Per-viewer model adapter for one active provider profile."""
 
     def __init__(
         self,
@@ -352,83 +238,10 @@ class OpenAICompatibleViewerRuntimeProvider:
         self._owns_client = client is None
         self._frame_resolver = frame_resolver
         self._ai_call_sink = ai_call_sink
-        self._director = self._role_provider(config.provider.director_model)
         self._viewer = self._role_provider(config.provider.viewer_model)
         self._visual_summary = self._role_provider(config.provider.visual_summary_model)
         self._close_lock = asyncio.Lock()
         self._closed = False
-
-    async def decide(self, request: object) -> DirectorOutcome:
-        if not isinstance(request, DirectorRequest):
-            raise ViewerRuntimeProtocolError("Director request has an invalid contract")
-        lifecycle = self._call_lifecycle(
-            role=AiCallRole.DIRECTOR,
-            correlation_id=request.wave.observation_id,
-            model_id=self.config.provider.director_model,
-            scope=AiCallScope(
-                room_id=request.wave.room_id,
-                session_id=request.wave.session_id,
-                audience_epoch=request.wave.audience_epoch,
-                observation_id=request.wave.observation_id,
-            ),
-        )
-        try:
-            self._ensure_available(self._director)
-            content = await self._director_content(request)
-            frame_count = (
-                0
-                if request.wave.frame_bundle is None
-                else len(request.wave.frame_bundle.frames)
-            )
-            payload = self._structured_payload(
-                model_id=self.config.provider.director_model,
-                system_prompt=_DIRECTOR_SYSTEM_PROMPT,
-                content=content,
-                schema_name="scene_assessment",
-                schema=_director_schema(frame_count),
-            )
-            lifecycle.sent(build_openai_request_summary(payload))
-            response = await self._send(self._director, payload, lifecycle=lifecycle)
-            lifecycle.received(build_http_response_summary(response))
-            output = self._structured_output(response)
-            raw_meme_candidate = output.pop("meme_candidate", None)
-            output.update(
-                {
-                    "room_id": request.wave.room_id,
-                    "session_id": request.wave.session_id,
-                    "audience_epoch": request.wave.audience_epoch,
-                    "observation_id": request.wave.observation_id,
-                    "decision_source": "director",
-                    "created_at_ms": request.wave.created_at_ms,
-                    "expires_at_ms": request.wave.deadline_at_ms,
-                }
-            )
-            try:
-                assessment = SceneAssessment.model_validate(output)
-            except ValidationError as error:
-                raise ViewerRuntimeProtocolError(
-                    "Director response violated the SceneAssessment contract: "
-                    f"{self._validation_codes(error)}"
-                ) from None
-            candidate = self._meme_candidate(request, raw_meme_candidate)
-            outcome = DirectorOutcome(assessment=assessment, meme_candidate=candidate)
-            lifecycle.succeeded(
-                {
-                    "assessment": assessment.model_dump(mode="json"),
-                    "meme_candidate": (
-                        None
-                        if candidate is None
-                        else candidate.model_dump(mode="json")
-                    ),
-                }
-            )
-            return outcome
-        except asyncio.CancelledError:
-            lifecycle.cancelled()
-            raise
-        except Exception as error:
-            lifecycle.failed(error)
-            raise
 
     async def generate(self, request: ViewerGenerationRequest) -> ViewerGenerationResponse:
         lifecycle = self._call_lifecycle(
@@ -545,13 +358,45 @@ class OpenAICompatibleViewerRuntimeProvider:
             lifecycle.failed(error)
             raise
 
+    async def summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
+    ) -> str:
+        if not older_history.strip():
+            return (existing_summary or "").strip()
+        context = json.dumps(
+            {
+                "session_id": session_id,
+                "audience_epoch": audience_epoch,
+                "existing_summary": existing_summary,
+                "older_history": older_history,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        payload = self._structured_payload(
+            model_id=self.config.provider.viewer_model,
+            system_prompt=_HISTORY_SUMMARY_SYSTEM_PROMPT,
+            content=context,
+            schema_name="conversation_history_summary",
+            schema=_HISTORY_SUMMARY_SCHEMA,
+        )
+        response = await self._send(self._viewer, payload)
+        output = self._structured_output(response)
+        summary = output.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ViewerRuntimeProtocolError("History summary response was blank")
+        return summary.strip()[:6_000]
+
     async def aclose(self) -> None:
         async with self._close_lock:
             if self._closed:
                 return
             self._closed = True
-            if self._director is not None:
-                await self._director.aclose()
             if self._viewer is not None:
                 await self._viewer.aclose()
             if self._visual_summary is not None:
@@ -651,19 +496,6 @@ class OpenAICompatibleViewerRuntimeProvider:
             raise ViewerRuntimeProviderError("Viewer runtime provider is closed")
         if provider is None:
             raise ViewerRuntimeProviderBlockedError("Model provider credentials are not configured")
-
-    async def _director_content(
-        self,
-        request: DirectorRequest,
-    ) -> str | list[dict[str, object]]:
-        context = {
-            "wave": request.wave.model_dump(mode="json"),
-            "maximum": request.maximum,
-            "runtime": self._json_value(request.runtime),
-        }
-        bundle = request.wave.frame_bundle
-        self._remove_data_refs(context)
-        return await self._content(context, request.wave.session_id, bundle)
 
     async def _viewer_content(
         self,
@@ -833,92 +665,6 @@ class OpenAICompatibleViewerRuntimeProvider:
                 reference["event_id"] = None
 
     @staticmethod
-    def _meme_candidate(
-        request: DirectorRequest,
-        raw: object,
-    ) -> MemeCandidate | None:
-        if raw is None:
-            return None
-        if not isinstance(raw, dict):
-            raise ViewerRuntimeProtocolError("Director meme candidate was not an object")
-        text = raw.get("text")
-        event_ids = raw.get("evidence_event_ids")
-        frame_indexes = raw.get("evidence_frame_indexes")
-        if (
-            not isinstance(text, str)
-            or not isinstance(event_ids, list)
-            or not all(isinstance(item, str) for item in event_ids)
-            or not isinstance(frame_indexes, list)
-            or not all(isinstance(item, int) for item in frame_indexes)
-        ):
-            raise ViewerRuntimeProtocolError(
-                "Director meme candidate violated its compact contract"
-            )
-        if not event_ids:
-            normalized_text = text.strip().casefold()
-            event_ids = [
-                event.event_id
-                for event in getattr(request.runtime, "public_context", ())
-                if (
-                    event.event_id in request.wave.event_ids
-                    and isinstance(event.text, str)
-                    and normalized_text
-                    and normalized_text in event.text.casefold()
-                )
-            ]
-        if not set(event_ids).issubset(request.wave.event_ids):
-            raise ViewerRuntimeProtocolError(
-                "Director meme candidate referenced an unknown event"
-            )
-        frame_count = (
-            0 if request.wave.frame_bundle is None else len(request.wave.frame_bundle.frames)
-        )
-        if any(index < 0 or index >= frame_count for index in frame_indexes):
-            raise ViewerRuntimeProtocolError(
-                "Director meme candidate referenced an unknown frame"
-            )
-        runtime_spec = getattr(request.runtime, "canonical_runtime_spec", None)
-        active_mode_id = getattr(runtime_spec, "active_mode_id", None)
-        active_mode = next(
-            (
-                mode
-                for mode in getattr(runtime_spec, "modes", ())
-                if getattr(mode, "mode_id", None) == active_mode_id
-            ),
-            None,
-        )
-        namespace_id = getattr(active_mode, "namespace_id", None)
-        if not isinstance(namespace_id, str) or not namespace_id:
-            raise ViewerRuntimeProtocolError(
-                "Director meme candidate is missing its trusted namespace"
-            )
-        identity = (
-            f"{request.wave.session_id}\0{request.wave.audience_epoch}\0"
-            f"{request.wave.observation_id}\0{text}"
-        )
-        candidate_id = (
-            f"meme-candidate-{hashlib.sha256(identity.encode()).hexdigest()[:24]}"
-        )
-        try:
-            return MemeCandidate(
-                candidate_id=candidate_id,
-                room_id=request.wave.room_id,
-                session_id=request.wave.session_id,
-                audience_epoch=request.wave.audience_epoch,
-                observation_id=request.wave.observation_id,
-                namespace_id=namespace_id,
-                text=text,
-                evidence_event_ids=event_ids,
-                evidence_frame_indexes=frame_indexes,
-                created_at_ms=request.wave.created_at_ms,
-            )
-        except ValidationError as error:
-            raise ViewerRuntimeProtocolError(
-                "Director meme candidate violated the MemeCandidate contract: "
-                f"{OpenAICompatibleViewerRuntimeProvider._validation_codes(error)}"
-            ) from None
-
-    @staticmethod
     def _json_value(value: object) -> object:
         if isinstance(value, BaseModel):
             return value.model_dump(mode="json")
@@ -943,7 +689,7 @@ class OpenAICompatibleViewerRuntimeProvider:
             return value.value
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
-        raise ViewerRuntimeProtocolError("Director runtime context is not serializable")
+        raise ViewerRuntimeProtocolError("Viewer runtime context is not serializable")
 
     @classmethod
     def _remove_data_refs(cls, value: object) -> None:

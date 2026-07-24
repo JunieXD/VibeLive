@@ -60,7 +60,6 @@ def runtime_spec(*, revision: int = 1, persona_revision: int = 1) -> dict[str, o
         ],
         "provider": {
             "provider_profile_id": "provider-1",
-            "director_model": "director",
             "viewer_model": "viewer",
             "memory_model": "memory",
             "visual_summary_model": "visual",

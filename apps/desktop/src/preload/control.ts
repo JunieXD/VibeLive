@@ -148,6 +148,7 @@ const api: ControlApi = {
   queryAiCalls: (query) => ipcRenderer.invoke("backend:ai-calls", query),
   submitUserText: (text, target) => ipcRenderer.invoke("backend:submit-text", text, target),
   submitAudioSegment: (input) => ipcRenderer.invoke("backend:submit-audio", input),
+  notifyVoiceActivity: (occurredAtMs) => ipcRenderer.send("backend:voice-activity", occurredAtMs),
   submitVisualFrame: (input) => ipcRenderer.invoke("backend:submit-frame", input),
   listRoomMemories: (roomId) => ipcRenderer.invoke("shared-brain:memory-list", roomId),
   getRoomMemoryHead: (roomId) => ipcRenderer.invoke("shared-brain:memory-head", roomId),

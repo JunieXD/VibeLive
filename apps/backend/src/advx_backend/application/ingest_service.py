@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -78,6 +79,15 @@ class _TrackedInput:
     accepted: bool = False
 
 
+@dataclass(slots=True)
+class _VoiceTurn:
+    event_ids: list[str]
+    target_viewer_id: str | None
+    target_persona_id: str | None
+    last_ended_at_ms: int
+    task: asyncio.Task[None] | None = None
+
+
 class IngestService:
     """Accept bounded media inputs and turn public inputs into observations."""
 
@@ -95,6 +105,9 @@ class IngestService:
         voice_target_resolver: TranscriptTargetResolver | None = None,
         max_final_transcript_attempts: int = 3,
         final_transcript_retry_backoff_ms: int = 25,
+        voice_turn_silence_ms: int = 1_500,
+        ambient_enabled: Callable[[str], Awaitable[bool]] | None = None,
+        ambient_interval_ms: int = 30_000,
     ) -> None:
         if max_tracked_input_ids < 1:
             raise ValueError("max_tracked_input_ids must be at least one")
@@ -102,6 +115,10 @@ class IngestService:
             raise ValueError("max_final_transcript_attempts must be at least one")
         if final_transcript_retry_backoff_ms < 0:
             raise ValueError("final_transcript_retry_backoff_ms must not be negative")
+        if voice_turn_silence_ms < 1:
+            raise ValueError("voice_turn_silence_ms must be positive")
+        if ambient_interval_ms < 1:
+            raise ValueError("ambient_interval_ms must be positive")
         self._room_service = room_service
         self._context_builder = context_builder
         self._frame_store = frame_store
@@ -113,13 +130,18 @@ class IngestService:
         self._voice_target_resolver = voice_target_resolver
         self._max_final_transcript_attempts = max_final_transcript_attempts
         self._final_transcript_retry_backoff_ms = final_transcript_retry_backoff_ms
+        self._voice_turn_silence_ms = voice_turn_silence_ms
+        self._ambient_enabled = ambient_enabled
+        self._ambient_interval_ms = ambient_interval_ms
         self._active_session_id: str | None = None
         self._seen_inputs: OrderedDict[str, _TrackedInput] = OrderedDict()
         self._seen_utterances: OrderedDict[str, int] = OrderedDict()
         self._partial_transcripts: dict[str, TranscriptSegment] = {}
+        self._voice_turns: dict[str, _VoiceTurn] = {}
         self._timestamp_floors: dict[IngestInputKind, int] = {}
         self._pending_audio_id: str | None = None
         self._result_task: asyncio.Task[None] | None = None
+        self._ambient_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
 
     async def start_session(self, session_id: str) -> None:
@@ -158,10 +180,31 @@ class IngestService:
     ) -> None:
         self._voice_target_resolver = resolver
 
+    async def notify_voice_activity(self, session_id: str, occurred_at_ms: int) -> None:
+        """Keep a short pause inside one spoken turn when speech resumes."""
+        if occurred_at_ms < 0:
+            raise ValueError("occurred_at_ms must be non-negative")
+        async with self._lock:
+            if self._active_session_id != session_id:
+                raise IngestSessionNotActiveError(session_id, self._active_session_id)
+            turn = self._voice_turns.get(session_id)
+            task = None if turn is None else turn.task
+            if turn is not None:
+                turn.task = None
+        if task is not None:
+            task.cancel()
+
     async def stop_session(self, session_id: str) -> None:
         async with self._lock:
             if self._active_session_id != session_id:
                 return
+            voice_tasks = tuple(
+                turn.task
+                for turn in self._voice_turns.values()
+                if turn.task is not None
+            )
+            ambient_task = self._ambient_task
+            self._ambient_task = None
             self._active_session_id = None
             self._reset_tracking()
             result_task = self._result_task
@@ -170,6 +213,13 @@ class IngestService:
         if result_task is not None:
             result_task.cancel()
             await asyncio.gather(result_task, return_exceptions=True)
+        for task in voice_tasks:
+            task.cancel()
+        if voice_tasks:
+            await asyncio.gather(*voice_tasks, return_exceptions=True)
+        if ambient_task is not None:
+            ambient_task.cancel()
+            await asyncio.gather(ambient_task, return_exceptions=True)
         try:
             await self._scheduler.cancel_session(session_id)
         finally:
@@ -209,6 +259,7 @@ class IngestService:
                 target_viewer_id=input.target_viewer_id,
                 target_persona_id=input.target_persona_id,
             )
+            await self._restart_ambient_timer(input.session_id)
         except BaseException:
             await self._settle(input.input_id, accepted=appended)
             raise
@@ -230,10 +281,6 @@ class IngestService:
             frame = await self._frame_store.store(input)
             stored = True
             await self._context_builder.append_frame_ref(input.session_id, frame)
-            await self._schedule_observation(
-                input.session_id,
-                trigger_frame_ids=(frame.frame_id,),
-            )
         except BaseException:
             await self._settle(input.input_id, accepted=stored)
             raise
@@ -390,12 +437,109 @@ class IngestService:
                 while len(self._seen_utterances) > self._max_tracked_input_ids:
                     self._seen_utterances.popitem(last=False)
             self._partial_transcripts.pop(session_id, None)
-        await self._schedule_observation(
+        await self._queue_voice_turn(
             session_id,
-            trigger_event_ids=(event.event_id,),
+            event_id=event.event_id,
+            ended_at_ms=segment.ended_at_ms,
             target_viewer_id=target_viewer_id,
             target_persona_id=target_persona_id,
         )
+
+    async def _queue_voice_turn(
+        self,
+        session_id: str,
+        *,
+        event_id: str,
+        ended_at_ms: int,
+        target_viewer_id: str | None,
+        target_persona_id: str | None,
+    ) -> None:
+        previous_task: asyncio.Task[None] | None = None
+        async with self._lock:
+            if self._active_session_id != session_id:
+                return
+            turn = self._voice_turns.get(session_id)
+            if turn is None:
+                turn = _VoiceTurn(
+                    event_ids=[],
+                    target_viewer_id=target_viewer_id,
+                    target_persona_id=target_persona_id,
+                    last_ended_at_ms=ended_at_ms,
+                )
+                self._voice_turns[session_id] = turn
+            else:
+                previous_task = turn.task
+                turn.last_ended_at_ms = max(turn.last_ended_at_ms, ended_at_ms)
+                if (
+                    turn.target_viewer_id != target_viewer_id
+                    or turn.target_persona_id != target_persona_id
+                ):
+                    turn.target_viewer_id = None
+                    turn.target_persona_id = None
+            turn.event_ids.append(event_id)
+            turn.task = asyncio.create_task(
+                self._finalize_voice_turn(session_id, turn),
+                name=f"ingest-voice-turn:{session_id}",
+            )
+        if previous_task is not None:
+            previous_task.cancel()
+
+    async def _finalize_voice_turn(self, session_id: str, turn: _VoiceTurn) -> None:
+        try:
+            remaining_ms = max(
+                0,
+                turn.last_ended_at_ms + self._voice_turn_silence_ms - self._clock.now_ms(),
+            )
+            await asyncio.sleep(remaining_ms / 1_000)
+            async with self._lock:
+                if (
+                    self._active_session_id != session_id
+                    or self._voice_turns.get(session_id) is not turn
+                    or turn.task is not asyncio.current_task()
+                ):
+                    return
+                self._voice_turns.pop(session_id, None)
+                event_ids = tuple(turn.event_ids)
+                target_viewer_id = turn.target_viewer_id
+                target_persona_id = turn.target_persona_id
+            await self._schedule_observation(
+                session_id,
+                trigger_event_ids=event_ids,
+                target_viewer_id=target_viewer_id,
+                target_persona_id=target_persona_id,
+            )
+            await self._restart_ambient_timer(session_id)
+        except asyncio.CancelledError:
+            raise
+
+    async def _restart_ambient_timer(self, session_id: str) -> None:
+        if self._ambient_enabled is None:
+            return
+        async with self._lock:
+            if self._active_session_id != session_id:
+                return
+            previous = self._ambient_task
+            self._ambient_task = asyncio.create_task(
+                self._run_ambient_timer(session_id),
+                name=f"ingest-ambient:{session_id}",
+            )
+        if previous is not None:
+            previous.cancel()
+
+    async def _run_ambient_timer(self, session_id: str) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._ambient_interval_ms / 1_000)
+                if not await self._is_active(session_id):
+                    return
+                if self._ambient_enabled is None or not await self._ambient_enabled(session_id):
+                    return
+                await self._schedule_observation(
+                    session_id,
+                    user_context={"ambient": "true"},
+                )
+        except asyncio.CancelledError:
+            raise
 
     def partial_transcript_snapshot(self, session_id: str) -> TranscriptSegment | None:
         return self._partial_transcripts.get(session_id)
@@ -408,11 +552,13 @@ class IngestService:
         trigger_frame_ids: tuple[str, ...] = (),
         target_viewer_id: str | None = None,
         target_persona_id: str | None = None,
+        user_context: dict[str, str] | None = None,
     ) -> None:
         if not await self._session_tasks.accepts_results(session_id):
             return
         observation = await self._context_builder.build(
             session_id,
+            user_context=user_context,
             trigger_event_ids=trigger_event_ids,
             trigger_frame_ids=trigger_frame_ids,
             target_viewer_id=target_viewer_id,
@@ -554,5 +700,6 @@ class IngestService:
         self._seen_inputs.clear()
         self._seen_utterances.clear()
         self._partial_transcripts.clear()
+        self._voice_turns.clear()
         self._timestamp_floors.clear()
         self._pending_audio_id = None

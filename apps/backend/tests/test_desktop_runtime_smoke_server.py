@@ -29,7 +29,7 @@ async def test_smoke_fixture_uses_production_graph_without_external_transports(
 
     assert {
         output.provider_role for output in bundle.recorded_provider_outputs
-    } == {"director", "viewer", "memory", "visual_summary", "asr"}
+    } == {"viewer", "memory", "visual_summary", "asr"}
     assert fixture.app.state.runtime is fixture.runtime
     assert fixture.runtime.viewer_runtime_coordinator is not None
     assert fixture.runtime.database.path.parent == tmp_path

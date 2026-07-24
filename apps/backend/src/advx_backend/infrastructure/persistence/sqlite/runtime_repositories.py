@@ -502,19 +502,21 @@ class SQLiteRoomEventRepository:
         room_id: str,
         session_id: str,
         *,
-        limit: int,
+        limit: int | None,
     ) -> list[PersistedRoomEvent]:
-        if limit <= 0:
+        if limit is not None and limit <= 0:
             raise ValueError("limit must be positive")
-        rows = await self._session.scalars(
+        statement = (
             select(RoomEventRow)
             .where(
                 RoomEventRow.room_id == room_id,
                 RoomEventRow.session_id == session_id,
             )
             .order_by(RoomEventRow.sequence.desc())
-            .limit(limit)
         )
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = await self._session.scalars(statement)
         return [_to_room_event(row) for row in reversed(list(rows))]
 
     async def prune(

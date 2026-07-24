@@ -327,10 +327,7 @@ class ViewerAudienceService:
 
         def transform(value: object) -> ViewerInstance:
             viewer = self._viewer(value)
-            if (
-                not viewer.is_active()
-                or viewer.behavior_revision != request.behavior_revision
-            ):
+            if not viewer.is_active():
                 return viewer
             state = viewer.private_state
             published = [*state.published_event_ids, event.barrage_id][-64:]
@@ -347,7 +344,8 @@ class ViewerAudienceService:
                 update={
                     "revision": state.revision + 1,
                     "published_event_ids": published,
-                    "cooldown_until_ms": event.created_at_ms + request.persona.cooldown_ms,
+                    "cooldown_until_ms": event.created_at_ms
+                    + max(15_000, request.persona.cooldown_ms),
                     "last_spoke_at_ms": event.created_at_ms,
                     "last_reacted_at_ms": event.created_at_ms,
                     "fatigue": min(1.0, state.fatigue + 0.08),
@@ -377,10 +375,7 @@ class ViewerAudienceService:
     async def record_silence(self, request: ViewerGenerationRequest) -> None:
         def transform(value: object) -> ViewerInstance:
             viewer = self._viewer(value)
-            if (
-                not viewer.is_active()
-                or viewer.behavior_revision != request.behavior_revision
-            ):
+            if not viewer.is_active():
                 return viewer
             state = viewer.private_state
             private_state = state.model_copy(

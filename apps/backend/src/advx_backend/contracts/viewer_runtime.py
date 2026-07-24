@@ -37,14 +37,8 @@ class Room(RuntimeContractModel):
         return self
 
 
-class DirectorFailureMode(StrEnum):
-    STRICT = "strict"
-    RESILIENT = "resilient"
-
-
 class ProviderRuntimeSpec(RuntimeContractModel):
     provider_profile_id: str = Field(min_length=1, max_length=128)
-    director_model: str = Field(min_length=1, max_length=256)
     viewer_model: str = Field(min_length=1, max_length=256)
     memory_model: str = Field(min_length=1, max_length=256)
     visual_summary_model: str = Field(min_length=1, max_length=256)
@@ -53,15 +47,14 @@ class ProviderRuntimeSpec(RuntimeContractModel):
 class RuntimeSettings(RuntimeContractModel):
     frame_bundle: FrameBundleSettings = Field(default_factory=FrameBundleSettings)
     viewer_visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES
-    director_failure_mode: DirectorFailureMode = DirectorFailureMode.RESILIENT
     max_in_flight_viewer_requests: int = Field(default=12, ge=1, le=32)
-    viewer_request_ttl_ms: int = Field(default=90_000, ge=1)
-    viewer_queue_capacity: int = Field(default=64, ge=1, le=1024)
-    observation_merge_window_ms: int = Field(default=250, ge=0)
+    viewer_request_ttl_ms: int = Field(default=900_000, ge=1)
+    viewer_queue_capacity: int = Field(default=8_192, ge=1, le=65_536)
+    observation_merge_window_ms: int = Field(default=0, ge=0)
     screen_change_threshold: float = Field(default=0.2, ge=0, le=1)
     screen_change_cooldown_ms: int = Field(default=2_000, ge=0)
-    ambient_tick_cooldown_ms: int = Field(default=5_000, ge=1)
-    max_consecutive_ambient_waves: int = Field(default=2, ge=0, le=32)
+    ambient_tick_cooldown_ms: int = Field(default=30_000, ge=1)
+    max_consecutive_ambient_waves: int = Field(default=1, ge=0, le=32)
 
 
 class ViewerRuntimeTelemetry(RuntimeContractModel):
@@ -315,8 +308,9 @@ class ViewerGenerationRequest(RuntimeContractModel):
     frame_bundle: FrameBundle | None = None
     shared_visual_summary: str | None = Field(default=None, max_length=8_000)
     input_event_ids: list[str] = Field(default_factory=list, max_length=128)
-    public_context_event_ids: list[str] = Field(default_factory=list, max_length=512)
-    public_context: list[ViewerPublicEvent] = Field(default_factory=list, max_length=512)
+    public_context_event_ids: list[str] = Field(default_factory=list, max_length=4_096)
+    public_context: list[ViewerPublicEvent] = Field(default_factory=list, max_length=4_096)
+    conversation_history_summary: str | None = Field(default=None, max_length=6_000)
     viewer_private_state: ViewerPrivateState
     room_memory_slice: RoomMemorySlice
     deadline_at_ms: int = Field(gt=0)
@@ -389,7 +383,7 @@ class ViewerGenerationResponse(RuntimeContractModel):
     action: ViewerAction
     intent: ViewerReactionIntent = ViewerReactionIntent.REACT_TO_SCENE
     target: ViewerReactionTarget | None = None
-    text: str | None = Field(default=None, min_length=1, max_length=200)
+    text: str | None = Field(default=None, min_length=1, max_length=4_000)
     reaction_type: str = Field(min_length=1, max_length=64)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
 
@@ -419,7 +413,7 @@ class ViewerBarrageEvent(RuntimeContractModel):
     intent: ViewerReactionIntent
     target: ViewerReactionTarget | None = None
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
-    text: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=160)
     created_at_ms: int = Field(ge=0)
     expires_at_ms: int = Field(gt=0)
 

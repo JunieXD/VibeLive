@@ -203,7 +203,6 @@ async def test_role_provider_records_blocked_visual_summary_call() -> None:
             base_url="https://example.com/v1",
             provider=ProviderRuntimeSpec(
                 provider_profile_id="profile-1",
-                director_model="director",
                 viewer_model="viewer",
                 memory_model="memory",
                 visual_summary_model="visual",
@@ -298,7 +297,6 @@ async def test_memory_extractor_records_request_and_parsed_candidates() -> None:
                 base_url="https://example.com/v1",
                 provider=ProviderRuntimeSpec(
                     provider_profile_id="profile-1",
-                    director_model="director",
                     viewer_model="viewer",
                     memory_model="memory",
                     visual_summary_model="visual",
@@ -370,7 +368,6 @@ async def test_memory_extractor_preserves_retryable_http_failure_details() -> No
                 base_url="https://example.com/v1",
                 provider=ProviderRuntimeSpec(
                     provider_profile_id="profile-1",
-                    director_model="director",
                     viewer_model="viewer",
                     memory_model="memory",
                     visual_summary_model="visual",

@@ -37,7 +37,6 @@ export type CompiledRuntimeSpec = {
 
 export type RuntimeProviderModels = {
   providerProfileId: string
-  directorModel: string
   viewerModel: string
   memoryModel: string
   visualSummaryModel: string
@@ -146,7 +145,6 @@ export function compileCanonicalRuntimeSpec(
     modes: workspace.modeState.modes.map(compileMode),
     provider: {
       provider_profile_id: provider.providerProfileId,
-      director_model: provider.directorModel,
       viewer_model: provider.viewerModel,
       memory_model: provider.memoryModel,
       visual_summary_model: provider.visualSummaryModel
@@ -157,18 +155,19 @@ export function compileCanonicalRuntimeSpec(
         frame_window_ms: visual.frameWindowMs,
         frame_selection_strategy: visual.frameSelectionStrategy,
         frame_max_dimension: visual.frameMaxDimension,
-        frame_quality: Math.max(1, Math.min(100, Math.round(visual.frameQuality * 100)))
+        frame_quality: Math.max(1, Math.min(100, Math.round(visual.frameQuality * 100))),
+        frame_similarity_threshold: 0.9,
+        frame_anchor_interval_ms: 5_000
       },
       viewer_visual_input_mode: visual.viewerVisualInputMode,
-      director_failure_mode: 'resilient',
       max_in_flight_viewer_requests: Math.min(12, activeMode.targetConcurrentViewers),
-      viewer_request_ttl_ms: 90_000,
-      viewer_queue_capacity: 64,
-      observation_merge_window_ms: 250,
+      viewer_request_ttl_ms: 900_000,
+      viewer_queue_capacity: 8_192,
+      observation_merge_window_ms: 0,
       screen_change_threshold: 0.2,
       screen_change_cooldown_ms: 2_000,
-      ambient_tick_cooldown_ms: 5_000,
-      max_consecutive_ambient_waves: 2
+      ambient_tick_cooldown_ms: 30_000,
+      max_consecutive_ambient_waves: 1
     }
   }
   const canonicalJson = canonicalJsonStringify(spec)
@@ -182,13 +181,11 @@ export function compileCanonicalRuntimeSpec(
 function normalizeRuntimeProvider(provider: RuntimeProviderModels): RuntimeProviderModels {
   const normalized = {
     providerProfileId: provider.providerProfileId.trim() || 'default',
-    directorModel: provider.directorModel.trim(),
     viewerModel: provider.viewerModel.trim(),
     memoryModel: provider.memoryModel.trim(),
     visualSummaryModel: provider.visualSummaryModel.trim()
   }
   if (
-    !normalized.directorModel ||
     !normalized.viewerModel ||
     !normalized.memoryModel ||
     !normalized.visualSummaryModel

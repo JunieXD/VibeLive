@@ -279,13 +279,13 @@ export function ModeToolbar({
               <input
                 type="number"
                 min={1}
-                max={16}
+                max={60}
                 value={activeMode.visualSettings.frameBundleSize}
                 onChange={(event) =>
                   onPatchMode({
                     visualSettings: {
                       ...activeMode.visualSettings,
-                      frameBundleSize: clampNumber(event.target.value, 1, 16)
+                      frameBundleSize: clampNumber(event.target.value, 1, 60)
                     }
                   })
                 }

@@ -10,6 +10,7 @@ class CrowdDomainModel(BaseModel):
 class DecisionSource(StrEnum):
     DIRECTOR = "director"
     FALLBACK = "fallback"
+    AUTONOMOUS = "autonomous"
 
 
 class CrowdDecision(CrowdDomainModel):

@@ -1126,8 +1126,6 @@ export interface components {
             pool: components["schemas"]["DebugViewerPoolSnapshot"];
             /** Waves */
             waves?: components["schemas"]["ObservationWaveTrace"][];
-            /** Director Budgets */
-            director_budgets?: components["schemas"]["DirectorBudgetTrace"][];
             queue?: components["schemas"]["DebugQueueSnapshot"] | null;
             telemetry?: components["schemas"]["ViewerRuntimeTelemetry"] | null;
             context_refs?: components["schemas"]["DebugContextReferences"];
@@ -1159,23 +1157,7 @@ export interface components {
          * DecisionSource
          * @enum {string}
          */
-        DecisionSource: "director" | "fallback";
-        /** DirectorBudgetTrace */
-        DirectorBudgetTrace: {
-            /** Minimum */
-            minimum: number;
-            /** Maximum */
-            maximum: number;
-            /** Available Viewer Ids */
-            available_viewer_ids?: string[];
-            /** Forced Viewer Ids */
-            forced_viewer_ids?: string[];
-        };
-        /**
-         * DirectorFailureMode
-         * @enum {string}
-         */
-        DirectorFailureMode: "strict" | "resilient";
+        DecisionSource: "director" | "fallback" | "autonomous";
         /** ExpectedRevisionRequest */
         ExpectedRevisionRequest: {
             /** Expected Revision */
@@ -1185,12 +1167,12 @@ export interface components {
         FrameBundleSettings: {
             /**
              * Frame Bundle Size
-             * @default 3
+             * @default 60
              */
             frame_bundle_size: number;
             /**
              * Frame Window Ms
-             * @default 10000
+             * @default 120000
              */
             frame_window_ms: number;
             /** @default change_peaks */
@@ -1205,6 +1187,16 @@ export interface components {
              * @default 80
              */
             frame_quality: number;
+            /**
+             * Frame Similarity Threshold
+             * @default 0.9
+             */
+            frame_similarity_threshold: number;
+            /**
+             * Frame Anchor Interval Ms
+             * @default 5000
+             */
+            frame_anchor_interval_ms: number;
         };
         /**
          * FrameSelectionStrategy
@@ -1527,7 +1519,7 @@ export interface components {
             /** Frame Hashes */
             frame_hashes?: string[];
             memory: components["schemas"]["MemoryReferenceTrace"];
-            director_status: components["schemas"]["ObservationWaveStatus"];
+            status: components["schemas"]["ObservationWaveStatus"];
             /** Selected Viewer Ids */
             selected_viewer_ids?: string[];
             /**
@@ -1670,8 +1662,6 @@ export interface components {
             model_base_url: string;
             /** Model Name */
             model_name: string;
-            /** Director Model */
-            director_model?: string | null;
             /** Viewer Model */
             viewer_model?: string | null;
             /** Memory Model */
@@ -1693,8 +1683,6 @@ export interface components {
             model_base_url?: string | null;
             /** Model Name */
             model_name?: string | null;
-            /** Director Model */
-            director_model?: string | null;
             /** Viewer Model */
             viewer_model?: string | null;
             /** Memory Model */
@@ -1715,8 +1703,6 @@ export interface components {
         ProviderRuntimeSpec: {
             /** Provider Profile Id */
             provider_profile_id: string;
-            /** Director Model */
-            director_model: string;
             /** Viewer Model */
             viewer_model: string;
             /** Memory Model */
@@ -1743,7 +1729,7 @@ export interface components {
              * Provider Role
              * @enum {string}
              */
-            provider_role: "director" | "viewer" | "memory" | "visual_summary" | "asr";
+            provider_role: "viewer" | "memory" | "visual_summary" | "asr";
             /** Generation Request Id */
             generation_request_id: string;
             /** Call Index */
@@ -1759,7 +1745,7 @@ export interface components {
              * Provider Role
              * @enum {string}
              */
-            provider_role: "director" | "viewer" | "memory" | "visual_summary" | "asr";
+            provider_role: "viewer" | "memory" | "visual_summary" | "asr";
             /** Output */
             output: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -1767,8 +1753,8 @@ export interface components {
         };
         /** RecordedReplayEvidence */
         RecordedReplayEvidence: {
-            /** Director Decisions */
-            director_decisions: {
+            /** Decisions */
+            decisions: {
                 [key: string]: components["schemas"]["JsonValue"];
             }[];
             /** Selected Viewer Ids */
@@ -1786,7 +1772,7 @@ export interface components {
                 [key: string]: components["schemas"]["JsonValue"];
             }[];
             /** Consumed Provider Roles */
-            consumed_provider_roles: ("director" | "viewer" | "memory" | "visual_summary" | "asr")[];
+            consumed_provider_roles: ("viewer" | "memory" | "visual_summary" | "asr")[];
             /** Consumed Provider Outputs */
             consumed_provider_outputs: components["schemas"]["RecordedOutputConsumption"][];
             /**
@@ -2001,8 +1987,6 @@ export interface components {
             model_base_url: string;
             /** Model Name */
             model_name: string;
-            /** Director Model */
-            director_model?: string | null;
             /** Viewer Model */
             viewer_model?: string | null;
             /** Memory Model */
@@ -2066,8 +2050,6 @@ export interface components {
             frame_bundle?: components["schemas"]["FrameBundleSettings"];
             /** @default direct_frames */
             viewer_visual_input_mode: components["schemas"]["ViewerVisualInputMode"];
-            /** @default resilient */
-            director_failure_mode: components["schemas"]["DirectorFailureMode"];
             /**
              * Max In Flight Viewer Requests
              * @default 12
@@ -2075,17 +2057,17 @@ export interface components {
             max_in_flight_viewer_requests: number;
             /**
              * Viewer Request Ttl Ms
-             * @default 90000
+             * @default 900000
              */
             viewer_request_ttl_ms: number;
             /**
              * Viewer Queue Capacity
-             * @default 64
+             * @default 8192
              */
             viewer_queue_capacity: number;
             /**
              * Observation Merge Window Ms
-             * @default 250
+             * @default 0
              */
             observation_merge_window_ms: number;
             /**
@@ -2100,12 +2082,12 @@ export interface components {
             screen_change_cooldown_ms: number;
             /**
              * Ambient Tick Cooldown Ms
-             * @default 5000
+             * @default 30000
              */
             ambient_tick_cooldown_ms: number;
             /**
              * Max Consecutive Ambient Waves
-             * @default 2
+             * @default 1
              */
             max_consecutive_ambient_waves: number;
         };
@@ -2456,8 +2438,7 @@ export interface components {
             config_hash: string;
             /** Observation Id */
             observation_id: string;
-            director_budget: components["schemas"]["DirectorBudgetTrace"];
-            director_decision: components["schemas"]["CrowdDecision"];
+            decision: components["schemas"]["CrowdDecision"];
             /** Viewer Instance Id */
             viewer_instance_id: string;
             /** Viewer Sequence */
@@ -2651,8 +2632,25 @@ export interface components {
             /** Text */
             text: string;
         };
+        /**
+         * ClientVoiceActivity
+         * @description Signals that the host resumed speaking before an utterance is final.
+         */
+        ClientVoiceActivity: {
+            /** Protocol Version */
+            protocol_version: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "client.voice.activity";
+            /** Session Id */
+            session_id: string;
+            /** Occurred At Ms */
+            occurred_at_ms: number;
+        };
         /** ClientMessageEnvelope */
-        ClientMessageEnvelope: components["schemas"]["ClientHello"] | components["schemas"]["ClientPing"] | components["schemas"]["ClientTextSubmit"] | components["schemas"]["ClientAudioCommit"];
+        ClientMessageEnvelope: components["schemas"]["ClientHello"] | components["schemas"]["ClientPing"] | components["schemas"]["ClientTextSubmit"] | components["schemas"]["ClientAudioCommit"] | components["schemas"]["ClientVoiceActivity"];
         /** BackendPong */
         BackendPong: {
             /**
@@ -3144,6 +3142,11 @@ export interface components {
             public_context_event_ids?: string[];
             /** Public Context */
             public_context?: components["schemas"]["ViewerPublicEvent"][];
+            /**
+             * Conversation History Summary
+             * @default null
+             */
+            conversation_history_summary: string | null;
             viewer_private_state: components["schemas"]["ViewerPrivateState"];
             room_memory_slice: components["schemas"]["RoomMemorySlice"];
             /** Deadline At Ms */

@@ -32,29 +32,12 @@ class ReplayEvent(ReplayContractModel):
 
 class RecordedProviderOutput(ReplayContractModel):
     generation_request_id: str = Field(min_length=1, max_length=128)
-    provider_role: Literal["director", "viewer", "memory", "visual_summary", "asr"]
+    provider_role: Literal["viewer", "memory", "visual_summary", "asr"]
     output: dict[str, JsonValue]
 
     @model_validator(mode="after")
     def validate_role_output(self) -> "RecordedProviderOutput":
         allowed = {
-            "director": {
-                "assessment_id",
-                "decision_id",
-                "salience",
-                "novelty",
-                "emotional_intensity",
-                "topics",
-                "emotional_tone",
-                "replyable_event_ids",
-                "suggested_reaction_types",
-                "maximum_responses",
-                "selected_viewer_ids",
-                "selected_persona_ids",
-                "reason_codes",
-                "evidence_event_ids",
-                "evidence_frame_indexes",
-            },
             "viewer": {
                 "action",
                 "text",
@@ -168,20 +151,20 @@ class ReplayRequest(ReplayContractModel):
 
 
 class RecordedOutputConsumption(ReplayContractModel):
-    provider_role: Literal["director", "viewer", "memory", "visual_summary", "asr"]
+    provider_role: Literal["viewer", "memory", "visual_summary", "asr"]
     generation_request_id: str = Field(min_length=1, max_length=128)
     call_index: int = Field(ge=1)
     runtime_request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class RecordedReplayEvidence(ReplayContractModel):
-    director_decisions: list[dict[str, JsonValue]]
+    decisions: list[dict[str, JsonValue]]
     selected_viewer_ids: list[str]
     barrages: list[dict[str, JsonValue]]
     memories: list[dict[str, JsonValue]]
     traces: list[dict[str, JsonValue]]
     consumed_provider_roles: list[
-        Literal["director", "viewer", "memory", "visual_summary", "asr"]
+        Literal["viewer", "memory", "visual_summary", "asr"]
     ]
     consumed_provider_outputs: list[RecordedOutputConsumption]
     external_transport_call_count: Literal[0] = 0

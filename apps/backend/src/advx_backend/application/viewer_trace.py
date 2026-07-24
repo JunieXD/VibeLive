@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from advx_backend.contracts.debug import (
-    DirectorBudgetTrace,
     MemoryReferenceTrace,
     ObservationWaveStatus,
     ObservationWaveTrace,
@@ -47,18 +46,6 @@ def build_viewer_request_trace(
     config_hash = _config_hash(spec)
     provider = getattr(spec, "provider", None)
     viewer_model = getattr(provider, "viewer_model", "unknown-viewer-model")
-    budget = getattr(runtime, "director_budget", None)
-    maximum = _bounded_budget_value(
-        getattr(budget, "maximum", None),
-        default=len(available_viewer_ids),
-    )
-    minimum = min(
-        _bounded_budget_value(getattr(budget, "minimum", None), default=0),
-        maximum,
-    )
-    forced = getattr(budget, "forced_viewer_ids", ())
-    if not isinstance(forced, (list, tuple)):
-        forced = ()
     frame_hashes = (
         []
         if wave.frame_bundle is None
@@ -79,13 +66,7 @@ def build_viewer_request_trace(
         audience_epoch=request.audience_epoch,
         config_hash=config_hash,
         observation_id=request.observation_id,
-        director_budget=DirectorBudgetTrace(
-            minimum=minimum,
-            maximum=maximum,
-            available_viewer_ids=list(available_viewer_ids),
-            forced_viewer_ids=list(forced),
-        ),
-        director_decision=decision,
+        decision=decision,
         viewer_instance_id=request.viewer_instance_id,
         viewer_sequence=request.viewer_sequence,
         persona_revision=request.persona_revision,
@@ -147,7 +128,7 @@ def build_observation_wave_trace(
             memory_slice,
             room_id=wave.room_id,
         ),
-        director_status=status,
+        status=status,
         selected_viewer_ids=(
             [] if decision is None else decision.selected_viewer_ids
         ),
@@ -232,9 +213,3 @@ def _config_hash(spec: object) -> str:
     if isinstance(value, str):
         return value
     return "0" * 64
-
-
-def _bounded_budget_value(value: object, *, default: int) -> int:
-    if not isinstance(value, int):
-        return max(0, min(32, default))
-    return max(0, min(32, value))

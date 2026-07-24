@@ -37,10 +37,8 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerAction,
     ViewerGenerationResponse,
 )
-from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemoryType
 from advx_backend.domain.observation_wave import ViewerVisualInputMode
-from advx_backend.domain.scene_assessment import SceneAssessment
 from advx_backend.providers.model.viewer_runtime import ViewerRuntimeProtocolError
 
 _PNG_FRAME = (
@@ -178,82 +176,8 @@ class _RecordedOutputLedger:
 class _RecordedViewerProvider:
     def __init__(self, ledger: _RecordedOutputLedger) -> None:
         self._ledger = ledger
-        self.director_calls = 0
         self.viewer_calls = 0
         self.visual_calls = 0
-
-    async def decide(self, request: object) -> object:
-        self.director_calls += 1
-        director = self._ledger.consume("director")
-        wave = request.wave
-        event_ids = list(wave.event_ids[:1])
-        frame_indexes = (
-            [0]
-            if wave.frame_bundle is not None and wave.frame_bundle.frames
-            else []
-        )
-        assessment = SceneAssessment(
-            assessment_id=str(
-                director.get(
-                    "assessment_id",
-                    f"recorded-assessment-{self.director_calls}",
-                )
-            ),
-            room_id=wave.room_id,
-            session_id=wave.session_id,
-            audience_epoch=wave.audience_epoch,
-            observation_id=wave.observation_id,
-            salience=float(director.get("salience", 0.9)),
-            novelty=float(director.get("novelty", 0.9)),
-            emotional_intensity=float(
-                director.get("emotional_intensity", 0.8)
-            ),
-            topics=[str(item) for item in director.get("topics", ["cs2"])],
-            emotional_tone=[
-                str(item)
-                for item in director.get("emotional_tone", ["excited"])
-            ],
-            replyable_event_ids=event_ids,
-            reason_codes=[
-                str(item)
-                for item in director.get(
-                    "reason_codes",
-                    ["recorded_fixture"],
-                )
-            ],
-            evidence_event_ids=event_ids,
-            evidence_frame_indexes=frame_indexes,
-            maximum_responses=min(
-                request.maximum,
-                int(director.get("maximum_responses", request.maximum)),
-            ),
-            created_at_ms=wave.created_at_ms,
-            expires_at_ms=wave.deadline_at_ms,
-        )
-        if not event_ids:
-            return assessment
-        mode = next(
-            item
-            for item in request.runtime.canonical_runtime_spec.modes
-            if item.mode_id == request.runtime.canonical_runtime_spec.active_mode_id
-        )
-        from advx_backend.application.director_service import DirectorOutcome
-
-        return DirectorOutcome(
-            assessment=assessment,
-            meme_candidate=MemeCandidate(
-                candidate_id=f"recorded-meme-{self.director_calls}",
-                room_id=wave.room_id,
-                session_id=wave.session_id,
-                audience_epoch=wave.audience_epoch,
-                observation_id=wave.observation_id,
-                namespace_id=mode.namespace_id,
-                text="recorded scenario meme",
-                evidence_event_ids=event_ids,
-                evidence_frame_indexes=frame_indexes,
-                created_at_ms=wave.created_at_ms,
-            ),
-        )
 
     async def generate(self, request: object) -> ViewerGenerationResponse:
         self.viewer_calls += 1
@@ -439,7 +363,6 @@ def _provider_request(bundle: ReplayBundle) -> ProviderConfigurationRequest:
         provider_profile_id=provider.provider_profile_id,
         model_base_url="https://recorded.invalid/v1",
         model_name=provider.viewer_model,
-        director_model=provider.director_model,
         viewer_model=provider.viewer_model,
         memory_model=provider.memory_model,
         visual_summary_model=provider.visual_summary_model,
@@ -639,8 +562,8 @@ async def _run_recorded_runtime_once(
             fixture.output_ledger.assert_complete()
             consumptions = fixture.output_ledger.consumptions
             runtime_evidence = RecordedReplayEvidence(
-                director_decisions=[
-                    item.director_decision.model_dump(mode="json")
+                decisions=[
+                    item.decision.model_dump(mode="json")
                     for item in traces.items
                 ],
                 selected_viewer_ids=[
@@ -713,7 +636,6 @@ async def _run_recorded_runtime_once(
                     "final_asr_delivered": asr.final_delivered.is_set(),
                 },
                 "dispatch": {
-                    "director_calls": viewer.director_calls,
                     "viewer_calls": viewer.viewer_calls,
                     "visual_summary_calls": viewer.visual_calls,
                     "memory_extractor_calls": memory.calls,

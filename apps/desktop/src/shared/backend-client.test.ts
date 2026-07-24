@@ -12,7 +12,6 @@ describe('canonical desktop runtime spec', () => {
       configRevision: 3,
       provider: {
         providerProfileId: 'profile-a',
-        directorModel: 'director-model',
         viewerModel: 'viewer-model',
         memoryModel: 'memory-model',
         visualSummaryModel: 'summary-model'
@@ -25,14 +24,13 @@ describe('canonical desktop runtime spec', () => {
       active_mode_id: 'lively-game-room',
       provider: {
         provider_profile_id: 'profile-a',
-        director_model: 'director-model',
         viewer_model: 'viewer-model',
         memory_model: 'memory-model',
         visual_summary_model: 'summary-model'
       },
       settings: {
         frame_bundle: {
-          frame_bundle_size: 3,
+          frame_bundle_size: 60,
           frame_selection_strategy: 'change_peaks',
           frame_quality: 82
         },

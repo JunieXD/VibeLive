@@ -151,7 +151,6 @@ def _status(
         request.role_models()
         if request is not None
         else {
-            "director": config.model_name,
             "viewer": config.model_name,
             "memory": config.model_name,
             "visual_summary": config.model_name,
@@ -162,7 +161,6 @@ def _status(
         provider_profile_id=request.provider_profile_id if request is not None else "default",
         model_base_url=request.model_base_url if request is not None else config.model_base_url,
         model_name=request.model_name if request is not None else config.model_name,
-        director_model=role_models["director"],
         viewer_model=role_models["viewer"],
         memory_model=role_models["memory"],
         visual_summary_model=role_models["visual_summary"],

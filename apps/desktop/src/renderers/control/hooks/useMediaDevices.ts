@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import type { DesktopSource, MediaAccessStatus } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
-import { AUDIO_SEGMENT_SECONDS, encodePcm16Mono } from '../audio'
+import {
+  AUDIO_SENTENCE_SILENCE_SECONDS,
+  AUDIO_SPEECH_THRESHOLD,
+  encodePcm16Mono
+} from '../audio'
 import {
   bindMediaStreamToVideo,
   calculateMicrophoneLevel,
@@ -64,6 +68,7 @@ export function useMediaDevices({
   const audioChunksRef = useRef<Float32Array[]>([])
   const audioSampleCountRef = useRef(0)
   const audioSampleRateRef = useRef(0)
+  const audioLastSpeechAtRef = useRef<number | null>(null)
   const audioSegmentStartedAtRef = useRef<number | null>(null)
   const audioSendQueueRef = useRef<Promise<void>>(Promise.resolve())
   const audioSegmentSequenceRef = useRef(0)
@@ -148,24 +153,22 @@ export function useMediaDevices({
     setCameraStream(null)
   }, [])
 
-  const flushAudioSegment = useCallback((includePartial = false): Promise<void> => {
+  const flushAudioSegment = useCallback((): Promise<void> => {
     if (!mediaIngestEnabledRef.current) {
       audioChunksRef.current = []
       audioSampleCountRef.current = 0
       audioSegmentStartedAtRef.current = null
+      audioLastSpeechAtRef.current = null
       return audioSendQueueRef.current
     }
     const sampleRate = audioSampleRateRef.current
     const sampleCount = audioSampleCountRef.current
-    const minimumSamples = includePartial
-      ? Math.round(sampleRate * 0.25)
-      : Math.round(sampleRate * AUDIO_SEGMENT_SECONDS)
+    const minimumSamples = Math.round(sampleRate * 0.1)
     if (sampleRate <= 0 || sampleCount < minimumSamples) {
-      if (includePartial) {
-        audioChunksRef.current = []
-        audioSampleCountRef.current = 0
-        audioSegmentStartedAtRef.current = null
-      }
+      audioChunksRef.current = []
+      audioSampleCountRef.current = 0
+      audioSegmentStartedAtRef.current = null
+      audioLastSpeechAtRef.current = null
       return audioSendQueueRef.current
     }
 
@@ -174,6 +177,7 @@ export function useMediaDevices({
     audioChunksRef.current = []
     audioSampleCountRef.current = 0
     audioSegmentStartedAtRef.current = null
+    audioLastSpeechAtRef.current = null
     const sequence = audioSegmentSequenceRef.current + 1
     audioSegmentSequenceRef.current = sequence
     const body = encodePcm16Mono(chunks, sampleRate)
@@ -215,7 +219,7 @@ export function useMediaDevices({
     const stream = microphoneStreamRef.current
     microphoneStreamRef.current = null
     stopMediaStream(stream)
-    await flushAudioSegment(true)
+    await flushAudioSegment()
     const context = audioContextRef.current
     audioContextRef.current = null
     if (context && context.state !== 'closed') await context.close().catch(() => undefined)
@@ -382,16 +386,24 @@ export function useMediaDevices({
         if (sessionStatusRef.current !== 'running' || !mediaIngestEnabledRef.current) return
         const samples = event.inputBuffer.getChannelData(0)
         if (samples.length === 0) return
+        const level = Math.sqrt(
+          samples.reduce((total, sample) => total + sample * sample, 0) / samples.length
+        )
+        const now = Date.now()
         if (audioSegmentStartedAtRef.current === null) {
-          audioSegmentStartedAtRef.current = Date.now()
+          if (level < AUDIO_SPEECH_THRESHOLD) return
+          window.advx.notifyVoiceActivity(now)
+          audioSegmentStartedAtRef.current = now
         }
         const copy = new Float32Array(samples)
         audioChunksRef.current.push(copy)
         audioSampleCountRef.current += copy.length
         audioSampleRateRef.current = context?.sampleRate ?? event.inputBuffer.sampleRate
-        if (
-          audioSampleCountRef.current >=
-          audioSampleRateRef.current * AUDIO_SEGMENT_SECONDS
+        if (level >= AUDIO_SPEECH_THRESHOLD) {
+          audioLastSpeechAtRef.current = now
+        } else if (
+          audioLastSpeechAtRef.current !== null &&
+          now - audioLastSpeechAtRef.current >= AUDIO_SENTENCE_SILENCE_SECONDS * 1_000
         ) {
           void flushAudioSegment()
         }
@@ -409,6 +421,7 @@ export function useMediaDevices({
       audioSampleCountRef.current = 0
       audioSampleRateRef.current = context.sampleRate
       audioSegmentStartedAtRef.current = null
+      audioLastSpeechAtRef.current = null
       setMicrophoneReady(true)
       setMicrophonePermission('granted')
       track.addEventListener('ended', () => {
