@@ -53,6 +53,15 @@ class OpenAICompatibleHttpError(OpenAICompatibleProviderError):
 class OpenAICompatibleProtocolError(OpenAICompatibleProviderError):
     """Raised when a response does not follow the expected Chat Completions shape."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "invalid_upstream_response",
+    ) -> None:
+        self.error_code = error_code
+        super().__init__(message)
+
 
 @dataclass(frozen=True, slots=True)
 class OpenAICompatibleConfig:
@@ -130,6 +139,7 @@ _PROBE_IMAGE: Final = (
     "RU5ErkJggg=="
 )
 _BLOCKING_HTTP_STATUSES: Final = frozenset({401, 402, 403, 408, 429})
+_PROBE_OUTPUT_TOKEN_BUDGET: Final = 4_096
 
 
 class OpenAICompatibleProvider:
@@ -485,9 +495,9 @@ class OpenAICompatibleProvider:
             "messages": [{"role": "user", "content": content}],
             "stream": False,
             "n": 1,
-            # Reasoning-capable compatible models may spend part of this budget
-            # before emitting the tiny structured response.
-            "max_tokens": 512,
+            # Match the production role budget so reasoning-capable multimodal
+            # models can finish before emitting the tiny structured response.
+            "max_tokens": _PROBE_OUTPUT_TOKEN_BUDGET,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -519,7 +529,16 @@ class OpenAICompatibleProvider:
         choices = payload.get("choices")
         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
             raise OpenAICompatibleProtocolError("probe response must contain a choice")
-        message = choices[0].get("message")
+        choice = choices[0]
+        finish_reason = choice.get("finish_reason")
+        if finish_reason == "length":
+            raise OpenAICompatibleProtocolError(
+                "probe response exhausted its output token budget",
+                error_code="output_token_limit",
+            )
+        if finish_reason not in {None, "stop"}:
+            raise OpenAICompatibleProtocolError("probe response did not finish normally")
+        message = choice.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
             raise OpenAICompatibleProtocolError("probe response must contain JSON text")
         output = self._json_object(cast(str, message["content"]), "probe structured output")
@@ -548,6 +567,9 @@ class OpenAICompatibleProvider:
             status = CapabilityProbeStatus.BLOCKED
         elif isinstance(error, OpenAICompatibleClosedError):
             error_code = "provider_closed"
+            status = CapabilityProbeStatus.FAILED
+        elif isinstance(error, OpenAICompatibleProtocolError):
+            error_code = error.error_code
             status = CapabilityProbeStatus.FAILED
         else:
             error_code = "invalid_upstream_response"
