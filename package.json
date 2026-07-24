@@ -9,7 +9,7 @@
     "dev:backend": "uv run --project apps/backend uvicorn advx_backend.main:app --app-dir apps/backend/src --reload --port 8765",
     "build": "pnpm --filter @advx/desktop build",
     "typecheck": "pnpm --filter @advx/contracts typecheck && pnpm --filter @advx/desktop typecheck",
-    "test": "pnpm --filter @advx/desktop test && uv run --project apps/backend pytest apps/backend/tests",
+    "test": "node --test scripts/process-lifecycle.test.mjs && pnpm --filter @advx/desktop test && uv run --project apps/backend pytest apps/backend/tests",
     "test:e2e:viewer-runtime": "uv run --project apps/backend pytest tests/e2e/test_viewer_runtime_recorded.py -q",
     "evidence:viewer-runtime": "uv run --project apps/backend python scripts/verify_viewer_runtime_evidence.py",
     "debug:headless": "uv run --project apps/backend python apps/backend/scripts/viewer_runtime_headless.py",

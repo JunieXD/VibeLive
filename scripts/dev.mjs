@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
+import { waitForCompletionOrTimeout } from "./process-lifecycle.mjs";
 
 const useProcessGroups = process.platform !== "win32";
 const backendProtocolVersion = 2;
@@ -113,17 +114,17 @@ function shutdown(exitCode = 0, signal = "SIGTERM") {
     const runningChildren = children.filter(isChildTreeRunning);
     for (const child of runningChildren) terminateChildTree(child, signal);
 
-    await Promise.race([
+    await waitForCompletionOrTimeout(
       Promise.all(runningChildren.map(waitForChildTreeExit)),
-      delay(shutdownGraceMs)
-    ]);
+      shutdownGraceMs
+    );
 
     const remainingChildren = runningChildren.filter(isChildTreeRunning);
     for (const child of remainingChildren) terminateChildTree(child, "SIGKILL");
-    await Promise.race([
+    await waitForCompletionOrTimeout(
       Promise.all(remainingChildren.map(waitForChildTreeExit)),
-      delay(1_000)
-    ]);
+      1_000
+    );
     process.exitCode = exitCode;
   })();
   return shutdownPromise;
