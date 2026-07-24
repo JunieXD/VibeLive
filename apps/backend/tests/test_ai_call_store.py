@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -14,6 +15,9 @@ from advx_backend.contracts.debug import (
     AiCallStatus,
     AiCallTimelineEvent,
     AiCallTrace,
+    MemoryReferenceTrace,
+    ObservationWaveStatus,
+    ObservationWaveTrace,
 )
 from advx_backend.contracts.protocol import PROTOCOL_VERSION_HEADER
 from advx_backend.infrastructure.logging.ai_call_store import AiCallStore
@@ -177,6 +181,81 @@ def test_jsonl_reload_marks_unfinished_calls_interrupted(tmp_path: Path) -> None
     assert loaded_again.query(
         AiCallQuery(status=AiCallStatus.INTERRUPTED)
     ).items[0].updated_at_ms == 100
+
+
+def test_trace_store_migrates_legacy_trace_fields(tmp_path: Path) -> None:
+    path = tmp_path / "viewer-traces.jsonl"
+    trace = ObservationWaveTrace(
+        trace_id="wave-1",
+        room_id="room-1",
+        session_id="session-1",
+        audience_epoch=1,
+        config_hash="0" * 64,
+        observation_id="observation-1",
+        created_at_ms=10,
+        deadline_at_ms=20,
+        triggers=["user_text"],
+        memory=MemoryReferenceTrace(
+            room_id="room-1",
+            memory_revision=0,
+        ),
+        status=ObservationWaveStatus.COMPLETED,
+    ).model_dump(mode="json")
+    trace["director_status"] = trace.pop("status")
+    viewer_trace = {
+        "trace_kind": "viewer_request",
+        "trace_schema_version": 1,
+        "trace_id": "request-1",
+        "room_id": "room-1",
+        "session_id": "session-1",
+        "audience_epoch": 1,
+        "config_hash": "0" * 64,
+        "observation_id": "observation-1",
+        "director_budget": {"minimum": 0, "maximum": 1},
+        "director_decision": {
+            "decision_id": "decision-1",
+            "room_id": "room-1",
+            "session_id": "session-1",
+            "audience_epoch": 1,
+            "observation_id": "observation-1",
+            "created_at_ms": 10,
+            "expires_at_ms": 20,
+        },
+        "viewer_instance_id": "viewer-1",
+        "viewer_sequence": 1,
+        "persona_revision": 1,
+        "instance_variant": {
+            "expression_length": 0.5,
+            "skepticism": 0.5,
+            "encouragement": 0.5,
+            "meme_affinity": 0.5,
+            "focus": "gameplay",
+            "silence_tendency": 0.5,
+        },
+        "memory": {"room_id": "room-1", "memory_revision": 0},
+        "prompt_manifest": {
+            "template_id": "viewer-generation-v1",
+            "template_revision": 1,
+            "input_hash": "0" * 64,
+        },
+        "provider": {"provider_role": "viewer", "model_id": "model-1", "queued_at_ms": 10},
+        "response_status": "completed",
+        "validation": {"accepted": True},
+    }
+    path.write_text(
+        "\n".join([json.dumps(trace), json.dumps(viewer_trace)]) + "\n",
+        encoding="utf-8",
+    )
+
+    reloaded = TraceStore(path=path)
+
+    assert reloaded.query().waves[0].status is ObservationWaveStatus.COMPLETED
+    persisted = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert persisted[0]["status"] == "completed"
+    assert "director_status" not in persisted[0]
+    assert persisted[1]["decision"]["decision_id"] == "decision-1"
+    assert "director_budget" not in persisted[1]
+    assert "director_decision" not in persisted[1]
 
 
 def test_upsert_rejects_unredacted_preview() -> None:

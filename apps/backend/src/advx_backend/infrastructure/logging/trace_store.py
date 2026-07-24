@@ -181,6 +181,7 @@ class TraceStore:
         if not self._path.exists():
             return
         loaded: deque[DebugTrace] = deque(maxlen=self._max_items)
+        migrated = False
         with self._path.open(encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
@@ -188,10 +189,42 @@ class TraceStore:
                 raw = json.loads(line)
                 assert_redacted_artifact(raw)
                 if raw.get("trace_kind") == "observation_wave":
+                    raw, was_migrated = self._migrate_observation_wave_trace(raw)
+                    migrated = migrated or was_migrated
                     loaded.append(ObservationWaveTrace.model_validate(raw))
                 else:
+                    raw, was_migrated = self._migrate_viewer_request_trace(raw)
+                    migrated = migrated or was_migrated
                     loaded.append(ViewerRequestTrace.model_validate(raw))
         self._items = loaded
+        if migrated:
+            self._persist()
+
+    @staticmethod
+    def _migrate_observation_wave_trace(raw: Any) -> tuple[Any, bool]:
+        if not isinstance(raw, dict) or "director_status" not in raw:
+            return raw, False
+
+        migrated = dict(raw)
+        migrated.setdefault("status", migrated["director_status"])
+        del migrated["director_status"]
+        return migrated, True
+
+    @staticmethod
+    def _migrate_viewer_request_trace(raw: Any) -> tuple[Any, bool]:
+        if not isinstance(raw, dict):
+            return raw, False
+
+        migrated = dict(raw)
+        was_migrated = False
+        if "director_decision" in migrated:
+            migrated.setdefault("decision", migrated["director_decision"])
+            del migrated["director_decision"]
+            was_migrated = True
+        if "director_budget" in migrated:
+            del migrated["director_budget"]
+            was_migrated = True
+        return migrated, was_migrated
 
     def _persist(self) -> None:
         if self._path is None:
