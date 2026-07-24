@@ -107,15 +107,15 @@
 
 ### D-014：每个观众是独立且连续的逻辑实体
 
-- 状态：`Accepted`
-- 决定：每个 AI 观众拥有稳定 ID、名称、人格、偏好、语言习惯、关系状态和独立记忆。用户可以通过文字弹幕或语音与观众持续交流。
-- 影响：每条 AI 弹幕必须归属于当前激活模式中的已有观众 ID；批量请求不能把人格和记忆合并成无身份的统一声音。模型调用次数和调度拓扑不属于产品不变量。
+- 状态：`Superseded`，由 D-031 和 D-032 取代
+- 决定：旧版把观众身份、人格和长期记忆绑定为同一对象。
+- 影响：稳定 Viewer 身份继续保留，但长期记忆改为 Room 共享，PersonaTemplate 与 ViewerInstance 也不再混为一类。
 
 ### D-015：发言与调度算法暂不固定
 
-- 状态：`Accepted`
-- 决定：导演保留 `CrowdDecision` 调度输出，但当前不固定何时触发弹幕、选择哪些观众、是否允许观众互相接话、一次请求包含几个观众或记忆何时更新。
-- 影响：实现需要保证房间事件有序、观众状态和模式覆盖隔离、队列有界及过期结果丢弃。任何调度方案都必须服从 D-014 的身份连续性要求；导演是否独立调用模型仍不是产品不变量。
+- 状态：`Superseded`，由 D-034 取代
+- 决定：旧版保留批量或独立调用、Director 拓扑和观众接话方式为开放问题。
+- 影响：首版现在已经锁定 ObservationWave、Director 精确选实例和一实例一独立请求。
 
 ### D-016：首版模型请求使用非流式结构化结果
 
@@ -167,19 +167,19 @@
 - 决定：FastAPI 后端使用单进程、单活动会话设计。API 只处理协议，Application Service 编排用例，Domain 维护不变量，业务层通过 Port 使用 Repository、ASR 和 Model Provider，SQLite、StepFun 和 OpenAI-compatible 实现属于 Adapter。
 - 影响：接口放在 Application Port，而不是具体 Infrastructure 或 Provider 模块中；WebSocket Handler、SQLAlchemy 模型和供应商 wire format 不能进入业务逻辑。具体模块设计见 [BACKEND_DESIGN.md](./BACKEND_DESIGN.md)。
 
-### D-024：持久状态使用 SQLite，实时上下文只保存在有界内存
+### D-024：结构化恢复状态使用 SQLite，原始媒体只保存在有界内存
 
 - 状态：`Accepted`
 - 日期：2026-07-23
-- 决定：模式、自定义人格版本、成长梗库、观众档案、关系、长期记忆、记忆来源和最小会话记录使用 SQLite 持久化，并使用版本化迁移。原始音频、画面、完整 Room Event 历史、Observation、模型请求、导演临时候选和待显示弹幕不写入数据库。
-- 影响：数据库由 FastAPI 单独拥有，位于 Electron `userData` 数据目录；用户删除的记忆及来源执行物理删除。第一版不提供直播历史、回放、分布式存储或向量数据库。模式与成长梗库 Schema 尚未写入 [BACKEND_DESIGN.md](./BACKEND_DESIGN.md)，需要在后端实现阶段补充；当前桌面前端合同不代表 SQLite 能力已经实现。
+- 决定：Room、Session runtime revision、Viewer 池、共享长期记忆、记忆来源、模式成长梗和有界结构化 Room Event 使用 SQLite 持久化，并使用版本化迁移。原始音频、完整画面、思维链、完整 Prompt 和待显示弹幕不写入数据库。
+- 影响：有界 Room Event 用于后端恢复，不等于保存完整直播历史。recorded replay 使用显式制作、脱敏且版本化的 fixture/bundle，不自动保存原始媒体。数据库由 FastAPI 单独拥有，位于 Electron `userData` 数据目录；用户删除的记忆及来源执行物理删除。
 
 ### D-025：观众内容按模式、人格和成长梗库分层
 
-- 状态：`Accepted`
+- 状态：`Superseded`，由 D-033 取代
 - 日期：2026-07-23
-- 决定：产品层级固定为“模式 > 模式内人格 > 成长梗库”。产品内置 32 个基础人格和 6 个模式，`6657` 是可选择的模式之一；同一时间只能激活一个模式。
-- 影响：固定的是内置目录和单一激活语义，不是每轮参与人数或模型调用次数。运行时只能读取当前模式的人格集合、覆盖和梗库。
+- 决定：旧版把 32 个基础人格、模式和成长梗作为主要运行层级。
+- 影响：现有素材继续保留，但新版增加 Room、ViewerInstance 和 SessionViewerPool，并将 32 改为 Viewer 上限。
 
 ### D-026：模式可复制，人格编辑与覆盖必须隔离
 
@@ -197,10 +197,10 @@
 
 ### D-028：当前迭代先实现桌面前端与产品合同
 
-- 状态：`Accepted`
+- 状态：`Superseded`，由 D-031 至 D-039 的 Viewer runtime 联动基线取代
 - 日期：2026-07-23
 - 决定：当前迭代先实现 Electron/React 桌面前端和共享 TypeScript 合同，覆盖模式、人格编辑、版本化 `personality.md` 与成长梗库的本地行为。
-- 影响：FastAPI、SQLite、真实导演模型和 Provider 链路仍是后续目标架构。本轮前端状态、内存数据或模拟输出不能被描述为后端持久化和真实模型能力已经完成。
+- 影响：该阶段已经留下可用的桌面工作区，同时仓库已有 FastAPI/SQLite、StepFun ASR、OpenAI-compatible Provider 和 protocol v1 链路。当前目标是实现 Room shared brain、Viewer runtime、真实 Director、原子热更新、Debug/replay 和 protocol v2；现有 v1 或前端 demo 不能冒充这些 v2 能力。
 
 ### D-029：成长梗使用可恢复的初始归档规则
 
@@ -216,6 +216,69 @@
 - 决定：`audience-workspace.json` 不存在时可以创建默认状态；读取、JSON 解析或 Schema 校验失败时必须禁止自动保存和关闭时刷新，不得用默认状态覆盖原文件。可读但被拒绝的内容按指纹复制为 `audience-workspace.rejected-<hash>.json`，只有用户显式重置后才重新开放写入。
 - 影响：当前版本在载入时按稳定 ID 注入最新内置人格基线，同时保留自定义人格、模式覆盖和梗库，避免内置文案更新使整个工作区不可访问。派生 `personality.md` 同步失败会返回具体原因、写入本地诊断并后台重试，但不改变 JSON 已保存的事实。
 
+### D-031：PersonaTemplate 与 ViewerInstance 分离
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：PersonaTemplate 是可复用表达模板；ViewerInstance 是 Session 内独立 AI 观众。一个 Session 最多创建 32 个 ViewerInstance，同一 PersonaTemplate 可以对应多个实例。现有 32 个 PersonaTemplate 继续作为素材库，但模板数量不是产品不变量。
+- 影响：每个实例拥有稳定 ID、确定性别名、微变体和短期状态。`personality.md` 是结构化 PersonaTemplate 的交换格式，不为每个 Viewer 复制一份。
+
+### D-032：长期记忆属于 Room 共享大脑
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：所有 Viewer 共享 RoomWorkingMemory 和绑定 `room_id` 的 RoomLongTermMemory；Persona 只影响关注角度和表达。Viewer 私有状态仅保存 Session 内最近发言、直接互动、注意点和冷却。
+- 影响：公开 AI 弹幕下一波对所有 Viewer 可见。用户事实需要非 AI 证据；AI 互动可以形成 room lore。经历跨模式共享，ModeMeme 仍按模式隔离。
+
+### D-033：Mode 通过人数和权重建立 Viewer 池
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：ModeDefinition 使用 `viewer_count`、`persona_weights`、普通/高光 response range、人格覆盖和 ambience。权重只用于确定性 Viewer 池分配，不在 Director 中再次加权。
+- 影响：六个现有模式的初始 Viewer 数为 24、28、16、14、24、14。UI 保存权重并预览准确实例数，房间人数、每波响应人数和网络并发数必须分开。
+
+### D-034：ObservationWave、Director 与独立 Viewer 请求
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：文字、final 语音、显著画面变化和受控 ambient tick 形成 ObservationWave。FastAPI 计算硬预算，Director 每波调用一次并选择准确 ViewerInstance ID；每个 selected Viewer 发起一次独立模型请求。
+- 影响：首版不实现多 Viewer batching。同一波使用冻结上下文，AI 输出不能直接递归触发新波。Viewer 每波返回一条弹幕或合法 silence，并携带 reaction type 和 evidence refs。
+
+### D-035：运行时配置使用版本化原子热更新
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：Electron 自动保存编辑；默认通过“应用到当前会话”把完整 runtime spec 原子切换到新 `audience_epoch`，开发模式可启用保存后自动应用。
+- 影响：旧 epoch 请求零副作用；配置可以查询、回滚和重放。未变化 Viewer 保留状态，Persona 内容变化清空对应短期状态，模式切换重建 Viewer 池但不清空 Room 记忆。
+
+### D-036：默认独立看历史帧，手动切换共享视觉摘要
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：默认 `direct_frames`，所有 selected Viewer 独立接收相同历史 FrameBundle；备用 `shared_summary` 只复用一次视觉理解，Viewer 请求仍然独立。
+- 影响：FrameBundle 默认使用 `change_peaks + 3 张`，数量、窗口、选择策略、尺寸和质量可热更新。首版不自动降级视觉模式。
+
+### D-037：机器可读调试和重放是首版产品能力
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：Pydantic/JSON Schema 是合同来源；Debug API、结构化 trace、headless harness 和 recorded/live replay 是首版必要能力，UI 只消费同一数据源。
+- 影响：agent 不依赖 UI 即可创建 Session、提交 fixture、查询状态、导出 trace 和重放。测试环境与真实 Room 数据强隔离，live replay 必须显式开启。
+
+### D-038：Provider 使用单 profile 和角色模型
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：首版使用一个活动 OpenAI-compatible Model Provider profile，Director、Viewer、memory 和 visual summary 可以覆盖不同 model ID；StepFun ASR 独立配置。
+- 影响：endpoint 或模型热更新前必须 capability probe。当前凭据实际模型列表和能力是执行 Gate，Provider 不可用时真实验收状态为 `BLOCKED`。
+
+### D-039：首个完整 E2E 使用固定 CS2/CSGO 场景
+
+- 状态：`Accepted`
+- 日期：2026-07-24
+- 决定：使用固定 CS2/CSGO 片段、脚本化 final 语音和文字验证普通跑图、高光、失误、点名、6657 权重热更新、共享记忆和模式梗，再补真实游戏 smoke。
+- 影响：真实模型按身份、证据、反应类别和状态变化验收，不比较固定弹幕文本。
+
 ## 4. 开放问题
 
 ### Q-001：Electron 与 FastAPI 的媒体编码是什么？
@@ -224,23 +287,10 @@
 - 已定边界：第一版 StepFun ASR 输入使用单声道 16 kHz PCM S16LE。
 - 需要回答：画面使用 JPEG、WebP 或其他格式，音频如何分段，以及本地数据面使用 WebSocket 二进制消息还是其他传输。
 
-### Q-002：观众发言和调用如何调度？
-
-- 状态：`Open`
-- 已定边界：导演输出 `CrowdDecision`，并可独立输出 D-027 定义的 `MemeCandidate`。
-- 需要回答：何时产生新反应、挑选哪些观众、批量还是独立调用、导演是否单独调用模型、是否允许观众彼此接话，以及如何避免内部对话挤占用户交流。
-- 约束：无论采用哪种算法，每条弹幕都必须绑定当前模式中的已有观众 ID，并使用该观众自己的状态和记忆；`MemeCandidate` 不能直接成为弹幕。
-
 ### Q-003：MVP 的默认模型体验是什么？
 
 - 状态：`Open`
 - 需要回答：首次启动必须由用户填写自己的 Provider，还是提供一个可选的默认服务。
-
-### Q-004：首个验收场景是什么？
-
-- 状态：`Open`
-- 需要回答：使用游戏、视频还是普通桌面演示作为可重复的端到端样例。
-- 约束：样例不能演变成产品只支持该内容的承诺。
 
 ### Q-005：弹幕 Overlay 的第一版范围是什么？
 
@@ -252,13 +302,6 @@
 - 状态：`Open`
 - 需要回答：端到端延迟、资源占用和弹幕密度应在原型测量后形成什么门槛。
 - 约束：测量前不写虚假的硬数字。
-
-### Q-007：长期记忆如何提取和管理？
-
-- 状态：`Open`
-- 已定边界：原始音频和连续画面不落盘，会话结束清理短期上下文。
-- 需要回答：哪些公开互动值得形成长期记忆，如何合并、遗忘和处理冲突，以及默认是否启用长期记忆。
-- 约束：长期记忆属于具体观众，保留来源，用户可以查看、修改和删除。
 
 ### Q-009：后端冻结和弹幕引擎如何落地？
 
@@ -274,9 +317,9 @@
 | 仅支持 Windows | 被 D-002 取代 |
 | 固定使用 StepFun `step-explore` | 被 D-006 取代 |
 | 未经 Provider 隔离的 StepAudio 云端 ASR | D-022 改为通过统一 `AsrProvider` 接入 |
-| 固定 32 个独立人格调用 | D-025 接受 32 个内置基础人格，但单轮参与者和调用方式仍由 Q-002 决定 |
-| 固定的人群导演模型 | D-015 与 D-027 保留导演输出合同，是否使用独立模型及其调用拓扑仍由 Q-002 决定 |
-| CSGO 四类事件作为产品验收 | 由 Q-004 重新评估 |
+| 固定 32 个独立人格调用 | D-031 将 32 改为 ViewerInstance 上限，PersonaTemplate 数量独立 |
+| 固定的人群导演模型 | D-034 固定 Director 合同和一实例一独立请求，但角色 model ID 可配置 |
+| CSGO 四类事件作为产品验收 | D-039 改为固定 CS fixture 加脚本化输入和真实 smoke |
 | Electron UtilityProcess 承担 AI 后端 | 被 D-004 取代 |
 | 黑客松四天排期和并发阶梯 | 不属于长期产品文档 |
 | 供应商专用请求头、SSE 事件和密钥规则 | 未来放入对应 Provider 的实现文档或代码 |

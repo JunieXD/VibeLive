@@ -4,7 +4,9 @@
 >
 > 第一版技术基线：Electron + React + TypeScript、FastAPI + `uv`、StepFun Step Plan ASR、OpenAI-compatible Model Provider。
 >
-> 当前实现迭代先落地桌面前端和 TypeScript 产品合同。本文中的 FastAPI、SQLite、Provider 和跨进程流程仍是目标架构，不表示相应后端能力已在本轮实现。
+> 更新日期：2026-07-24
+>
+> 当前仓库已经实现 Electron/React、FastAPI/SQLite、StepFun ASR、OpenAI-compatible Provider、Room shared brain、ViewerInstance pool、ObservationWave、原子热更新、独立 Viewer 请求、Debug/replay 和 protocol v2 联动基线。deterministic replay 与 Windows Electron + FastAPI + Overlay smoke 已通过；真实 StepFun 能力探测已通过，但完整 credentialed E2E 因生产 Director 上游超时以 `BLOCKED` 收口。macOS 系统级验收尚未执行。完整验收状态以 [VIEWER_RUNTIME_INTEGRATION_PLAN.md](./VIEWER_RUNTIME_INTEGRATION_PLAN.md) 为准。
 
 ## 1. 架构目标
 
@@ -15,7 +17,7 @@ flowchart TB
     USER["用户<br/>屏幕 · 语音 · 文字"]
     DESKTOP["Electron 桌面端<br/>采集 · 交互 · 弹幕展示"]
     CORE["FastAPI AI 核心<br/>ASR 接入 · 上下文理解 · 观众编排"]
-    AUDIENCE[("AI 观众系统<br/>人格 · 偏好 · 关系 · 记忆")]
+    AUDIENCE[("AI 观众系统<br/>人格模板 · Viewer 实例 · 共享记忆")]
     ASR["StepFun ASR<br/>语音转写"]
     MODEL["外部多模态模型<br/>OpenAI-compatible"]
 
@@ -63,13 +65,14 @@ FastAPI 负责本地计算和 AI 编排：
 - ASR Provider 调度。
 - 近期画面与转写缓冲。
 - 用户文字、语音转写和公开弹幕组成的房间事件流。
-- 稳定观众档案、关系状态和观众独立记忆。
+- 稳定 Viewer 池、实例短期状态和 Room 共享记忆。
 - 模式、模式内人格覆盖和成长梗库的持久状态。
-- 观察上下文构建。
-- AI 观众生成策略。
+- `ObservationWave` 和可配置历史画面包构建。
+- Director 调度、独立 Viewer 请求和并发控制。
 - Model Provider 调用、取消、超时和错误归一化。
 - 弹幕结构校验、时效检查、去重和内容过滤。
 - 向 Electron 输出状态和弹幕事件。
+- 机器可读 Debug Trace、headless harness 和 replay。
 
 FastAPI 是本机应用组件，不等同于公开部署的云后端。是否在未来提供远程后端，需要单独决策。
 
@@ -186,8 +189,10 @@ StepFun 的 endpoint、model、鉴权和 SSE 事件只存在于 Adapter 内。�
 
 ```python
 class RoomEvent(TypedDict):
+    room_id: str
     event_id: str
     session_id: str
+    audience_epoch: int
     source_type: str
     source_id: str | None
     created_at_ms: int
@@ -197,89 +202,107 @@ class RoomEvent(TypedDict):
 
 `source_type` 至少区分 `user_text`、`user_voice`、`audience_barrage`、`screen_observation` 和 `system_event`。用户文字无需等待模型即可作为用户弹幕显示，同时进入后续观众上下文。
 
-每个观众是稳定逻辑实体：
+`PersonaTemplate` 是跨会话可编辑模板，`ViewerInstance` 才是当前 Session 中真正独立的 AI 观众：
 
 ```python
-class AudienceMember(TypedDict):
-    audience_id: str
+class ViewerInstance(TypedDict):
+    viewer_instance_id: str
+    session_id: str
+    persona_id: str
+    persona_revision: int
+    ordinal: int
     display_name: str
-    avatar_ref: str | None
-    personality: dict[str, object]
-    preferences: dict[str, object]
-    speaking_style: dict[str, object]
-    relationships: dict[str, object]
+    instance_variant: dict[str, object]
+    viewer_sequence: int
     enabled: bool
 
-class AudienceMemory(TypedDict):
+class RoomLongTermMemory(TypedDict):
     memory_id: str
-    audience_id: str
+    room_id: str
+    memory_type: str
     content: str
-    source_event_ids: list[str]
+    evidence_event_ids: list[str]
+    revision: int
+    state: str
     created_at_ms: int
     updated_at_ms: int
 ```
 
-`AudienceMember` 的核心人格和偏好由本地状态管理，不允许模型直接覆盖。动态心情、关系变化和长期记忆需要经过独立校验与写入流程；一个观众的私有记忆不能无条件出现在其他观众的上下文中。
+同一 `PersonaTemplate` 可以创建多个 ViewerInstance；实例使用确定性别名和微变体区分。Persona 只影响观察重点、口吻和行为边界，不拥有私有长期事实。所有 Viewer 读取同一 `RoomLongTermMemory`，每波只检索相关切片；实例自己的近期已公开发言、被点名互动、临时情绪、注意点和冷却保存在 `ViewerPrivateState`，不复制整份房间历史。
+
+所有成功公开的弹幕进入 `RoomWorkingMemory`，从下一波起对全部 Viewer 可见。用户事实必须有用户文字、最终语音、可信画面事件或系统事件作为证据；AI 互动只能独立形成 `room_lore` 或共同经历，不能单独证明现实事实。
 
 ### 4.4 模式与人格合同
 
-观众产品状态按“模式 > 模式内人格 > 成长梗库”分层。桌面端内置 32 个基础人格和 6 个模式，其中 `6657` 是可选择的普通模式之一；状态中只能存在一个 `active_mode_id`，不能把多个模式合并为同一运行快照。
+观众产品状态按“模式 > PersonaTemplate 引用与覆盖 > ViewerInstance 池 > 成长梗库”分层。现有 32 个基础人格继续作为首版内置模板库，但 `32` 的运行时含义是单个 Session 最多 32 个 ViewerInstance，不要求存在 32 个唯一人格文件。同一 PersonaTemplate 可以按权重生成多个实例。
 
-模式引用基础人格，并可以保存只属于该模式的人格覆盖。运行时人格按“当前版本内置基础人格 -> 当前模式覆盖”解析；载入旧工作区时以内置人格稳定 ID 注入当前基线，只校验和保留自定义人格数据。覆盖不能反写基础人格，也不能影响其他模式。内置模式保留可恢复基线，用户既可以直接调整后重置，也可以复制为新的自定义模式继续编辑。
+模式保存 `viewer_count`、`persona_weights`、模式内人格覆盖、普通/高光响应人数范围和 ambient 行为。`viewer_count` 范围为 1 到 32；Persona 权重只用于以 Hamilton 最大余数法确定性构建 Viewer 池，Director 不再二次应用权重。状态中只能存在一个 `active_mode_id`，不能把多个模式合并为同一运行快照。
+
+运行时人格按“当前版本内置模板 -> 当前模式覆盖”解析。覆盖不能反写基础模板，也不能影响其他模式。内置模式保留可恢复基线，用户既可以直接调整后重置，也可以复制为新的自定义模式继续编辑。
 
 完整人格编辑器覆盖人格的稳定 ID、显示信息、角色、颜色、特征、表达方式、行为约束、触发与避用偏好、沉默/爆发/复读倾向、冷却与单轮上限、内容标记和启用状态。人格导入导出使用 `personality.md`；文档格式携带明确版本并在应用边界校验，未知版本或不完整字段不能静默进入运行状态。
 
-本节首先约束 Electron/React 与桌面共享 TypeScript 类型。当前桌面实现以 `audience-workspace.json` 作为唯一规范状态，模式目录中的 `personality.md` 是可重新生成的便携文档；文档同步失败不能回滚或伪装 JSON 的保存结果，主进程会记录具体错误，渲染进程会后台重试。规范 JSON 不存在和加载失败必须分开处理：前者可以初始化默认值，后者锁住所有写入、保留原文件并生成内容寻址的拒绝副本，直到用户重试成功或显式重置。本节不替代 D-018 的跨进程规则：后续把模式、人格或梗库交给 FastAPI 时，仍需由 Pydantic 定义并生成对应客户端合同。
+本节首先约束 Electron/React 与桌面共享 TypeScript 类型。Electron 是可编辑 PersonaTemplate、ModeDefinition 和 Provider 设置的权威；结构化、版本化对象是规范状态，模式目录中的 `personality.md` 是可重新生成的导入导出表示。后端通过完整 canonical runtime spec、revision、hash 和 `apply_id` 接收版本化快照，在 `ObservationWave` 边界原子应用并递增 `audience_epoch`。应用失败继续使用旧版本，不允许半更新；旧 epoch 的请求和候选必须零副作用。
 
-### 4.5 Context Builder
+### 4.5 ObservationWave 与 Context Builder
 
 Context Builder 维护有界的近期上下文：
 
-- 带时间信息的画面帧。
+- 带时间信息和内容 hash 的历史画面帧。
 - 用户文字、最终语音转写和近期已显示弹幕组成的房间事件。
-- 用户明确配置的主题和风格信息。
+- Room 共享记忆的相关切片。
+- 用户明确配置的主题、模式和风格信息。
 
-它生成不可变的 `Observation`。概念结构如下：
+它生成可重放、同波冻结的 `ObservationWave`。概念结构如下：
 
 ```python
-class Observation(TypedDict):
+class ObservationWave(TypedDict):
+    room_id: str
     session_id: str
+    audience_epoch: int
     observation_id: str
     created_at_ms: int
-    frames: list[FrameRef]
-    room_events: list[RoomEvent]
-    user_context: dict[str, str]
+    deadline_at_ms: int
+    trigger_event_ids: list[str]
+    frame_bundle: FrameBundle
+    room_event_ids: list[str]
+    room_memory_revision: int
 ```
 
-`Observation` 不规定固定帧数或固定时间窗。构建策略可以根据画面变化、模型限制和实际延迟选择上下文。
+同一波的 Director 和全部 Viewer 使用同一份 public context snapshot；同波先返回的弹幕不会改变慢 Viewer 的输入，只能从下一波起进入共享上下文。
 
-画面可以使用定时缩略帧和简单差异去重，不引入 OpenCV、目标检测或游戏专用事件识别。具体由哪些房间事件触发生成、多久触发、选取哪些观众以及如何处理空闲期暂不确定；调度器只需保证队列有界，并丢弃已经失去时效的观察。
+`FrameBundle` 默认采用 `change_peaks + 3`，并允许热更新历史张数、时间窗、`latest_n` / `evenly_spaced` / `change_peaks` 策略、最大尺寸和质量。默认 `direct_frames` 让每个选中 Viewer 独立看到同一画面包；`shared_summary` 只复用视觉摘要，不合并 Viewer 请求。两种模式由用户手动切换，首版不自动降级。
+
+正式触发源包括用户文字、最终语音、超过阈值且满足冷却的画面变化，以及连续模式下的有界 ambient tick。相近输入合并成一波；ASR 部分结果只用于 UI 和调试，最终转写以稳定 utterance ID 幂等入房间事件。AI 弹幕不能直接递归触发新波；长时间没有真实输入时必须强制安静。
 
 ### 4.6 Audience Engine
 
-Audience Engine 使用导演决定何时生成、选择哪些观众，以及将明确观众的生成结果转换为弹幕候选。导演保留独立的 `CrowdDecision` 调度输出，并可以额外产生 `MemeCandidate`。
+Audience Engine 先由本地预算器根据事件类型、模式响应范围、冷却和 Provider 压力得到本波硬上限，再调用一次 Director。Director 只在预算内选择准确的 ViewerInstance ID，也可以选择 0 个；输出为独立的 `CrowdDecision` 和可选 `MemeCandidate`，不能生成弹幕正文。
 
-在每次生成中，它需要为候选观众提供：
+每个被选中的 ViewerInstance 创建一个独立 Provider 请求，并收到：
 
-- 稳定的观众档案。
-- 当前会话状态与近期公开事件。
-- 只属于该观众的相关长期记忆。
-- 该观众与用户及其他观众的关系状态。
+- 完整 PersonaTemplate、模式覆盖和稳定实例微变体。
+- 冻结的 `ObservationWave`、画面包或共享视觉摘要。
+- 同波一致的 public context 和 Room 长期记忆核心切片。
+- 仅属于该实例的 `ViewerPrivateState`。
+- `session_id`、`audience_epoch`、`viewer_sequence` 和 deadline。
 
-它不应假设：
+首版明确要求：
 
-- 每轮都必须使用全部 32 个内置人格。
-- 每个人格必须独立调用模型。
-- `CrowdDecision` 和 `MemeCandidate` 必须来自两次独立模型调用。
-- 每次观察必须产生弹幕。
+- 不把多个 Viewer 合并为一个 prompt，也不使用多 Viewer batching。
+- 每个 Viewer 每波只返回 `action=barrage|silence`；`barrage` 最多一条，沉默是合法结果。
+- 初始 Viewer 请求并发上限为 12，可配置范围为 1 到 32；超出部分进入有界队列。
+- TTL 从波创建时开始；每个 Viewer 使用 latest-wins，旧 epoch、旧 sequence、过期、取消和非法结果零副作用。
+- 瞬时网络错误、429 或 5xx 仅在 TTL 允许时重试同一 Viewer 一次，不换人补位。
+- 合法结果按完成顺序独立发布，语义近似重复时保留最早通过者。
 
-`CrowdDecision` 只负责调度哪些已有观众参与以及相关生成意图。无论一次请求处理一个还是多个观众，最终弹幕候选都必须显式引用当前模式中的已有 `audience_id`。本地系统校验身份后才能展示或写入记忆，模型不能临时创造一个无档案观众冒充房间成员。
+文字 `@` 通过自动补全传递结构化 Viewer 或 Persona 目标；最终语音由可追踪 mention resolver 解析。高置信实例目标必须成为选择约束，Persona 目标至少选择该模板的一个实例，歧义目标按普通房间发言处理。
 
 `MemeCandidate` 是与弹幕候选分离的领域对象。它可以从用户文字、最终语音转写、近期真实事件或已经发生的 AI 互动中提议梗内容；导演判断成立且本地校验通过后，候选自动写入当时的激活模式。自动写入必须可撤销，持久条目需要支持衰减和归档。
 
 `MemeCandidate` 不能转换为 `BarrageEvent`、写成 `audience_barrage`，也不能直接发送给 Overlay。只有已入库梗在后续被某个明确观众用于合法生成时，才进入常规弹幕管线。
 
-选择哪些观众、发言时机、批量或独立调用、观众彼此接话、导演调用拓扑和记忆更新时机仍属于开放的调度算法。架构固定 `CrowdDecision` 与 `MemeCandidate` 的语义边界、观众独立逻辑状态和模式隔离，不引入通用多 Agent 框架。
+Director 提供 strict 和 resilient 两种失败策略。strict 模式在导演失败时保持安静并暴露机器错误，用于开发和真实验收；resilient 模式使用确定性本地 fallback，并显式标记 `decision_source=fallback`。不得复用上一波决定。
 
 ### 4.7 Model Provider
 
@@ -288,11 +311,7 @@ Audience Engine 使用导演决定何时生成、选择哪些观众，以及将�
 ```python
 class ModelProvider(Protocol):
     async def health(self) -> ProviderHealth: ...
-    async def generate(
-        self,
-        observation: Observation,
-        request: GenerationRequest,
-    ) -> GenerationResult: ...
+    async def generate(self, request: ModelRequest) -> ModelResult: ...
     async def cancel(self, request_id: str) -> None: ...
 ```
 
@@ -305,9 +324,9 @@ Provider Adapter 负责：
 - 支持超时和尽可能及时的取消。
 - 声明模型是否支持图像、支持的格式和请求限制。
 
-第一版实现 OpenAI-compatible 多模态 Adapter，允许用户配置 `base_url`、`model` 和凭据。默认使用非流式短结构结果；Adapter 在连接检查时探测图像、结构化输出、限制和错误行为，不能因为服务自称兼容就假设所有可选字段均可用。
+第一版实现一个启用中的 OpenAI-compatible Provider profile，允许用户配置 `base_url`、凭据和 `director`、`viewer`、`memory`、`visual_summary` 角色模型 ID。角色模型默认继承同一模型，高级设置可以覆盖。默认使用非流式短结构结果；Adapter 在连接检查时通过 `/v1/models` 和最小 capability probe 探测模型、图像、结构化输出、限制和错误行为，不能因为服务自称兼容就假设所有可选字段均可用。
 
-`GenerationRequest` 携带本轮候选观众及各自隔离的状态。`GenerationResult` 中每条候选必须带 `audience_id`；如果一次批量调用无法可靠保持人格和记忆隔离，Audience Engine 可以改用独立调用，而不改变 Provider 接口的业务语义。
+Director、Viewer、Memory 和 Visual Summary 使用相同 Adapter，但请求合同按角色区分。每个 ViewerInstance 始终对应一个独立逻辑 `GenerationRequest`；首版不允许多 Viewer batching。endpoint、凭据或角色模型热更新必须先探测成功，再随 runtime revision 原子应用；失败继续使用旧 revision。
 
 业务层不能出现 OpenAI-compatible 或其他供应商的 wire 字段。未来增加其他协议时，应新增 Adapter，不修改 Observation、Audience Engine 或 Barrage Pipeline。
 
@@ -320,9 +339,10 @@ Provider Adapter 负责：
 ```text
 raw result
   -> structure validation
-  -> audience identity validation
-  -> session and observation check
+  -> viewer identity validation
+  -> session, epoch, observation and sequence check
   -> expiration check
+  -> evidence validation
   -> content policy
   -> duplicate and density control
   -> BarrageEvent
@@ -335,9 +355,16 @@ raw result
 ```python
 class BarrageEvent(TypedDict):
     barrage_id: str
+    room_id: str
     session_id: str
+    audience_epoch: int
     observation_id: str
-    audience_id: str
+    generation_request_id: str
+    viewer_instance_id: str
+    persona_id: str
+    viewer_sequence: int
+    reaction_type: str
+    evidence_refs: list[str]
     text: str
     created_at_ms: int
     expires_at_ms: int
@@ -345,7 +372,7 @@ class BarrageEvent(TypedDict):
     metadata: dict[str, object]
 ```
 
-模型不必直接生成全部字段。本地系统可以补充弹幕 ID、时间、样式和其他可信元数据，但 `audience_id` 必须来自本轮明确提供的候选观众，不能在验证后随意改挂到其他身份。
+模型不必直接生成全部字段。本地系统补充弹幕 ID、身份、版本、时间、样式和其他可信元数据；Provider 不能自行指定或改挂 Viewer 身份。
 
 通过检查并公开显示的 AI 弹幕会写入来源为 `audience_barrage` 的 `RoomEvent`，供用户和其他观众后续交流。是否同时产生关系或记忆更新，需要走独立的数据写入流程，不能把模型自由文本直接当作可信记忆。
 
@@ -355,19 +382,19 @@ class BarrageEvent(TypedDict):
 
 Electron 与 FastAPI 之间需要两类通信：
 
-- 控制面：健康检查、配置、开始、暂停、停止和状态快照。
-- 数据面：画面帧、音频块、用户文字、转写状态、房间事件和弹幕事件。
+- 控制面：健康检查、配置校验与应用、回滚、开始、暂停、停止、恢复、状态快照和 Debug API。
+- 数据面：画面帧、音频块、用户文字、转写状态、ObservationWave、房间事件、弹幕事件和 trace 状态。
 
 第一版采用以下组合：
 
-- HTTP：健康检查、配置、模型连接测试和会话控制。
+- HTTP：健康检查、配置、Provider capability probe、会话控制、Debug 查询和 replay 控制。
 - WebSocket：音频块、代表帧、用户文字、实时状态、房间事件和弹幕事件。
 
 无论采用哪种传输，都必须满足：
 
 - 只监听回环地址，不默认暴露局域网端口。
 - 每次应用启动使用不可预测的短期鉴权信息。
-- 校验消息大小、类型、会话 ID 和来源。
+- 校验消息大小、类型、协议版本、`room_id`、会话 ID、epoch 和来源。
 - 音频和图像队列有界；新数据可以覆盖已经失去价值的旧数据。
 - Electron 退出时后端随之退出，不留下孤立进程。
 
@@ -380,8 +407,10 @@ Electron 与 FastAPI 之间需要两类通信：
 | 类型         | 示例                               | 存储原则                               |
 | ------------ | ---------------------------------- | -------------------------------------- |
 | 普通设置     | 弹幕样式、来源偏好、语言           | 保存在本地配置文件                     |
-| 模式内容     | 模式定义、模式内人格覆盖、成长梗库 | 按模式隔离并持久化，自动入库可撤销     |
-| 观众状态     | 人格、偏好、关系、记忆             | 本地持久化，可查看和删除               |
+| 模式内容     | 模式定义、模式内人格覆盖           | Electron 保存版本化工作区              |
+| Viewer 状态  | 实例身份、微变体、短期状态和冷却   | 后端 Session 内管理，必要结构可恢复     |
+| Room 状态    | 工作记忆、长期记忆和来源           | 后端按 `room_id` 持久化，可查看和删除   |
+| 成长梗       | ModeMeme 和事件日志                | 后端按 mode namespace 隔离，可撤销      |
 | 外部服务设置 | ASR/模型 Provider、endpoint、model | 可本地持久化并可编辑                   |
 | 敏感凭据     | API Key、访问令牌                  | 使用平台安全存储，不进入普通配置和日志 |
 
@@ -389,17 +418,17 @@ ASR 和模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不�
 
 控制界面必须展示当前启用的 ASR 服务，并在开始采集前说明麦克风音频会发送到 StepFun。原始音频默认不持久化，也不得写入日志；弹幕生成模型只接收最终转写文本。
 
-第一版没有账号或云同步。目标架构使用 SQLite 持久化模式、自定义人格版本、成长梗库、观众档案、关系、长期记忆、记忆来源和最小会话记录，并通过版本化迁移管理 Schema。实时音频、画面、Room Event、Observation、模型请求和待显示弹幕只存在于有界内存中，不写入数据库。现有 [BACKEND_DESIGN.md](./BACKEND_DESIGN.md) 仍需在后端实现阶段补充模式与成长梗库 Schema；本轮桌面前端状态不能视为 SQLite 持久化已经完成。Electron 和 FastAPI 使用结构化本地日志，通过 `session_id`、`observation_id` 和 `request_id` 关联事件，但不记录原始音频、完整画面或长段转写。
+第一版没有账号或云同步。目标架构使用 SQLite 持久化 Room、最小会话记录、runtime revisions、Viewer 池结构、有界可恢复的公开结构事件、Room 长期记忆与证据、ModeMeme 及其事件日志，并通过版本化迁移管理 Schema。原始音频、完整画面、隐藏推理、完整 Prompt、Provider 原始响应和凭据不写入数据库或 Debug Trace。Electron 和 FastAPI 使用结构化本地日志及机器可读 trace，通过 `room_id`、`session_id`、`audience_epoch`、`observation_id`、`generation_request_id` 和 `viewer_instance_id` 关联事件。
 
-长期记忆只保存从公开房间事件中提炼的必要事实或关系摘要，并保留来源事件引用。用户删除或修改记忆后，后续上下文不得继续使用旧值。
+Room 长期记忆只保存从公开房间事件中提炼的必要事实、共同经历或关系摘要，并保留来源事件引用、类型和 revision。用户删除、撤销或修改记忆后，后续上下文不得继续使用旧值。波次完成后的异步提取不阻塞弹幕发布。
 
 ## 7. 取消、背压与时效
 
-- 每项异步工作携带 `session_id`、`observation_id` 和创建时间。
-- 停止会话时取消采集、ASR 和模型任务，并让旧会话标识立即失效。
-- 新观察到来时，尚未开始处理的旧观察可以被替换。
-- 模型返回后先检查会话和有效期，再进行展示。
-- Provider 限流或故障时降低生成压力，不允许无限重试或无界排队。
+- 每项异步工作携带 `session_id`、`audience_epoch`、`observation_id`、`viewer_sequence`、创建时间和 deadline。
+- 停止会话、热更新或恢复时取消对应任务，并让旧 epoch 立即失效。
+- 每个 Viewer 最多一个执行中请求和一个等待中的最新请求；新波覆盖其尚未执行的旧任务。
+- 模型返回后先检查 Session、epoch、Viewer、sequence、deadline、取消状态和 evidence，再允许展示或写入状态。
+- Provider 限流或故障时不允许无限重试或无界排队；初始 Viewer 并发为 12，范围 1 到 32。
 - 弹幕队列达到上限时优先丢弃旧的、低优先级的内容。
 
 具体并发、队列长度、超时和 TTL 是配置与实测结果，不是固定架构常量。
@@ -413,7 +442,7 @@ ASR 和模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不�
 | ASR 失败或网络中断 | 不把不稳定文本送入模型，保留文字输入、控制和停止能力 |
 | Provider 不可用    | 停止新的模型请求，显示明确状态，不伪造上下文弹幕    |
 | 模型输出非法       | 丢弃本次候选并记录脱敏错误                          |
-| 观众 ID 非法或串号 | 丢弃候选，不更新关系与记忆                          |
+| Viewer ID、epoch 或 sequence 非法 | 丢弃候选，不更新任何状态                  |
 | 记忆存储不可用     | 保持会话内交流，停止长期记忆写入并提示降级          |
 | FastAPI 崩溃       | Electron 保持可控，停止采集并尝试有界恢复或结束会话 |
 | Overlay 崩溃       | 后端可继续停止，用户通过独立入口恢复或结束          |
@@ -434,15 +463,17 @@ ASR 和模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不�
 
 ## 10. 测试边界
 
-- 领域单元测试：上下文选择、会话失效、TTL、去重和调度。
-- 观众状态测试：人格稳定、记忆隔离、点名路由、关系更新和删除生效。
-- 模式合同测试：六个内置模式、32 个基础人格、单一激活、覆盖隔离、复制和 `personality.md` 版本校验。
+- 领域单元测试：ObservationWave 合并与冻结、会话/epoch 失效、TTL、latest-wins、去重和调度。
+- Viewer 状态测试：确定性池分配、稳定实例 ID、微变体、点名路由、短期状态协调和模式切换。
+- 模式合同测试：六个内置模式、1 到 32 个 Viewer 上限、权重分配、单一激活、覆盖隔离、复制和 `personality.md` 版本校验。
+- Shared Brain 测试：下一波共享可见、跨 Session/模式 Room 记忆、证据约束、异步提取和删除生效。
 - 成长梗库测试：来源归一化、当前模式隔离、自动入库撤销、持久恢复、衰减归档，以及 `MemeCandidate` 不能直接成为弹幕。
-- Provider 合同测试：成功、无图像能力、非法输出、超时、取消、限流和断流。
+- Provider 合同测试：角色模型探测、独立 Viewer 请求、沉默、非法输出、超时、取消、限流、一次重试和断流。
 - ASR 合同测试：音频格式、SSE 分片、部分结果、最终结果、超时、限流、断流和停止。
-- Electron 集成测试：开始、暂停、清屏、停止和后端崩溃。
+- Electron 集成测试：开始、暂停、清屏、热更新、回滚、停止和后端恢复。
+- Headless/replay 测试：固定 seed、虚拟时钟、隔离数据目录、recorded replay、live replay 显式开关和稳定退出码。
 - 两个平台的真实系统测试：权限、点击穿透、采集释放和打包启动。
-- 端到端测试：真实屏幕、真实麦克风、StepFun ASR 和至少一个真实外部模型。
+- 端到端测试：固定 CS2/CSGO fixture、真实屏幕、真实麦克风、StepFun ASR 和至少一个真实外部模型。
 
 模拟服务可以覆盖错误路径，但不能代替最终的真实多模态验收。
 
@@ -452,8 +483,8 @@ ASR 和模型凭据由 Electron Main 通过 `safeStorage` 保存。Renderer 不�
 - 麦克风音频的分段方式，以及 Step Plan SSE 的延迟是否满足实时互动体验。
 - 屏幕帧在进程间使用何种编码和压缩。
 - 双平台实测后采用哪个成熟弹幕库。
-- 观众发言时机、参与选择、批量/独立调用和彼此接话算法。
-- 长期记忆的提取、合并、冲突和遗忘策略。
+- 画面变化阈值、ambient 间隔、响应人数预算、并发、队列和 TTL 的调优值。
+- Room 长期记忆的提取、合并、冲突、遗忘和检索排序细节。
 - 遥测、崩溃上报和自动更新方案。
 
 这些事项经过 Spike 或实现验证后，在 [DECISIONS.md](./DECISIONS.md) 中记录决定。

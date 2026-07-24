@@ -4,20 +4,29 @@
 >
 > 本文定义 Electron 与本地后端之间的实时输入合同。`IngestService` 与
 > WebSocket Handler 已按此合同接入，`/ws` 同时承载控制消息和实时输入。
+>
+> 本文记录当前已实现的 protocol v2。二进制 ingest envelope 仍有独立的 version
+> 字段，当前为 `1`；它与 WebSocket JSON 协议版本不是同一个版本空间。
 
 ## 1. 范围与兼容性
 
 数据面使用与控制面相同的 `/ws` 连接，并要求已完成 `client.hello` 握手。JSON
-控制消息带 `protocol_version: 1`；二进制包使用独立的 envelope version。此次增加
-为加性合同，以下既有消息的字段和语义不变：
+控制消息带 `protocol_version: 2`；二进制包使用独立的 envelope version。连接必须以
+`client.hello` 声明 v2，后续每一条 JSON 客户端消息也必须继续声明 v2：
 
 - `client.hello` / `backend.ready`
 - `client.ping` / `backend.pong`
 - `session.status`、`barrage.event`、`protocol.error`
+- `ingest.ack`、`ingest.rejected`
 
 Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调用 Application 的
 `IngestPort`。拒绝一个输入不会关闭已完成握手的连接，除非它同时违反现有 WebSocket
 协议规则。
+
+版本门禁语义是确定的：握手或握手后的 JSON 消息声明非 v2 时，后端先发送
+`protocol.error`（`code: version_mismatch`、`supported_version: 2`），再以 `4406`
+关闭连接。握手 token 无效以 `4401` 关闭；握手超时以 `4408` 关闭；JSON schema
+不合法或消息顺序不合法以 `4400` 关闭。上述协议错误不同于单个 ingest 输入被拒绝。
 
 ## 2. JSON 消息
 
@@ -27,6 +36,7 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 | client -> backend | `client.audio.commit` | `session_id`, `input_id`, `committed_at_ms` | 提交同一 `input_id` 的单个音频 binary envelope，形成一个 ASR 段。 |
 | backend -> client | `ingest.ack` | `session_id`, `input_id`, `input_kind`, `stage`, `accepted_at_ms` | `stage` 为 `received` 或 `committed`。 |
 | backend -> client | `ingest.rejected` | `code`, `message`，以及可选的 `session_id`、`input_id`、`input_kind` | 输入被拒绝，身份无法可靠解析时关联字段省略。 |
+| backend -> client | `barrage.event` | `barrage` | Viewer v2 输出；包含 Room、Session、epoch、Observation、生成请求、Viewer 身份与 evidence refs。 |
 
 `input_kind` 的值为 `text`、`audio` 或 `frame`。`ingest.rejected.code` 为
 `invalid_input`、`session_not_active`、`duplicate_input`、`unknown_input`、
@@ -34,6 +44,11 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 `unsupported_binary_version`、`unsupported_media_type` 或
 `malformed_binary_envelope`。运行时尚未注入 Ingest Pipeline 或其容量暂不可用时返回
 `pipeline_unavailable`。
+
+`ingest.rejected` 是输入级拒绝：后端发送拒绝消息后保持已握手连接，客户端可以修正后
+继续提交。可恢复的 binary envelope 错误（版本、media type、长度或编码）同样映射为
+`ingest.rejected`，不会因为单个坏输入直接关闭连接。只有 WebSocket frame/消息本身违反
+协议规则时才进入上一节的 `protocol.error` 关闭语义。
 
 音频顺序为：发送一条 `audio` binary envelope，收到 `received` ACK 后发送
 `client.audio.commit`，再收到 `committed` ACK。一个 binary envelope 对应一个
@@ -82,9 +97,10 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 ## 4. 帧所有权与隐私
 
 `FrameInput` 的 bytes 只能进入有界的 `FrameStore`。Store 同时声明最大帧数、单帧字节数
-和总字节数，并在会话结束时清理。`Observation` 只能携带 `FrameRef`，其 `data_ref` 是
-不透明的本地引用，不得是 data URI、base64 正文或可恢复的媒体内容。
+和总字节数，并在会话结束时清理。当前 Observation 合同和目标 `ObservationWave` 都只能
+携带 `FrameRef`；其 `data_ref` 是不透明的本地引用，不得是 data URI、base64 正文或可恢复
+的媒体内容。
 
 需要像素的 Provider Adapter 通过 `FrameResolver` 以 `session_id` 和 `FrameRef` 解析临时
 的 `ResolvedFrame`。原始音频、图片正文和 `ResolvedFrame.body` 不得写入日志、Room Event、
-Observation、SQLite 或生成请求的结构化元数据。
+ObservationWave、SQLite、Debug Trace、replay bundle 或生成请求的结构化元数据。
