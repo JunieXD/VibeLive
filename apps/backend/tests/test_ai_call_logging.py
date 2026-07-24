@@ -593,7 +593,7 @@ async def test_memory_extractor_preserves_retryable_http_failure_details() -> No
 @pytest.mark.asyncio
 async def test_stepfun_asr_records_audio_summary_stream_and_final_text() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path.endswith("/audio/asr/sse")
+        assert str(request.url) == "https://api.stepfun.com/v1/audio/asr/sse"
         return httpx.Response(
             200,
             headers={"x-request-id": "asr-provider-1"},

@@ -30,7 +30,7 @@ Windows 系统声音 ─> StepFun ASR B ─┘
 - Renderer UI 使用 React + TypeScript。
 - 本地后端使用 FastAPI，Python 依赖和锁文件使用 `uv` 管理。
 - 产品目标平台是 Windows 和 macOS。
-- 第一版使用两个相互隔离的 StepFun Step Plan ASR 通道，分别转写麦克风和 Windows 系统声音；业务层仍只依赖统一 ASR Provider。
+- 第一版使用两个相互隔离的 StepFun ASR API 通道，分别转写麦克风和 Windows 系统声音；业务层仍只依赖统一 ASR Provider。
 - 系统声音采集默认开启并标记为推荐，用户可以关闭；非 Windows 平台明确显示当前不支持系统回环采集。
 - 麦克风和系统声音的原始音频会发送给用户明确启用的 StepFun 服务；弹幕生成模型只接收带来源标记的最终文本。
 - 第一版接入 OpenAI-compatible 多模态协议，并保留统一 Model Provider 接口。
@@ -58,7 +58,7 @@ Windows 系统声音 ─> StepFun ASR B ─┘
 以下内容需要通过原型和实测决定，不是当前产品承诺：
 
 - 画面采样频率、观察窗口长度、FrameBundle 数量和关键帧选择参数的最终默认值。
-- 两路音频的最终分段参数以及 Step Plan SSE 的延迟是否满足体验要求。
+- 两路音频的最终分段参数以及 StepFun ASR API SSE 的延迟是否满足体验要求。
 - Observation 合并窗口、响应预算、Viewer TTL、并发和 ambient tick 的最终默认值。
 - RoomLongTermMemory 检索数量、阈值和衰减参数。
 - 首次启动默认激活哪个内置模式，以及房间活跃度参数。

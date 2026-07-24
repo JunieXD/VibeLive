@@ -47,7 +47,7 @@ async def test_role_payload_uses_json_examples_and_stepfun_low_reasoning() -> No
     async with httpx.AsyncClient() as client:
         provider = OpenAICompatibleViewerRuntimeProvider(
             OpenAICompatibleViewerRuntimeConfig(
-                base_url="https://api.stepfun.com/step_plan/v1",
+                base_url="https://api.stepfun.com/v1",
                 provider=ProviderRuntimeSpec(
                     provider_profile_id="default",
                     viewer_model="step-3.7-flash",
@@ -78,11 +78,11 @@ async def test_role_payload_uses_json_examples_and_stepfun_low_reasoning() -> No
 
 def test_stepfun_flash_defaults_to_low_reasoning_effort() -> None:
     assert default_reasoning_options(
-        "https://api.stepfun.com/step_plan/v1",
+        "https://api.stepfun.com/v1",
         "step-3.7-flash",
     ) == {"reasoning_effort": "low"}
     assert default_reasoning_options(
-        "https://api.stepfun.com/step_plan/v1",
+        "https://api.stepfun.com/v1",
         "step-router-v1",
     ) == {}
 

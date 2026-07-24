@@ -44,7 +44,7 @@ class StepFunAsrError(RuntimeError):
 @dataclass(frozen=True)
 class StepFunAsrConfig:
     api_key: str = field(repr=False)
-    base_url: str = "https://api.stepfun.com/step_plan/v1"
+    base_url: str = "https://api.stepfun.com/v1"
     model: str = "stepaudio-2.5-asr"
     language: str = "zh"
     enable_itn: bool = True
@@ -117,7 +117,7 @@ _ResultItem = TranscriptSegment | Exception | _EndOfResults
 
 
 class StepFunAsrProvider:
-    """Step Plan HTTP + SSE ASR adapter.
+    """StepFun HTTP + SSE ASR adapter.
 
     Audio chunks are buffered until ``commit`` marks an utterance boundary.
     Committed segments are processed in order so room events cannot be reordered

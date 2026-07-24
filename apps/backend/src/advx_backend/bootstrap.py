@@ -120,7 +120,7 @@ class ExternalProviderConfig:
     model_name: str
     model_api_key: str = field(repr=False)
     asr_api_key: str = field(repr=False)
-    asr_base_url: str = "https://api.stepfun.com/step_plan/v1"
+    asr_base_url: str = "https://api.stepfun.com/v1"
     asr_model: str = "stepaudio-2.5-asr"
 
     def __post_init__(self) -> None:

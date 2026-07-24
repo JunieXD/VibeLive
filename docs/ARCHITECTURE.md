@@ -2,7 +2,7 @@
 
 > 状态：Architecture Baseline
 >
-> 第一版技术基线：Electron + React + TypeScript、FastAPI + `uv`、StepFun Step Plan ASR、OpenAI-compatible Model Provider。
+> 第一版技术基线：Electron + React + TypeScript、FastAPI + `uv`、StepFun ASR API、OpenAI-compatible Model Provider。
 >
 > 更新日期：2026-07-24
 >
@@ -177,13 +177,13 @@ class AsrProvider(Protocol):
 - 开始和结束时间。
 - 是否为最终结果。
 
-第一版实现 `StepFunAsrProvider`，通过 Step Plan 的 HTTP + SSE 接口调用 `stepaudio-2.5-asr`。Electron 将麦克风和 Windows 系统声音分别转换为单声道 16 kHz PCM S16LE，并通过带 `AudioSource` 的本地数据面发送给 FastAPI。运行时为两个来源各持有一个独立 Provider，允许并行识别且不混合缓冲；Provider 在音频段提交后编码请求，并把供应商的增量、最终和错误事件转换为统一结果。
+第一版实现 `StepFunAsrProvider`，通过 StepFun ASR API 的 HTTP + SSE 接口调用 `stepaudio-2.5-asr`。Electron 将麦克风和 Windows 系统声音分别转换为单声道 16 kHz PCM S16LE，并通过带 `AudioSource` 的本地数据面发送给 FastAPI。运行时为两个来源各持有一个独立 Provider，允许并行识别且不混合缓冲；Provider 在音频段提交后编码请求，并把供应商的增量、最终和错误事件转换为统一结果。
 
-Step Plan 接口一次提交一个有限音频段，不提供持续上传音频的双向流。`commit(source)` 只表示对应来源的当前音频段结束，不规定使用静音检测、固定窗口或其他分段算法。同一来源内串行处理已提交片段，不同来源可以并行；具体分段方式和时长需要通过延迟与准确率实测决定。
+StepFun ASR API 一次提交一个有限音频段，不提供持续上传音频的双向流。`commit(source)` 只表示对应来源的当前音频段结束，不规定使用静音检测、固定窗口或其他分段算法。同一来源内串行处理已提交片段，不同来源可以并行；具体分段方式和时长需要通过延迟与准确率实测决定。
 
 每个最终转写会转换为来源为 `user_voice` 的 `RoomEvent`。主播麦克风使用 `source_id=host`，系统声音使用 `source_id=system-audio`，payload 同时保留 `audio_source`。用户从 React UI 发送的文字则由 Main/FastAPI 校验后转换为 `user_text` 事件；这些输入在触发观察时地位相同，但模型和控制台始终能区分来源。
 
-StepFun 的 endpoint、model、鉴权和 SSE 事件只存在于 Adapter 内。业务层和跨进程合同不出现供应商字段；如果 Step Plan 延迟不能满足体验，可以新增双向流式 ASR Adapter，而不修改房间事件和 Audience Engine。
+StepFun 的 endpoint、model、鉴权和 SSE 事件只存在于 Adapter 内。业务层和跨进程合同不出现供应商字段；如果当前 ASR API 延迟不能满足体验，可以新增双向流式 ASR Adapter，而不修改房间事件和 Audience Engine。
 
 ### 4.3 Room 与观众模型
 
@@ -490,7 +490,7 @@ Room 长期记忆只保存从公开房间事件中提炼的必要事实、共同
 ## 11. 明确未定的实现
 
 - Python Runtime 使用哪种目录式冻结工具随 Electron 分发。
-- 两路音频的最终分段参数，以及 Step Plan SSE 的延迟是否满足实时互动体验。
+- 两路音频的最终分段参数，以及 StepFun ASR API SSE 的延迟是否满足实时互动体验。
 - 屏幕帧在进程间使用何种编码和压缩。
 - 双平台实测后采用哪个成熟弹幕库。
 - 画面变化阈值、ambient 间隔、响应人数预算、并发、队列和 TTL 的调优值。

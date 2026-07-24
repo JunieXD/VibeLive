@@ -153,12 +153,12 @@
 - 决定：弹幕先经过结构、长度、时效、重复、屏蔽词和基础硬规则检查；第一版不接外部审核服务。
 - 影响：过滤失败时丢弃候选，不能只依赖 Prompt，也不能宣传为覆盖所有语言风险。
 
-### D-022：第一版使用 StepFun Step Plan ASR
+### D-022：第一版使用 StepFun ASR API
 
 - 状态：`Accepted`
 - 日期：2026-07-23
-- 决定：第一版通过独立 `AsrProvider` 调用 StepFun Step Plan 的 `stepaudio-2.5-asr`。Provider 使用 HTTP + SSE 接收增量和最终转写，只把最终文本送入观众上下文。
-- 影响：麦克风音频会发送到用户明确启用的 StepFun 服务，界面必须告知数据去向；凭据使用 `safeStorage` 保存并按会话注入后端。Step Plan 需要一次提交一个有限音频段，具体分段算法与参数通过实测决定。如果延迟不足，可以增加双向流式 ASR Adapter，不改变业务合同。
+- 决定：第一版通过独立 `AsrProvider` 调用 StepFun ASR API 的 `stepaudio-2.5-asr`。Provider 使用 HTTP + SSE 接收增量和最终转写，只把最终文本送入观众上下文。
+- 影响：麦克风音频会发送到用户明确启用的 StepFun 服务，界面必须告知数据去向；凭据使用 `safeStorage` 保存并按会话注入后端。当前 ASR API 需要一次提交一个有限音频段，具体分段算法与参数通过实测决定。如果延迟不足，可以增加双向流式 ASR Adapter，不改变业务合同。
 
 ### D-023：后端采用 Application、Domain、Port 与 Adapter 边界
 
