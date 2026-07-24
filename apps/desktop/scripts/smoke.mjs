@@ -1,14 +1,11 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { dirname, resolve } from 'node:path'
-import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { _electron as electron } from 'playwright-core'
 
-const execFileAsync = promisify(execFile)
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const artifactDirectory = resolve(root, 'artifacts')
 await mkdir(artifactDirectory, { recursive: true })
@@ -92,117 +89,6 @@ async function setRange(page, label, value) {
   await input.evaluate((element) => {
     element.dispatchEvent(new Event('change', { bubbles: true }))
   })
-}
-
-async function windowAtScreenPoint(point) {
-  const script = `
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class AdvxWindowHitTest {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct Point { public int X; public int Y; }
-  [StructLayout(LayoutKind.Sequential)]
-  public struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
-  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point point);
-  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
-  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(
-    IntPtr hwnd, out uint processId
-  );
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-  public static extern int GetWindowText(IntPtr hwnd, System.Text.StringBuilder text, int count);
-  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-  public static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder text, int count);
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
-}
-'@
-[AdvxWindowHitTest]::SetProcessDPIAware() | Out-Null
-$point = New-Object AdvxWindowHitTest+Point
-$point.X = ${point.x}
-$point.Y = ${point.y}
-$hit = [AdvxWindowHitTest]::WindowFromPoint($point)
-$root = [AdvxWindowHitTest]::GetAncestor($hit, 2)
-$processId = [uint32]0
-[AdvxWindowHitTest]::GetWindowThreadProcessId($root, [ref]$processId) | Out-Null
-$title = New-Object System.Text.StringBuilder 256
-[AdvxWindowHitTest]::GetWindowText($root, $title, $title.Capacity) | Out-Null
-$className = New-Object System.Text.StringBuilder 256
-[AdvxWindowHitTest]::GetClassName($root, $className, $className.Capacity) | Out-Null
-$rect = New-Object AdvxWindowHitTest+Rect
-[AdvxWindowHitTest]::GetWindowRect($root, [ref]$rect) | Out-Null
-@{
-  handle = $root.ToInt64().ToString()
-  processId = $processId
-  title = $title.ToString()
-  className = $className.ToString()
-  rect = @{ left = $rect.Left; top = $rect.Top; right = $rect.Right; bottom = $rect.Bottom }
-} | ConvertTo-Json -Compress
-`
-  const { stdout } = await execFileAsync('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    script
-  ])
-  return JSON.parse(stdout.trim())
-}
-
-async function clickScreenPoint(point) {
-  const script = `
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class AdvxNativeMouse {
-  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-  [DllImport("user32.dll")]
-  public static extern void mouse_event(
-    uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo
-  );
-}
-'@
-[AdvxNativeMouse]::SetProcessDPIAware() | Out-Null
-[AdvxNativeMouse]::SetCursorPos(${point.x}, ${point.y}) | Out-Null
-Start-Sleep -Milliseconds 80
-[AdvxNativeMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
-Start-Sleep -Milliseconds 40
-[AdvxNativeMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
-`
-  await execFileAsync('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    script
-  ])
-}
-
-async function windowRectForHandle(handle) {
-  const script = `
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class AdvxWindowRect {
-  [StructLayout(LayoutKind.Sequential)]
-  public struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
-  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
-}
-'@
-[AdvxWindowRect]::SetProcessDPIAware() | Out-Null
-$rect = New-Object AdvxWindowRect+Rect
-$handle = [IntPtr]([Int64]::Parse('${handle}'))
-[AdvxWindowRect]::GetWindowRect($handle, [ref]$rect) | Out-Null
-@{ left = $rect.Left; top = $rect.Top; right = $rect.Right; bottom = $rect.Bottom } |
-  ConvertTo-Json -Compress
-`
-  const { stdout } = await execFileAsync('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    script
-  ])
-  return JSON.parse(stdout.trim())
 }
 
 let electronApp = await launchApp()
@@ -379,6 +265,15 @@ try {
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('heading', { name: '弹幕覆盖层', exact: true }).waitFor()
   await page.getByLabel('弹幕目标', { exact: true }).waitFor()
+  assert.equal(await page.getByLabel('点击穿透', { exact: true }).count(), 0)
+  const controlAlwaysOnTop = await electronApp.evaluate(({ BrowserWindow }) => {
+    const controlWindow = BrowserWindow.getAllWindows().find((window) =>
+      window.webContents.getURL().includes('/control/')
+    )
+    if (!controlWindow) throw new Error('Control window is missing.')
+    return controlWindow.isAlwaysOnTop()
+  })
+  assert.equal(controlAlwaysOnTop, false, 'Overlay settings must not elevate the control window.')
 
   const defaultOverlaySettings = await page.evaluate(() => window.advx.getOverlaySettings())
   assert.deepEqual(
@@ -390,8 +285,7 @@ try {
       speed: defaultOverlaySettings.speed,
       opacity: defaultOverlaySettings.opacity,
       density: defaultOverlaySettings.density,
-      region: defaultOverlaySettings.region,
-      clickThrough: defaultOverlaySettings.clickThrough
+      region: defaultOverlaySettings.region
     },
     {
       fontSizePx: 25,
@@ -401,8 +295,7 @@ try {
       speed: 75,
       opacity: 80,
       density: 6,
-      region: { topPercent: 0, bottomPercent: 50 },
-      clickThrough: true
+      region: { topPercent: 0, bottomPercent: 50 }
     }
   )
 
@@ -447,8 +340,7 @@ try {
       speed: configuredSettings.speed,
       opacity: configuredSettings.opacity,
       density: configuredSettings.density,
-      region: configuredSettings.region,
-      clickThrough: configuredSettings.clickThrough
+      region: configuredSettings.region
     },
     {
       fontSizePx: 30,
@@ -458,8 +350,7 @@ try {
       speed: 100,
       opacity: 55,
       density: 3,
-      region: { topPercent: 20, bottomPercent: 60 },
-      clickThrough: true
+      region: { topPercent: 20, bottomPercent: 60 }
     }
   )
 
@@ -537,7 +428,6 @@ try {
   assert.ok(sourceCount >= 1, 'Desktop source IPC returned no sources.')
   await page.getByTitle('关闭').click()
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByLabel('点击穿透', { exact: true }).waitFor()
 
   await page.evaluate(async () => {
     await window.advx.showOverlay()
@@ -1299,15 +1189,14 @@ try {
   )
 
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByLabel('点击穿透', { exact: true }).waitFor()
   await page.evaluate(async () => {
     await window.advx.showOverlay()
     for (let index = 0; index < 8; index += 1) {
       await window.advx.pushBarrage({
-        barrageId: `click-proof-${index}`,
+        barrageId: `overlay-proof-${index}`,
         audienceId: `audience-${index}`,
         audienceName: `测试观众 ${index + 1}`,
-        text: `Overlay 点击穿透验证弹幕 ${index + 1}`,
+        text: `Overlay 渲染验证弹幕 ${index + 1}`,
         color: index % 2 === 0 ? '#a8f53a' : '#65d6b9',
         createdAt: Date.now()
       })
@@ -1319,220 +1208,6 @@ try {
     path: resolve(artifactDirectory, 'overlay-renderer.png'),
     omitBackground: false
   })
-
-  let clickThroughProof = { skipped: process.platform !== 'win32' }
-  if (process.platform === 'win32') {
-    const clickThroughToggle = page.getByLabel('点击穿透', { exact: true })
-    await clickThroughToggle.scrollIntoViewIfNeeded()
-
-    await electronApp.evaluate(({ BrowserWindow }) => {
-      const overlayWindow = BrowserWindow.getAllWindows().find((window) =>
-        window.webContents.getURL().replaceAll('\\', '/').endsWith('/overlay/index.html')
-      )
-      if (!overlayWindow) throw new Error('Overlay window is missing.')
-      const original = overlayWindow.setIgnoreMouseEvents.bind(overlayWindow)
-      globalThis.__advxIgnoreMouseCalls = []
-      overlayWindow.setIgnoreMouseEvents = (ignore, options) => {
-        globalThis.__advxIgnoreMouseCalls.push(ignore)
-        return original(ignore, options)
-      }
-    })
-
-    await page.evaluate(() => {
-      const probe = document.createElement('button')
-      probe.id = 'overlay-click-probe'
-      probe.type = 'button'
-      probe.textContent = 'click probe'
-      probe.style.cssText =
-        'position:fixed;left:80px;top:120px;width:140px;height:48px;z-index:2147483647;'
-      document.body.append(probe)
-    })
-    await overlayPage.evaluate(() => {
-      const probe = document.createElement('div')
-      probe.id = 'overlay-native-hit-probe'
-      probe.style.cssText =
-        'position:fixed;right:40px;top:80px;width:120px;height:60px;background:#16191d;' +
-        'opacity:.2;pointer-events:auto;'
-      document.body.append(probe)
-    })
-
-    await electronApp.evaluate(
-      ({ BrowserWindow, screen }, { targetDisplayId }) => {
-        const controlWindow = BrowserWindow.getAllWindows().find((window) =>
-          window.webContents.getURL().replaceAll('\\', '/').endsWith('/control/index.html')
-        )
-        const overlayWindow = BrowserWindow.getAllWindows().find((window) =>
-          window.webContents.getURL().replaceAll('\\', '/').endsWith('/overlay/index.html')
-        )
-        if (!controlWindow) throw new Error('Control window is missing.')
-        if (!overlayWindow) throw new Error('Overlay window is missing.')
-        const targetDisplay =
-          screen.getAllDisplays().find((display) => display.id === targetDisplayId) ??
-          screen.getPrimaryDisplay()
-        controlWindow.setBounds({
-          x: targetDisplay.workArea.x + 24,
-          y: targetDisplay.workArea.y + 24,
-          width: Math.min(1_120, targetDisplay.workArea.width),
-          height: Math.min(720, targetDisplay.workArea.height)
-        })
-        controlWindow.setAlwaysOnTop(true, 'pop-up-menu')
-        controlWindow.show()
-        controlWindow.focus()
-        controlWindow.moveTop()
-        overlayWindow.moveTop()
-      },
-      {
-        targetDisplayId: configuredSettings.targetDisplayId
-      }
-    )
-    await clickThroughToggle.scrollIntoViewIfNeeded()
-    await page.waitForTimeout(100)
-
-    const probeBox = await page.locator('#overlay-click-probe').boundingBox()
-    assert.ok(probeBox, 'Could not locate the click-through probe.')
-    const toggleBox = await clickThroughToggle.boundingBox()
-    assert.ok(toggleBox, 'Could not locate the click-through toggle.')
-    const overlayProbeBox = await overlayPage.locator('#overlay-native-hit-probe').boundingBox()
-    assert.ok(overlayProbeBox, 'Could not locate the Overlay native hit-test probe.')
-
-    const nativeHandles = await electronApp.evaluate(({ BrowserWindow }) => {
-      const windows = BrowserWindow.getAllWindows()
-      const controlWindow = windows.find((window) =>
-        window.webContents.getURL().replaceAll('\\', '/').endsWith('/control/index.html')
-      )
-      const overlayWindow = windows.find((window) =>
-        window.webContents.getURL().replaceAll('\\', '/').endsWith('/overlay/index.html')
-      )
-      if (!controlWindow || !overlayWindow) throw new Error('Smoke windows are missing.')
-      return {
-        control: controlWindow.getNativeWindowHandle().readBigUInt64LE().toString(),
-        overlay: overlayWindow.getNativeWindowHandle().readBigUInt64LE().toString()
-      }
-    })
-    const [controlNativeRect, overlayNativeRect] = await Promise.all([
-      windowRectForHandle(nativeHandles.control),
-      windowRectForHandle(nativeHandles.overlay)
-    ])
-    const overlayViewport = await overlayPage.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.innerHeight
-    }))
-    const controlViewport = await page.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.innerHeight
-    }))
-    const scaleX =
-      (overlayNativeRect.right - overlayNativeRect.left) / overlayViewport.width
-    const scaleY =
-      (overlayNativeRect.bottom - overlayNativeRect.top) / overlayViewport.height
-    const controlContentOffset = {
-      x:
-        (controlNativeRect.right -
-          controlNativeRect.left -
-          controlViewport.width * scaleX) /
-        2,
-      y:
-        (controlNativeRect.bottom -
-          controlNativeRect.top -
-          controlViewport.height * scaleY) /
-        2
-    }
-    const toControlNativePoint = (box) => ({
-      x: Math.round(
-        controlNativeRect.left +
-          controlContentOffset.x +
-          (box.x + box.width / 2) * scaleX
-      ),
-      y: Math.round(
-        controlNativeRect.top +
-          controlContentOffset.y +
-          (box.y + box.height / 2) * scaleY
-      )
-    })
-    const overlayOnlyPoint = {
-      x: Math.round(
-        overlayNativeRect.left +
-          (overlayProbeBox.x + overlayProbeBox.width / 2) *
-            scaleX
-      ),
-      y: Math.round(
-        overlayNativeRect.top +
-          (overlayProbeBox.y + overlayProbeBox.height / 2) *
-            scaleY
-      )
-    }
-    assert.ok(
-      overlayOnlyPoint.x < controlNativeRect.left ||
-        overlayOnlyPoint.x >= controlNativeRect.right ||
-        overlayOnlyPoint.y < controlNativeRect.top ||
-        overlayOnlyPoint.y >= controlNativeRect.bottom,
-      'The Overlay native hit-test probe is covered by the control window.'
-    )
-    const hitTestPoints = {
-      probe: toControlNativePoint(probeBox),
-      toggle: toControlNativePoint(toggleBox),
-      overlayOnly: overlayOnlyPoint
-    }
-    const passThroughOwner = await windowAtScreenPoint(hitTestPoints.probe)
-    assert.equal(
-      passThroughOwner.handle,
-      nativeHandles.control,
-      `The control window did not own the hit-test point with click-through enabled: ${JSON.stringify({ nativeHandles, passThroughOwner, hitTestPoints })}`
-    )
-
-    await clickThroughToggle.uncheck()
-    await page.waitForFunction(async () => !(await window.advx.getOverlaySettings()).clickThrough)
-    const blockedOwner = await windowAtScreenPoint(hitTestPoints.overlayOnly)
-    assert.equal(
-      blockedOwner.handle,
-      nativeHandles.overlay,
-      `The overlay did not own its painted hit-test probe with click-through disabled: ${JSON.stringify({ blockedOwner, hitTestPoints, controlNativeRect, overlayNativeRect, overlayViewport, overlayProbeBox })}`
-    )
-
-    const recoveryControlOwner = await windowAtScreenPoint(hitTestPoints.toggle)
-    assert.equal(
-      recoveryControlOwner.handle,
-      nativeHandles.control,
-      `The control window was not accessible above the blocking Overlay: ${JSON.stringify({ recoveryControlOwner, hitTestPoints, controlNativeRect, overlayNativeRect, toggleBox })}`
-    )
-    await clickScreenPoint(hitTestPoints.toggle)
-    await page.waitForFunction(async () => (await window.advx.getOverlaySettings()).clickThrough)
-    const restoredOwner = await windowAtScreenPoint(hitTestPoints.probe)
-    assert.equal(
-      restoredOwner.handle,
-      nativeHandles.control,
-      'The underlying window did not regain hit-test ownership after native recovery.'
-    )
-    const restoredOverlayPointOwner = await windowAtScreenPoint(hitTestPoints.overlayOnly)
-    assert.notEqual(
-      restoredOverlayPointOwner.handle,
-      nativeHandles.overlay,
-      'The Overlay still owned hit tests after native recovery.'
-    )
-    const ignoreMouseCalls = await electronApp.evaluate(
-      () => globalThis.__advxIgnoreMouseCalls ?? []
-    )
-    assert.deepEqual(
-      ignoreMouseCalls.slice(-2),
-      [false, true],
-      'Click-through changes did not reach BrowserWindow.setIgnoreMouseEvents.'
-    )
-    clickThroughProof = {
-      skipped: false,
-      nativeHandles,
-      nativeRects: {
-        control: controlNativeRect,
-        overlay: overlayNativeRect
-      },
-      hitTestPoints,
-      passThroughOwner,
-      blockedOwner,
-      recoveryControlOwner,
-      restoredOwner,
-      restoredOverlayPointOwner,
-      ignoreMouseCalls
-    }
-  }
 
   await page.evaluate(() => window.advx.clearOverlay())
   await overlayPage.locator('.overlay-barrage').first().waitFor({ state: 'detached' })
@@ -1546,7 +1221,6 @@ try {
     settings: configuredSettings,
     rendered,
     bounds: boundsProof,
-    clickThrough: clickThroughProof,
     clearCount: 0
   }
 
@@ -1709,7 +1383,7 @@ try {
   )
 
   console.log(
-    `Desktop Overlay smoke passed: ${targetOptions} target(s), ${sourceCount} capture source(s), three barrage modes, font styling, collision-free density, bounds, clear, persistence, main-window quit, and ${clickThroughProof.skipped ? 'API-only' : 'real Windows'} click-through.`
+    `Desktop Overlay smoke passed: ${targetOptions} target(s), ${sourceCount} capture source(s), three barrage modes, font styling, collision-free density, bounds, clear, persistence, and main-window quit.`
   )
   console.log(`Settings screenshot: ${resolve(artifactDirectory, 'overlay-settings.png')}`)
   console.log(`Overlay screenshot: ${resolve(artifactDirectory, 'overlay-renderer.png')}`)

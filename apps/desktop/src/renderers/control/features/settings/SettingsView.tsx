@@ -470,14 +470,6 @@ export function SettingsView({
               checked={overlaySettings.bold}
               onChange={(bold) => onOverlaySettingsChange({ ...overlaySettings, bold })}
             />
-            <ToggleField
-              label="点击穿透"
-              checked={overlaySettings.clickThrough}
-              notice={overlaySettingsNotice}
-              onChange={(clickThrough) =>
-                onOverlaySettingsChange({ ...overlaySettings, clickThrough })
-              }
-            />
           </div>
         )}
       </section>

@@ -7,7 +7,7 @@ import { loadRenderer } from "./load-renderer";
 
 let overlayWindow: BrowserWindow | null = null;
 
-export function createOverlayWindow(bounds: Rectangle, clickThrough = true): BrowserWindow {
+export function createOverlayWindow(bounds: Rectangle): BrowserWindow {
   const window = new BrowserWindow({
     ...bounds,
     transparent: true,
@@ -28,9 +28,9 @@ export function createOverlayWindow(bounds: Rectangle, clickThrough = true): Bro
     }
   });
 
-  window.setAlwaysOnTop(true, clickThrough ? "screen-saver" : "pop-up-menu");
+  window.setAlwaysOnTop(true, "screen-saver");
   window.setBounds(bounds);
-  window.setIgnoreMouseEvents(clickThrough, { forward: true });
+  window.setIgnoreMouseEvents(true, { forward: true });
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) void shell.openExternal(url);
@@ -58,7 +58,7 @@ function getOverlayWindow(): BrowserWindow {
   if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
 
   const settings = getOverlaySettings();
-  overlayWindow = createOverlayWindow(getTargetBounds(settings), settings.clickThrough);
+  overlayWindow = createOverlayWindow(getTargetBounds(settings));
   overlayWindow.on("closed", () => {
     overlayWindow = null;
   });
@@ -102,11 +102,8 @@ export function pushBarrage(event: BarrageEvent): void {
 export function applyOverlaySettings(settings: OverlaySettings): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
-  overlayWindow.setAlwaysOnTop(
-    true,
-    settings.clickThrough ? "screen-saver" : "pop-up-menu"
-  );
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
   overlayWindow.setBounds(getTargetBounds(settings));
-  overlayWindow.setIgnoreMouseEvents(settings.clickThrough, { forward: true });
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   sendWhenReady(overlayWindow, "overlay:settings-changed", settings);
 }

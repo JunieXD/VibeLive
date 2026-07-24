@@ -252,7 +252,6 @@ export type OverlaySettings = {
   opacity: number
   density: number
   region: OverlayRegion
-  clickThrough: boolean
 }
 
 export type ControlApi = {

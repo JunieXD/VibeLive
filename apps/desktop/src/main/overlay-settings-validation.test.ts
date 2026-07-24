@@ -15,8 +15,7 @@ describe("overlay settings validation", () => {
       speed: 75,
       opacity: 80,
       density: 6,
-      region: { topPercent: 0, bottomPercent: 50 },
-      clickThrough: true
+      region: { topPercent: 0, bottomPercent: 50 }
     });
   });
 
@@ -57,5 +56,16 @@ describe("overlay settings validation", () => {
     delete legacySettings.outlineWidthPx;
 
     expect(normalizeOverlaySettings(legacySettings, 1, [1])).toEqual(settings);
+  });
+
+  it("accepts persisted settings that contain the removed click-through option", () => {
+    const legacySettings = {
+      ...createDefaultOverlaySettings(1),
+      clickThrough: false
+    };
+
+    expect(normalizeOverlaySettings(legacySettings, 1, [1])).toEqual(
+      createDefaultOverlaySettings(1)
+    );
   });
 });

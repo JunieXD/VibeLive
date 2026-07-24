@@ -18,8 +18,7 @@ export const DEFAULT_OVERLAY_SETTINGS: OverlaySettings = {
   region: {
     topPercent: 0,
     bottomPercent: 50
-  },
-  clickThrough: true
+  }
 }
 
 export type VisibleBarrage = Omit<BarrageEvent, 'mode'> & {

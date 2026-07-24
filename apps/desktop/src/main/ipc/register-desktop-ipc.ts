@@ -699,12 +699,7 @@ function applyOverlayWindowState(
   applyOverlaySettings(settings);
 
   if (controlWindow && !controlWindow.isDestroyed()) {
-    controlWindow.setAlwaysOnTop(!settings.clickThrough, "screen-saver");
-    if (!settings.clickThrough) {
-      controlWindow.show();
-      controlWindow.focus();
-      controlWindow.moveTop();
-    }
+    controlWindow.setAlwaysOnTop(false);
   }
 }
 

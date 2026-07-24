@@ -19,8 +19,7 @@ export function createDefaultOverlaySettings(primaryDisplayId: number): OverlayS
     region: {
       topPercent: 0,
       bottomPercent: 50
-    },
-    clickThrough: true
+    }
   };
 }
 
@@ -57,8 +56,7 @@ export function normalizeOverlaySettings(
     !region ||
     !isNumberInRange(region.topPercent, 0, 100) ||
     !isNumberInRange(region.bottomPercent, 0, 100) ||
-    region.bottomPercent - region.topPercent < 20 ||
-    typeof settings.clickThrough !== "boolean"
+    region.bottomPercent - region.topPercent < 20
   ) {
     return null;
   }
@@ -77,7 +75,6 @@ export function normalizeOverlaySettings(
     region: {
       topPercent: region.topPercent,
       bottomPercent: region.bottomPercent
-    },
-    clickThrough: settings.clickThrough
+    }
   };
 }
