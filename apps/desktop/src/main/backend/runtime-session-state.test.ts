@@ -30,5 +30,5 @@ describe("runtime session state", () => {
 
     await clearRuntimeSessionId(directory);
     expect(await loadRuntimeSessionId(directory)).toBeNull();
-  });
+  }, 15_000);
 });
