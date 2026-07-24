@@ -5,6 +5,8 @@ import type {
 } from '../../shared/contracts'
 
 export const FIXED_BARRAGE_DURATION_MS = 4_000
+export const BARRAGE_LINE_HEIGHT = 1.125
+export const FIXED_BARRAGE_LANE_GAP_PX = 6
 
 export const DEFAULT_OVERLAY_SETTINGS: OverlaySettings = {
   targetDisplayId: 0,
@@ -146,6 +148,18 @@ export function laneBottomPercent(
 
   return 100 - bottomPercent +
     (normalizedLane / normalizedLaneCount) * (bottomPercent - topPercent)
+}
+
+export function fixedBarrageLaneOffsetPx(
+  lane: number,
+  fontSizePx: number
+): number {
+  const normalizedLane = Math.max(0, Math.round(lane))
+  const normalizedFontSize = clamp(fontSizePx, 14, 36)
+  const lanePitch = normalizedFontSize * BARRAGE_LINE_HEIGHT +
+    FIXED_BARRAGE_LANE_GAP_PX
+
+  return normalizedLane * lanePitch
 }
 
 function barrageMode(mode: BarrageEvent['mode'] | undefined): BarrageMode {

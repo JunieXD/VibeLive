@@ -652,15 +652,8 @@
 }
 
 .viewer-avatar {
-  display: grid;
   width: 24px;
   height: 24px;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--avatar-bg);
-  color: var(--avatar-ink);
-  font-size: 10px;
-  font-weight: 800;
 }
 
 .viewer-identity {

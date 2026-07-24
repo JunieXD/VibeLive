@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, RefreshCw, UserMinus, Volume2, VolumeX, X } from 'lucide-react'
 import { SelectDropdown } from '../../components/SelectDropdown'
+import { ViewerAvatar } from '../../components/ViewerAvatar'
 import {
   selectLiveAudienceViewers,
   type LiveAudienceFilter
@@ -124,7 +125,11 @@ export function LiveAudience({
           const pending = pendingViewerId !== null
           return (
             <div className="viewer-row" key={viewer.viewer_instance_id}>
-              <span className="viewer-avatar">{viewer.display_name.charAt(0)}</span>
+              <ViewerAvatar
+                avatarSeed={viewer.avatar_seed}
+                className="viewer-avatar"
+                colorSeed={viewer.color_seed}
+              />
               <span className="viewer-identity">
                 <strong>{viewer.display_name}</strong>
                 <small>{viewer.persona_display_name}</small>

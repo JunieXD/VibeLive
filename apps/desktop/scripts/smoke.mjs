@@ -1340,7 +1340,8 @@ try {
     ['mock-scroll-3', '画面很清楚，继续冲', 'scroll'],
     ['mock-top-1', '顶端固定：本场最佳', 'top'],
     ['mock-top-2', '顶端固定：名场面预定', 'top'],
-    ['mock-bottom-1', '底端固定：感谢观看', 'bottom']
+    ['mock-bottom-1', '底端固定：感谢观看', 'bottom'],
+    ['mock-bottom-2', '底端固定：下次再见', 'bottom']
   ].map(([barrageId, text, mode], index) => ({
     barrageId,
     audienceId: `mock-audience-${index}`,
@@ -1357,7 +1358,7 @@ try {
     }
   }, mockBarrageEvents)
   await restartedOverlayPage.waitForFunction(
-    () => document.querySelectorAll('.overlay-barrage').length === 6
+    () => document.querySelectorAll('.overlay-barrage').length === 7
   )
   await restartedOverlayPage.waitForTimeout(1_200)
   const modeMock = await restartedOverlayPage.evaluate(() => {
@@ -1394,17 +1395,24 @@ try {
         top: topStyle.animationDuration,
         bottom: bottomStyle.animationDuration
       },
-      fixedRects: [top, bottom].map((item) => {
-        const rect = item.getBoundingClientRect()
-        return { top: rect.top, bottom: rect.bottom }
-      }),
+      fixedRects: Object.fromEntries(
+        ['top', 'bottom'].map((mode) => [
+          mode,
+          [...document.querySelectorAll(`.overlay-barrage--${mode}`)]
+            .map((item) => {
+              const rect = item.getBoundingClientRect()
+              return { top: rect.top, bottom: rect.bottom }
+            })
+            .sort((left, right) => left.top - right.top)
+        ])
+      ),
       rootHeight: rootRect.height,
       identityNodeCount: document.querySelectorAll('.overlay-name, .ai-watermark, img').length
     }
   })
   assert.ok(modeMock, 'Three-mode mock styles were not readable.')
-  assert.equal(modeMock.count, 6)
-  assert.deepEqual(modeMock.modes, { scroll: 3, top: 2, bottom: 1 })
+  assert.equal(modeMock.count, 7)
+  assert.deepEqual(modeMock.modes, { scroll: 3, top: 2, bottom: 2 })
   assert.equal(modeMock.fontSize, '25px')
   assert.match(modeMock.fontFamily, /SimHei/)
   assert.ok(['700', 'bold'].includes(modeMock.fontWeight))
@@ -1416,8 +1424,15 @@ try {
     bottom: '4s'
   })
   assert.equal(modeMock.identityNodeCount, 0)
+  for (const rects of Object.values(modeMock.fixedRects)) {
+    assert.equal(rects.length, 2)
+    assert.ok(
+      Math.abs(rects[1].top - rects[0].bottom - 6) <= 1,
+      'Adjacent fixed barrages did not keep the compact six-pixel gap.'
+    )
+  }
   assert.ok(
-    modeMock.fixedRects.every(
+    Object.values(modeMock.fixedRects).flat().every(
       (rect) => rect.top >= -1 && rect.bottom <= modeMock.rootHeight * 0.5 + 1
     ),
     'A fixed barrage escaped the default top-half display region.'

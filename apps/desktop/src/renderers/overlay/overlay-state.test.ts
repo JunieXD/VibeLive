@@ -6,10 +6,13 @@ import type {
 } from '../../shared/contracts'
 import {
   applySettingsToQueue,
+  BARRAGE_LINE_HEIGHT,
   DEFAULT_OVERLAY_SETTINGS,
   displayDurationMs,
   enqueueBarrage,
+  fixedBarrageLaneOffsetPx,
   FIXED_BARRAGE_DURATION_MS,
+  FIXED_BARRAGE_LANE_GAP_PX,
   fitSettingsToViewport,
   laneFor,
   laneBottomPercent,
@@ -63,6 +66,24 @@ describe('overlay state helpers', () => {
     expect(laneTopPercent(0, 1, { topPercent: 12, bottomPercent: 72 })).toBe(12)
     expect(laneBottomPercent(0, 4, { topPercent: 12, bottomPercent: 72 })).toBe(28)
     expect(laneBottomPercent(3, 4, { topPercent: 12, bottomPercent: 72 })).toBe(73)
+  })
+
+  it('packs adjacent fixed barrages by line height instead of spreading them across the region', () => {
+    const fontSizePx = 25
+    const firstOffset = fixedBarrageLaneOffsetPx(0, fontSizePx)
+    const secondOffset = fixedBarrageLaneOffsetPx(1, fontSizePx)
+    const sixthOffset = fixedBarrageLaneOffsetPx(5, fontSizePx)
+    const expectedPitch = fontSizePx * BARRAGE_LINE_HEIGHT +
+      FIXED_BARRAGE_LANE_GAP_PX
+
+    expect(firstOffset).toBe(0)
+    expect(secondOffset).toBe(expectedPitch)
+    expect(sixthOffset - fixedBarrageLaneOffsetPx(4, fontSizePx)).toBe(
+      expectedPitch
+    )
+    expect(secondOffset - fontSizePx * BARRAGE_LINE_HEIGHT).toBe(
+      FIXED_BARRAGE_LANE_GAP_PX
+    )
   })
 
   it('allocates lanes independently for scrolling, top, and bottom barrages', () => {

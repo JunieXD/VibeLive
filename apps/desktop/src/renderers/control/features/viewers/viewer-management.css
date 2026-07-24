@@ -225,22 +225,13 @@
 }
 
 .viewer-management-avatar {
-  display: grid;
   width: 30px;
   height: 30px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--avatar-bg);
-  color: var(--avatar-ink);
-  font-size: 11px;
-  font-weight: 800;
 }
 
 .viewer-management-avatar.large {
   width: 40px;
   height: 40px;
-  font-size: 14px;
 }
 
 .viewer-management-person > span:last-child {

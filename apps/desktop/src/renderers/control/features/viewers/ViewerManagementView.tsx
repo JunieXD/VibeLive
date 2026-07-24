@@ -15,6 +15,7 @@ import {
 import type { BackendViewerSnapshot } from '../../../../shared/contracts'
 import type { SessionStatus } from '../../../../shared/session'
 import { SelectDropdown } from '../../components/SelectDropdown'
+import { ViewerAvatar } from '../../components/ViewerAvatar'
 import type { LiveAudienceProps } from '../live/liveTypes'
 import {
   isViewerMuted,
@@ -267,7 +268,11 @@ export function ViewerManagementView({
                   >
                     <td>
                       <span className="viewer-management-person">
-                        <span className="viewer-management-avatar">{viewer.display_name.charAt(0)}</span>
+                        <ViewerAvatar
+                          avatarSeed={viewer.avatar_seed}
+                          className="viewer-management-avatar"
+                          colorSeed={viewer.color_seed}
+                        />
                         <span><strong>{viewer.display_name}</strong><small>@{viewer.username}</small></span>
                       </span>
                     </td>
@@ -320,7 +325,11 @@ export function ViewerManagementView({
           {selectedViewer ? (
             <>
               <div className="viewer-management-detail-heading">
-                <span className="viewer-management-avatar large">{selectedViewer.display_name.charAt(0)}</span>
+                <ViewerAvatar
+                  avatarSeed={selectedViewer.avatar_seed}
+                  className="viewer-management-avatar large"
+                  colorSeed={selectedViewer.color_seed}
+                />
                 <div><strong>{selectedViewer.display_name}</strong><span>@{selectedViewer.username}</span></div>
               </div>
               <dl>
