@@ -45,6 +45,67 @@ describe("BackendClient startup state", () => {
 });
 
 describe("BackendClient runtime v2", () => {
+  it("treats an already-gone backend session as an idempotent stop", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          detail: {
+            code: "session_not_found",
+            message: "session stale-session is not active"
+          }
+        }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" }
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          session_id: null,
+          state: "idle",
+          started_at_ms: null,
+          updated_at_ms: 20,
+          revision: 3
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+      );
+    const client = new BackendClient({
+      baseUrl: "http://127.0.0.1:9999",
+      localToken: "token"
+    });
+    const bridge = client as unknown as {
+      session: {
+        sessionId: string;
+        state: "running";
+        startedAtMs: number;
+        updatedAtMs: number;
+        revision: number;
+      };
+    };
+    bridge.session = {
+      sessionId: "stale-session",
+      state: "running",
+      startedAtMs: 1,
+      updatedAtMs: 2,
+      revision: 2
+    };
+
+    await expect(client.stopSession()).resolves.toMatchObject({
+      sessionId: null,
+      state: "idle"
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "http://127.0.0.1:9999/sessions/stale-session/stop",
+      "http://127.0.0.1:9999/sessions/current"
+    ]);
+    expect(client.currentStatus().session).toMatchObject({
+      sessionId: null,
+      state: "idle"
+    });
+    fetchMock.mockRestore();
+  });
+
   it("sends structured Viewer and Persona targets without embedding them in text", async () => {
     const client = new BackendClient({ localToken: "token" });
     const sendJson = vi.fn();

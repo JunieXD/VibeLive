@@ -41,6 +41,7 @@ const CONNECT_TIMEOUT_MS = 8_000;
 const PROVIDER_PROBE_TIMEOUT_MS = 130_000;
 // Starting a runtime repeats the model probe and adds a final-ASR check (35 seconds).
 const RUNTIME_SESSION_START_TIMEOUT_MS = 180_000;
+const PROVIDER_OPERATION_TIMEOUT_MS = 180_000;
 
 type RequestOptions = {
   timeoutMs?: number;
@@ -261,7 +262,8 @@ export class BackendClient {
         canonical_runtime_spec: compiled.spec,
         client_config_hash: compiled.configHash,
         provider_candidate: providerChanged ? providerCandidate : undefined
-      }
+      },
+      { timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS }
     );
     this.rememberRuntime(runtime);
     return runtime;
@@ -298,7 +300,8 @@ export class BackendClient {
         audience_contract_version: 1,
         provider_candidate:
           providerChanged && providerCandidateMatchesTarget ? providerCandidate : undefined
-      }
+      },
+      { timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS }
     );
     this.rememberRuntime(runtime);
     return runtime;
@@ -307,7 +310,9 @@ export class BackendClient {
   async recoverRuntime(sessionId: string): Promise<RuntimeQuerySnapshot> {
     const runtime = await this.request<RuntimeQuerySnapshot>(
       `/runtime/sessions/${encodeURIComponent(sessionId)}/recover`,
-      "POST"
+      "POST",
+      undefined,
+      { timeoutMs: PROVIDER_OPERATION_TIMEOUT_MS }
     );
     this.rememberRuntime(runtime);
     this.recoverableRuntimeSessionId = null;
@@ -349,7 +354,18 @@ export class BackendClient {
   }
 
   async stopSession(): Promise<BackendSessionSnapshot> {
-    const session = await this.sessionCommand("stop");
+    let session: BackendSessionSnapshot;
+    try {
+      session = await this.sessionCommand("stop");
+    } catch (error) {
+      if (!(error instanceof BackendClientError) || error.code !== "session_not_found") {
+        throw error;
+      }
+      session = this.applySession(
+        await this.request<SessionSnapshot>("/sessions/current", "GET")
+      );
+      if (session.state !== "idle") throw error;
+    }
     this.runtime = null;
     this.runtimeProvidersByRevision.clear();
     this.recoverableRuntimeSessionId = null;
