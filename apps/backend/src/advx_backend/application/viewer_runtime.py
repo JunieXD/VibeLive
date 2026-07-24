@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import unicodedata
 from collections import deque
 from dataclasses import dataclass, field
@@ -24,7 +25,10 @@ from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation_wave import ObservationWave, ViewerVisualInputMode
 from advx_backend.domain.viewer import ViewerInstance, ViewerLifecycleState
-from advx_backend.providers.model.viewer_runtime import ViewerRuntimeProviderBlockedError
+from advx_backend.providers.model.viewer_runtime import (
+    ViewerRuntimeProviderBlockedError,
+    ViewerRuntimeProviderError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -562,11 +566,17 @@ class ViewerRuntime:
                 validation_codes=("provider_blocked",),
             )
             return "failed"
-        except Exception:
-            logger.exception(
-                "Viewer provider failed for request %s",
-                request.generation_request_id,
-            )
+        except Exception as error:
+            if isinstance(error, ViewerRuntimeProviderError) and error.status_code == 429:
+                logger.warning(
+                    "Viewer provider rate limited for request %s after retry",
+                    request.generation_request_id,
+                )
+            else:
+                logger.exception(
+                    "Viewer provider failed for request %s",
+                    request.generation_request_id,
+                )
             item.completed_at_ms = self._clock.now_ms()
             self._record_trace(
                 item,
@@ -775,7 +785,7 @@ class ViewerRuntime:
                 raise
             if not self._is_transient(error) or self._expired(request):
                 raise
-            backoff_seconds = 0.05
+            backoff_seconds = self._retry_delay_seconds(error)
             minimum_attempt_seconds = 0.05
             remaining_seconds = self._remaining_attempt_seconds(
                 request,
@@ -797,6 +807,18 @@ class ViewerRuntime:
                 request,
                 timeout_seconds=retry_budget,
             )
+
+    @staticmethod
+    def _retry_delay_seconds(error: Exception) -> float:
+        retry_after_seconds = getattr(error, "retry_after_seconds", None)
+        if (
+            isinstance(retry_after_seconds, (int, float))
+            and not isinstance(retry_after_seconds, bool)
+            and math.isfinite(retry_after_seconds)
+            and retry_after_seconds >= 0
+        ):
+            return float(retry_after_seconds)
+        return 0.5
 
     async def _provider_attempt(
         self,

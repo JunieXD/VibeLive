@@ -3,6 +3,8 @@ import base64
 import json
 import math
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Final, cast
 from urllib.parse import quote, urlsplit
 
@@ -42,8 +44,9 @@ class OpenAICompatibleTransportError(OpenAICompatibleProviderError):
 class OpenAICompatibleHttpError(OpenAICompatibleProviderError):
     """Raised when the upstream endpoint returns a non-success status."""
 
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, *, retry_after_seconds: float | None = None) -> None:
         self.status_code = status_code
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(f"OpenAI-compatible provider returned HTTP {status_code}")
 
 
@@ -437,8 +440,32 @@ class OpenAICompatibleProvider:
             raise OpenAICompatibleTransportError("OpenAI-compatible transport failed") from None
 
         if not response.is_success:
-            raise OpenAICompatibleHttpError(response.status_code)
+            raise OpenAICompatibleHttpError(
+                response.status_code,
+                retry_after_seconds=self._retry_after_seconds(response.headers.get("Retry-After")),
+            )
         return response
+
+    @staticmethod
+    def _retry_after_seconds(value: str | None) -> float | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            seconds = float(value)
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(value)
+            except (TypeError, ValueError, IndexError, OverflowError):
+                return None
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=UTC)
+            seconds = (retry_at - datetime.now(UTC)).total_seconds()
+        if not math.isfinite(seconds) or seconds < 0:
+            return None
+        return seconds
 
     async def _probe_chat(
         self,

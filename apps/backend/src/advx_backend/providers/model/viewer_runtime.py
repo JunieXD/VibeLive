@@ -46,9 +46,11 @@ class ViewerRuntimeProviderError(RuntimeError):
         *,
         status_code: int | None = None,
         retryable: bool = False,
+        retry_after_seconds: float | None = None,
     ) -> None:
         self.status_code = status_code
         self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
         super().__init__(message)
 
 
@@ -461,6 +463,11 @@ class OpenAICompatibleViewerRuntimeProvider:
                 str(error),
                 status_code=status_code,
                 retryable=retryable,
+                retry_after_seconds=(
+                    error.retry_after_seconds
+                    if isinstance(error, OpenAICompatibleHttpError)
+                    else None
+                ),
             ) from error
 
     async def _director_content(
