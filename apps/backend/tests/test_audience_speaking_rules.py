@@ -351,22 +351,36 @@ def _frame(index: int, *, change_score: float) -> FrameBundleItem:
     )
 
 
-def test_smart_frame_timeline_keeps_anchors_and_caps_at_sixty() -> None:
-    frames = tuple(
-        _frame(index, change_score=0.7 if index in {15, 45, 75, 105} else 0.01)
-        for index in range(120)
+def test_change_peaks_collapses_consecutive_similar_frames_to_their_latest_frames() -> None:
+    frames = (
+        _frame(0, change_score=0.0),
+        _frame(1, change_score=0.01),
+        _frame(2, change_score=0.01),
+        _frame(3, change_score=0.25),
+        _frame(4, change_score=0.01),
+        _frame(5, change_score=0.01),
     )
     selected = select_frame_bundle(
         frames=frames,
-        settings=FrameBundleSettings(frame_bundle_size=60, frame_window_ms=120_000),
-        now_ms=119_000,
+        settings=FrameBundleSettings(frame_bundle_size=15, frame_window_ms=120_000),
+        now_ms=5_000,
     )
 
-    selected_times = {frame.captured_at_ms for frame in selected}
-    assert len(selected) <= 60
-    assert selected == tuple(sorted(selected, key=lambda frame: frame.captured_at_ms))
-    assert {0, 5_000, 10_000, 15_000}.issubset(selected_times)
-    assert {15_000, 45_000, 75_000, 105_000}.issubset(selected_times)
+    assert [frame.frame_id for frame in selected] == ["frame-2", "frame-5"]
+
+
+def test_change_peaks_caps_distinct_frame_groups_without_refilling_similar_frames() -> None:
+    frames = tuple(
+        _frame(index, change_score=0.25 if index else 0.0)
+        for index in range(6)
+    )
+    selected = select_frame_bundle(
+        frames=frames,
+        settings=FrameBundleSettings(frame_bundle_size=3, frame_window_ms=120_000),
+        now_ms=5_000,
+    )
+
+    assert [frame.frame_id for frame in selected] == ["frame-0", "frame-2", "frame-5"]
 
 
 def test_autonomous_wave_accepts_evidence_for_every_frame_in_a_maximum_bundle() -> None:
@@ -490,7 +504,7 @@ def _request() -> ViewerGenerationRequest:
         visual_input_mode=ViewerVisualInputMode.DIRECT_FRAMES,
         frame_bundle=FrameBundle(
             bundle_id="bundle",
-            settings=FrameBundleSettings(frame_bundle_size=60),
+            settings=FrameBundleSettings(frame_bundle_size=15),
             frames=[frame],
         ),
         viewer_private_state=ViewerPrivateState(),

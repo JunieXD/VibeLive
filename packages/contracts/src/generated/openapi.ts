@@ -1169,7 +1169,7 @@ export interface components {
         FrameBundleSettings: {
             /**
              * Frame Bundle Size
-             * @default 60
+             * @default 15
              */
             frame_bundle_size: number;
             /**

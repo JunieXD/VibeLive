@@ -1411,7 +1411,7 @@
       },
       "settings": {
         "frame_bundle": {
-          "frame_bundle_size": 60,
+          "frame_bundle_size": 15,
           "frame_window_ms": 120000,
           "frame_selection_strategy": "change_peaks",
           "frame_max_dimension": 1280,
@@ -1430,7 +1430,7 @@
         "max_consecutive_ambient_waves": 1
       }
     },
-    "config_hash": "7233ac151c411e7c71aa3d222f75bde5f8154e9d5dc8e7baa6dda8a6a400800d",
+    "config_hash": "01d3711b61bf8d2fb5d0b03020fed7d4be440e4679ca8e025263a9afc03c9459",
     "created_at_ms": 2000,
     "events": [
       {
@@ -3007,7 +3007,7 @@
     },
     "settings": {
       "frame_bundle": {
-        "frame_bundle_size": 60,
+        "frame_bundle_size": 15,
         "frame_window_ms": 120000,
         "frame_selection_strategy": "change_peaks",
         "frame_max_dimension": 1280,

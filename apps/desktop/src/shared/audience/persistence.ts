@@ -316,7 +316,13 @@ function parseVisualSettings(
   )) {
     issues.push(`${path}.frameSelectionStrategy is invalid`)
   }
-  const frameBundleSize = boundedInteger(value.frameBundleSize, `${path}.frameBundleSize`, 1, 60, issues)
+  const frameBundleSize = legacyFrameBundleSize(value.frameBundleSize) ?? boundedInteger(
+    value.frameBundleSize,
+    `${path}.frameBundleSize`,
+    1,
+    15,
+    issues
+  )
   const frameWindowMs = boundedInteger(value.frameWindowMs, `${path}.frameWindowMs`, 1, 300_000, issues)
   const frameMaxDimension = boundedInteger(
     value.frameMaxDimension,
@@ -337,6 +343,13 @@ function parseVisualSettings(
     frameMaxDimension,
     frameQuality: value.frameQuality as number
   }
+}
+
+function legacyFrameBundleSize(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 15 || value > 60) {
+    return null
+  }
+  return 15
 }
 
 function validateReferences(

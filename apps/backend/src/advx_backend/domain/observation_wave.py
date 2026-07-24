@@ -2,7 +2,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-MAX_FRAME_BUNDLE_SIZE = 60
+MAX_FRAME_BUNDLE_SIZE = 15
 
 
 class ObservationDomainModel(BaseModel):

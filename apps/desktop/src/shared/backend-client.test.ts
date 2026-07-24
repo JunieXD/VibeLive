@@ -30,7 +30,7 @@ describe('canonical desktop runtime spec', () => {
       },
       settings: {
         frame_bundle: {
-          frame_bundle_size: 60,
+          frame_bundle_size: 15,
           frame_selection_strategy: 'change_peaks',
           frame_quality: 82
         },

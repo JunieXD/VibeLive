@@ -192,7 +192,7 @@ describe('workspace persistence', () => {
       .toEqual([24, 28, 16, 14, 24, 14])
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
       viewerVisualInputMode: 'direct_frames',
-      frameBundleSize: 60,
+      frameBundleSize: 15,
       frameSelectionStrategy: 'change_peaks'
     })
   })
@@ -243,9 +243,22 @@ describe('workspace persistence', () => {
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
-      frameBundleSize: 60,
+      frameBundleSize: 15,
       frameWindowMs: 120_000
     })
+  })
+
+  it('caps former frame bundle settings at fifteen', () => {
+    const workspace = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    workspace.modeState.modes[0].visualSettings = {
+      ...workspace.modeState.modes[0].visualSettings,
+      frameBundleSize: 60
+    }
+
+    const parsed = parseAudienceWorkspaceState(workspace)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.workspace.modeState.modes[0].visualSettings.frameBundleSize).toBe(15)
   })
 
   it('strictly hydrates a JSON round trip and rejects damaged references', () => {
