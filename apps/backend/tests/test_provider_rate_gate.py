@@ -61,6 +61,13 @@ def _policy(
     )
 
 
+def test_default_provider_rate_policy() -> None:
+    policy = ProviderRatePolicy()
+
+    assert policy.max_in_flight == 12
+    assert policy.min_start_interval_seconds == 0.1
+
+
 @pytest.mark.asyncio
 async def test_twenty_eight_requests_complete_with_four_provider_calls_in_flight() -> None:
     gate = ProviderRateGate(_policy(max_in_flight=4))
