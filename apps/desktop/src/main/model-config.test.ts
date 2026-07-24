@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ModelConfig } from "../shared/contracts";
 import {
+  asrProviderChanged,
   createRuntimeProviderCandidate,
   configureProviderForSession,
   isProviderPipelineAlreadyConfigured,
@@ -20,6 +21,8 @@ const storedConfig: ModelConfig = {
   memoryModel: "",
   visualSummaryModel: "",
   apiKey: "stored-model-key",
+  asrBaseUrl: "https://speech.example/v1",
+  asrModel: "stored-asr-model",
   asrApiKey: "stored-asr-key"
 };
 
@@ -82,6 +85,8 @@ describe("model configuration", () => {
           memoryModel: " ",
           visualSummaryModel: "summary-model",
           apiKey: "",
+          asrBaseUrl: " https://new-speech.example/v1 ",
+          asrModel: " new-asr-model ",
           asrApiKey: "   "
         },
         storedConfig
@@ -94,7 +99,26 @@ describe("model configuration", () => {
       memoryModel: "",
       visualSummaryModel: "summary-model",
       apiKey: "stored-model-key",
+      asrBaseUrl: "https://new-speech.example/v1",
+      asrModel: "new-asr-model",
       asrApiKey: "stored-asr-key"
+    });
+  });
+
+  it("migrates missing ASR endpoint fields from legacy renderer payloads", () => {
+    const legacyInput = {
+      ...storedConfig,
+      asrBaseUrl: undefined,
+      asrModel: undefined
+    } as unknown as ModelConfig;
+
+    expect(resolveModelConfig(legacyInput, storedConfig)).toMatchObject({
+      asrBaseUrl: "https://speech.example/v1",
+      asrModel: "stored-asr-model"
+    });
+    expect(resolveModelConfig(legacyInput, null)).toMatchObject({
+      asrBaseUrl: "https://api.stepfun.com/v1",
+      asrModel: "stepaudio-2.5-asr"
     });
   });
 
@@ -109,6 +133,8 @@ describe("model configuration", () => {
           memoryModel: "",
           visualSummaryModel: "",
           apiKey: " new-model-key ",
+          asrBaseUrl: "https://new-speech.example/v1",
+          asrModel: "new-asr-model",
           asrApiKey: ""
         },
         storedConfig
@@ -130,11 +156,13 @@ describe("model configuration", () => {
           memoryModel: "",
           visualSummaryModel: "",
           apiKey: "",
+          asrBaseUrl: "",
+          asrModel: "",
           asrApiKey: ""
         },
         null
       )
-    ).toThrow("模型地址、模型名称、模型密钥和语音识别密钥均为必填项。");
+    ).toThrow("模型与语音识别的地址、模型名称和密钥均为必填项。");
   });
 
   it("inherits blank role overrides from the default model", () => {
@@ -189,7 +217,12 @@ describe("model configuration", () => {
   it("does not revision the profile for ASR-only changes or an explicit profile change", () => {
     expect(
       reviseProviderProfileForActiveSession(
-        { ...storedConfig, asrApiKey: "new-asr-key" },
+        {
+          ...storedConfig,
+          asrBaseUrl: "https://new-speech.example/v1",
+          asrModel: "new-asr-model",
+          asrApiKey: "new-asr-key"
+        },
         storedConfig,
         true,
         "12345678"
@@ -203,6 +236,18 @@ describe("model configuration", () => {
         "12345678"
       ).providerProfileId
     ).toBe("profile-b");
+    expect(
+      modelProviderChanged(
+        { ...storedConfig, asrBaseUrl: "https://new-speech.example/v1" },
+        storedConfig
+      )
+    ).toBe(false);
+    expect(
+      asrProviderChanged(
+        { ...storedConfig, asrBaseUrl: "https://new-speech.example/v1" },
+        storedConfig
+      )
+    ).toBe(true);
   });
 
   it("restarts only to replace a different provider for the next session", async () => {

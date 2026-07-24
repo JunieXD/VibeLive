@@ -83,7 +83,7 @@ def create_configuration_router(
             ProviderCapabilityCheck(
                 capability="asr_adapter",
                 status=CapabilityProbeStatus.SKIPPED.value,
-                model_id="stepaudio-2.5-asr",
+                model_id=probe_request.asr_model,
                 error_code="requires_final_audio",
             )
         )
@@ -164,6 +164,7 @@ def _status(
         viewer_model=role_models["viewer"],
         memory_model=role_models["memory"],
         visual_summary_model=role_models["visual_summary"],
+        asr_base_url=config.asr_base_url,
         asr_model=config.asr_model,
     )
 
@@ -188,6 +189,8 @@ def _active_request(
         model_base_url=config.model_base_url,
         model_name=config.model_name,
         model_api_key=config.model_api_key,
+        asr_base_url=config.asr_base_url,
+        asr_model=config.asr_model,
         asr_api_key=config.asr_api_key,
     )
 

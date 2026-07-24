@@ -1672,6 +1672,16 @@ export interface components {
             visual_summary_model?: string | null;
             /** Model Api Key */
             model_api_key: string;
+            /**
+             * Asr Base Url
+             * @default https://api.stepfun.com/v1
+             */
+            asr_base_url: string;
+            /**
+             * Asr Model
+             * @default stepaudio-2.5-asr
+             */
+            asr_model: string;
             /** Asr Api Key */
             asr_api_key: string;
         };
@@ -1691,6 +1701,8 @@ export interface components {
             memory_model?: string | null;
             /** Visual Summary Model */
             visual_summary_model?: string | null;
+            /** Asr Base Url */
+            asr_base_url?: string | null;
             /** Asr Model */
             asr_model?: string | null;
         };

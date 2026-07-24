@@ -481,6 +481,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             memoryModel={modelConfig.memoryModel}
             visualSummaryModel={modelConfig.visualSummaryModel}
             apiKey={modelConfig.apiKey}
+            asrBaseUrl={modelConfig.asrBaseUrl}
+            asrModel={modelConfig.asrModel}
             asrApiKey={modelConfig.asrApiKey}
             modelConfigStatus={modelConfig.status}
             modelConfigLoading={modelConfig.loading}
@@ -497,6 +499,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             onMemoryModelChange={modelConfig.setMemoryModel}
             onVisualSummaryModelChange={modelConfig.setVisualSummaryModel}
             onApiKeyChange={modelConfig.setApiKey}
+            onAsrBaseUrlChange={modelConfig.setAsrBaseUrl}
+            onAsrModelChange={modelConfig.setAsrModel}
             onAsrApiKeyChange={modelConfig.setAsrApiKey}
             onSaveModelConfig={() => void modelConfig.save()}
             onOverlaySettingsChange={overlay.updateSettings}

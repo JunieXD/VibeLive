@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from advx_backend.bootstrap import build_runtime
+from advx_backend.contracts.configuration import ProviderConfigurationRequest
 from advx_backend.contracts.protocol import PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER
 from advx_backend.main import create_app
 from advx_backend.providers.model.base import (
@@ -21,13 +22,32 @@ def headers() -> dict[str, str]:
     }
 
 
-def provider_payload(*, model_name: str = "test-model") -> dict[str, str]:
+def provider_payload(
+    *,
+    model_name: str = "test-model",
+    asr_base_url: str = "https://speech.example/v1",
+    asr_model: str = "custom-asr",
+) -> dict[str, str]:
     return {
         "model_base_url": "https://models.example/v1",
         "model_name": model_name,
         "model_api_key": "private-model-key",
+        "asr_base_url": asr_base_url,
+        "asr_model": asr_model,
         "asr_api_key": "private-asr-key",
     }
+
+
+def test_provider_configuration_defaults_keep_legacy_clients_compatible() -> None:
+    request = ProviderConfigurationRequest(
+        model_base_url="https://models.example/v1",
+        model_name="test-model",
+        model_api_key="private-model-key",
+        asr_api_key="private-asr-key",
+    )
+
+    assert request.asr_base_url == "https://api.stepfun.com/v1"
+    assert request.asr_model == "stepaudio-2.5-asr"
 
 
 def test_provider_configuration_is_authenticated_idempotent_and_secret_safe(
@@ -49,6 +69,7 @@ def test_provider_configuration_is_authenticated_idempotent_and_secret_safe(
             headers=headers(),
             json=provider_payload(),
         )
+        active_external_config = runtime.external_provider_config
 
     assert missing_auth.status_code == 401
     assert initial.json() == {
@@ -59,6 +80,7 @@ def test_provider_configuration_is_authenticated_idempotent_and_secret_safe(
         "viewer_model": None,
         "memory_model": None,
         "visual_summary_model": None,
+        "asr_base_url": None,
         "asr_model": None,
     }
     assert configured.status_code == 200
@@ -70,9 +92,13 @@ def test_provider_configuration_is_authenticated_idempotent_and_secret_safe(
         "viewer_model": "test-model",
         "memory_model": "test-model",
         "visual_summary_model": "test-model",
-        "asr_model": "stepaudio-2.5-asr",
+        "asr_base_url": "https://speech.example/v1",
+        "asr_model": "custom-asr",
     }
     assert configured_again.json() == configured.json()
+    assert active_external_config is not None
+    assert active_external_config.asr_base_url == "https://speech.example/v1"
+    assert active_external_config.asr_model == "custom-asr"
     assert "private-model-key" not in repr(runtime)
     assert "private-asr-key" not in repr(runtime)
 
@@ -176,7 +202,7 @@ def test_provider_role_models_and_redacted_capability_endpoints(
     assert probe.json()["checks"][-1] == {
         "capability": "asr_adapter",
         "status": "skipped",
-        "model_id": "stepaudio-2.5-asr",
+        "model_id": "custom-asr",
         "error_code": "requires_final_audio",
         "http_status": None,
     }

@@ -252,6 +252,8 @@ class RuntimeProviderController:
             )
         return ProviderConfigurationRequest(
             **request.model_dump(),
+            asr_base_url=active.configuration.asr_base_url,
+            asr_model=active.configuration.asr_model,
             asr_api_key=active.configuration.asr_api_key,
         )
 

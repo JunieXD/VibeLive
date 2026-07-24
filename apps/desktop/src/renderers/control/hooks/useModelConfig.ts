@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  DEFAULT_ASR_BASE_URL,
+  DEFAULT_ASR_MODEL
+} from '../../../shared/contracts'
 import type {
   BackendConnectionState,
   BackendRuntimeStatus,
@@ -29,6 +33,8 @@ export function getModelConfigNotice(result: SaveModelConfigResult): string {
 export function canSaveModelConfig(input: {
   baseUrl: string
   model: string
+  asrBaseUrl: string
+  asrModel: string
   apiKey: string
   asrApiKey: string
   status: ModelConfigStatus | null
@@ -45,6 +51,8 @@ export function canSaveModelConfig(input: {
     input.backendConnection !== 'failed' &&
     input.baseUrl.trim().length > 0 &&
     input.model.trim().length > 0 &&
+    input.asrBaseUrl.trim().length > 0 &&
+    input.asrModel.trim().length > 0 &&
     (input.apiKey.trim().length > 0 || input.status?.modelApiKeyStored === true) &&
     (input.asrApiKey.trim().length > 0 || input.status?.asrApiKeyStored === true)
   )
@@ -65,6 +73,8 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
   const [memoryModel, setMemoryModel] = useState('')
   const [visualSummaryModel, setVisualSummaryModel] = useState('')
   const [apiKey, setApiKey] = useState('')
+  const [asrBaseUrl, setAsrBaseUrl] = useState(DEFAULT_ASR_BASE_URL)
+  const [asrModel, setAsrModel] = useState(DEFAULT_ASR_MODEL)
   const [asrApiKey, setAsrApiKey] = useState('')
   const [status, setStatus] = useState<ModelConfigStatus | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -85,6 +95,8 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
         setViewerModel(nextStatus.viewerModel ?? '')
         setMemoryModel(nextStatus.memoryModel ?? '')
         setVisualSummaryModel(nextStatus.visualSummaryModel ?? '')
+        setAsrBaseUrl(nextStatus.asrBaseUrl ?? DEFAULT_ASR_BASE_URL)
+        setAsrModel(nextStatus.asrModel ?? DEFAULT_ASR_MODEL)
       })
       .catch(() => undefined)
       .finally(() => {
@@ -100,6 +112,8 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
       canSaveModelConfig({
         baseUrl,
         model,
+        asrBaseUrl,
+        asrModel,
         apiKey,
         asrApiKey,
         status,
@@ -109,7 +123,9 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
       }),
     [
       apiKey,
+      asrBaseUrl,
       asrApiKey,
+      asrModel,
       baseUrl,
       loading,
       model,
@@ -134,6 +150,8 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
         memoryModel,
         visualSummaryModel,
         apiKey,
+        asrBaseUrl,
+        asrModel,
         asrApiKey
       })
       setApiKey('')
@@ -145,6 +163,8 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
         viewerModel: viewerModel.trim() || null,
         memoryModel: memoryModel.trim() || null,
         visualSummaryModel: visualSummaryModel.trim() || null,
+        asrBaseUrl: asrBaseUrl.trim(),
+        asrModel: asrModel.trim(),
         modelApiKeyStored: result.securelyStored,
         asrApiKeyStored: result.securelyStored
       })
@@ -160,7 +180,9 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
     }
   }, [
     apiKey,
+    asrBaseUrl,
     asrApiKey,
+    asrModel,
     baseUrl,
     canSave,
     memoryModel,
@@ -186,6 +208,10 @@ export function useModelConfig(options: UseModelConfigOptions = {}) {
     setVisualSummaryModel,
     apiKey,
     setApiKey,
+    asrBaseUrl,
+    setAsrBaseUrl,
+    asrModel,
+    setAsrModel,
     asrApiKey,
     setAsrApiKey,
     status,

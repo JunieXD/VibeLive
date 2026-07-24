@@ -198,6 +198,8 @@ export class BackendClient {
       memory_model: config.memoryModel || undefined,
       visual_summary_model: config.visualSummaryModel || undefined,
       model_api_key: config.apiKey,
+      asr_base_url: config.asrBaseUrl,
+      asr_model: config.asrModel,
       asr_api_key: config.asrApiKey
     });
     this.providersConfigured = true;

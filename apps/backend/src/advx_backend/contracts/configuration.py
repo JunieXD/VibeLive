@@ -15,6 +15,12 @@ class ProviderConfigurationRequest(BaseModel):
     memory_model: str | None = Field(default=None, min_length=1, max_length=256)
     visual_summary_model: str | None = Field(default=None, min_length=1, max_length=256)
     model_api_key: str = Field(min_length=1, max_length=4_096, repr=False)
+    asr_base_url: str = Field(
+        default="https://api.stepfun.com/v1",
+        min_length=1,
+        max_length=2_048,
+    )
+    asr_model: str = Field(default="stepaudio-2.5-asr", min_length=1, max_length=256)
     asr_api_key: str = Field(min_length=1, max_length=4_096, repr=False)
 
     @field_validator(
@@ -25,6 +31,8 @@ class ProviderConfigurationRequest(BaseModel):
         "memory_model",
         "visual_summary_model",
         "model_api_key",
+        "asr_base_url",
+        "asr_model",
         "asr_api_key",
         mode="before",
     )
@@ -81,6 +89,7 @@ class ProviderConfigurationStatus(BaseModel):
     viewer_model: str | None = None
     memory_model: str | None = None
     visual_summary_model: str | None = None
+    asr_base_url: str | None = None
     asr_model: str | None = None
 
 

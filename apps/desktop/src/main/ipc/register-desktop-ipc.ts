@@ -18,20 +18,22 @@ import {
   type LegacyLocalMeme,
   type Persona
 } from "../../shared/audience";
-import type {
-  AudioSource,
-  BackendRuntimeStatus,
-  BarrageEvent,
-  ColorTheme,
-  DesktopSource,
-  MediaAccessSnapshot,
-  MediaAccessStatus,
-  ModelConfig,
-  ModelConfigStatus,
-  OverlaySettings,
-  RuntimeRoomIdentity,
-  SaveAudienceWorkspaceResult,
-  SaveModelConfigResult
+import {
+  DEFAULT_ASR_BASE_URL,
+  DEFAULT_ASR_MODEL,
+  type AudioSource,
+  type BackendRuntimeStatus,
+  type BarrageEvent,
+  type ColorTheme,
+  type DesktopSource,
+  type MediaAccessSnapshot,
+  type MediaAccessStatus,
+  type ModelConfig,
+  type ModelConfigStatus,
+  type OverlaySettings,
+  type RuntimeRoomIdentity,
+  type SaveAudienceWorkspaceResult,
+  type SaveModelConfigResult
 } from "../../shared/contracts";
 import {
   compileCanonicalRuntimeSpec,
@@ -47,6 +49,7 @@ import {
   saveRuntimeSessionId
 } from "../backend/runtime-session-state";
 import {
+  asrProviderChanged,
   configureProviderForSession,
   createRuntimeProviderCandidate,
   mergeProviderProfileSnapshots,
@@ -139,8 +142,7 @@ async function saveModelConfig(
     randomUUID()
   );
   const runtimeApplyRequired = sessionActive && modelProviderChanged(normalized, stored);
-  const nextSessionRequired =
-    sessionActive && (stored === null || normalized.asrApiKey !== stored.asrApiKey);
+  const nextSessionRequired = sessionActive && asrProviderChanged(normalized, stored);
 
   const configDirectory = app.getPath("userData");
   await mkdir(configDirectory, { recursive: true });
@@ -161,6 +163,8 @@ async function saveModelConfig(
     storedConfig.viewerModel = normalized.viewerModel;
     storedConfig.memoryModel = normalized.memoryModel;
     storedConfig.visualSummaryModel = normalized.visualSummaryModel;
+    storedConfig.asrBaseUrl = normalized.asrBaseUrl;
+    storedConfig.asrModel = normalized.asrModel;
   }
 
   await writeFile(
@@ -202,6 +206,14 @@ function parseModelConfigRecord(config: Record<string, unknown>): ModelConfig | 
     visualSummaryModel:
       typeof config.visualSummaryModel === "string" ? config.visualSummaryModel : "",
     apiKey: config.apiKey,
+    asrBaseUrl:
+      typeof config.asrBaseUrl === "string" && config.asrBaseUrl.trim()
+        ? config.asrBaseUrl
+        : DEFAULT_ASR_BASE_URL,
+    asrModel:
+      typeof config.asrModel === "string" && config.asrModel.trim()
+        ? config.asrModel
+        : DEFAULT_ASR_MODEL,
     asrApiKey: config.asrApiKey
   };
 }
@@ -268,6 +280,14 @@ async function loadStoredModelConfigStore(): Promise<ModelConfigStore | null> {
       memoryModel: "",
       visualSummaryModel: "",
       apiKey: safeStorage.decryptString(Buffer.from(encryptedModelApiKey, "base64")),
+      asrBaseUrl:
+        typeof parsed.asrBaseUrl === "string" && parsed.asrBaseUrl.trim()
+          ? parsed.asrBaseUrl
+          : DEFAULT_ASR_BASE_URL,
+      asrModel:
+        typeof parsed.asrModel === "string" && parsed.asrModel.trim()
+          ? parsed.asrModel
+          : DEFAULT_ASR_MODEL,
       asrApiKey: safeStorage.decryptString(Buffer.from(parsed.encryptedAsrApiKey, "base64"))
     };
     return { current, profiles: [current] };
@@ -300,6 +320,8 @@ async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
       viewerModel: null,
       memoryModel: null,
       visualSummaryModel: null,
+      asrBaseUrl: null,
+      asrModel: null,
       modelApiKeyStored: false,
       asrApiKeyStored: false
     };
@@ -311,6 +333,8 @@ async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
     viewerModel: config.viewerModel || null,
     memoryModel: config.memoryModel || null,
     visualSummaryModel: config.visualSummaryModel || null,
+    asrBaseUrl: config.asrBaseUrl,
+    asrModel: config.asrModel,
     modelApiKeyStored: true,
     asrApiKeyStored: true
   };

@@ -24,6 +24,8 @@ export type SettingsViewProps = {
   memoryModel: string
   visualSummaryModel: string
   apiKey: string
+  asrBaseUrl: string
+  asrModel: string
   asrApiKey: string
   modelConfigStatus: ModelConfigStatus | null
   modelConfigLoading: boolean
@@ -40,6 +42,8 @@ export type SettingsViewProps = {
   onMemoryModelChange: (value: string) => void
   onVisualSummaryModelChange: (value: string) => void
   onApiKeyChange: (value: string) => void
+  onAsrBaseUrlChange: (value: string) => void
+  onAsrModelChange: (value: string) => void
   onAsrApiKeyChange: (value: string) => void
   onSaveModelConfig: () => void
   onOverlaySettingsChange: (settings: OverlaySettings) => void
@@ -150,6 +154,8 @@ export function SettingsView({
   memoryModel,
   visualSummaryModel,
   apiKey,
+  asrBaseUrl,
+  asrModel,
   asrApiKey,
   modelConfigStatus,
   modelConfigLoading,
@@ -166,6 +172,8 @@ export function SettingsView({
   onMemoryModelChange,
   onVisualSummaryModelChange,
   onApiKeyChange,
+  onAsrBaseUrlChange,
+  onAsrModelChange,
   onAsrApiKeyChange,
   onSaveModelConfig,
   onOverlaySettingsChange,
@@ -265,6 +273,24 @@ export function SettingsView({
               }
             />
           </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className={labelClassName}>
+              ASR 服务地址
+              <input
+                className={controlClassName}
+                value={asrBaseUrl}
+                onChange={(event) => onAsrBaseUrlChange(event.target.value)}
+              />
+            </label>
+            <label className={labelClassName}>
+              ASR 模型
+              <input
+                className={controlClassName}
+                value={asrModel}
+                onChange={(event) => onAsrModelChange(event.target.value)}
+              />
+            </label>
+          </div>
           <label className={labelClassName}>
             <span className="flex items-center justify-between gap-3">
               StepFun ASR API Key

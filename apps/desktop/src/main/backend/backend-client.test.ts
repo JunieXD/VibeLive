@@ -428,6 +428,8 @@ describe("BackendClient runtime v2", () => {
       memoryModel: "memory-model",
       visualSummaryModel: "",
       apiKey: "model-key",
+      asrBaseUrl: "https://speech.example.com/v1",
+      asrModel: "speech-model",
       asrApiKey: "asr-key"
     });
 
@@ -438,6 +440,8 @@ describe("BackendClient runtime v2", () => {
       model_name: "default-model",
       memory_model: "memory-model",
       model_api_key: "model-key",
+      asr_base_url: "https://speech.example.com/v1",
+      asr_model: "speech-model",
       asr_api_key: "asr-key"
     });
     fetchMock.mockRestore();

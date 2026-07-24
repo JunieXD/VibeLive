@@ -88,6 +88,8 @@ DATA_DIRECTORY_ENV = "ADVX_DATA_DIR"
 MODEL_BASE_URL_ENV = "ADVX_MODEL_BASE_URL"
 MODEL_NAME_ENV = "ADVX_MODEL_NAME"
 MODEL_API_KEY_ENV = "ADVX_MODEL_API_KEY"
+ASR_BASE_URL_ENV = "ADVX_ASR_BASE_URL"
+ASR_MODEL_ENV = "ADVX_ASR_MODEL"
 ASR_API_KEY_ENV = "ADVX_ASR_API_KEY"
 DEFAULT_DATA_DIRECTORY = Path.cwd() / ".advx-data"
 
@@ -373,6 +375,8 @@ class BackendRuntime:
             model_base_url=config.model_base_url,
             model_name=config.model_name,
             model_api_key=config.model_api_key,
+            asr_base_url=config.asr_base_url,
+            asr_model=config.asr_model,
             asr_api_key=config.asr_api_key,
         )
         return self._configure_viewer_runtime_pipeline(
@@ -390,6 +394,8 @@ class BackendRuntime:
                 model_base_url=request.model_base_url,
                 model_name=request.model_name,
                 model_api_key=request.model_api_key,
+                asr_base_url=request.asr_base_url,
+                asr_model=request.asr_model,
                 asr_api_key=request.asr_api_key,
             ),
         )
@@ -530,6 +536,8 @@ class BackendRuntime:
                 model_base_url=request.model_base_url,
                 model_name=request.model_name,
                 model_api_key=request.model_api_key,
+                asr_base_url=request.asr_base_url,
+                asr_model=request.asr_model,
                 asr_api_key=request.asr_api_key,
             ),
             viewer_provider_override=viewer_provider,
@@ -751,6 +759,9 @@ def build_runtime_from_environment() -> BackendRuntime:
                 model_base_url=provider_values["model_base_url"] or "",
                 model_name=provider_values["model_name"] or "",
                 model_api_key=provider_values["model_api_key"] or "",
+                asr_base_url=os.environ.get(ASR_BASE_URL_ENV)
+                or "https://api.stepfun.com/v1",
+                asr_model=os.environ.get(ASR_MODEL_ENV) or "stepaudio-2.5-asr",
                 asr_api_key=provider_values["asr_api_key"] or "",
             )
         )

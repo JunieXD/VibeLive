@@ -60,6 +60,9 @@ export type BarrageEvidenceRef = {
   frameIndex: number | null
 }
 
+export const DEFAULT_ASR_BASE_URL = 'https://api.stepfun.com/v1'
+export const DEFAULT_ASR_MODEL = 'stepaudio-2.5-asr'
+
 export type ModelConfig = {
   baseUrl: string
   providerProfileId: string
@@ -68,6 +71,8 @@ export type ModelConfig = {
   memoryModel: string
   visualSummaryModel: string
   apiKey: string
+  asrBaseUrl: string
+  asrModel: string
   asrApiKey: string
 }
 
@@ -78,6 +83,8 @@ export type ModelConfigStatus = {
   viewerModel: string | null
   memoryModel: string | null
   visualSummaryModel: string | null
+  asrBaseUrl: string | null
+  asrModel: string | null
   modelApiKeyStored: boolean
   asrApiKeyStored: boolean
 }

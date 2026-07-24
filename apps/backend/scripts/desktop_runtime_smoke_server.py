@@ -312,6 +312,8 @@ def main() -> None:
                     "memoryModel": MEMORY_MODEL,
                     "visualSummaryModel": VISUAL_SUMMARY_MODEL,
                     "apiKey": MODEL_API_KEY,
+                    "asrBaseUrl": "https://api.stepfun.com/v1",
+                    "asrModel": "stepaudio-2.5-asr",
                     "asrApiKey": ASR_API_KEY,
                 },
                 "expected_barrage_text": BARRAGE_TEXT,

@@ -134,6 +134,8 @@ try {
   await page.getByLabel('服务地址', { exact: true }).fill('https://smoke.example/v1')
   await page.getByLabel('模型名称', { exact: true }).fill('smoke-model')
   await page.getByLabel('模型 API Key', { exact: true }).fill('smoke-model-key')
+  await page.getByLabel('ASR 服务地址', { exact: true }).fill('https://speech.smoke.example/v1')
+  await page.getByLabel('ASR 模型', { exact: true }).fill('smoke-asr-model')
   await page.getByLabel('StepFun ASR API Key', { exact: true }).fill('smoke-asr-key')
   await page.getByRole('button', { name: '保存连接', exact: true }).click()
   await page.getByText(/模型与语音识别配置已安全保存/).waitFor()
@@ -316,6 +318,14 @@ try {
 
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('heading', { name: '弹幕窗口', exact: true }).waitFor()
+  assert.equal(
+    await page.getByLabel('ASR 服务地址', { exact: true }).inputValue(),
+    'https://speech.smoke.example/v1'
+  )
+  assert.equal(
+    await page.getByLabel('ASR 模型', { exact: true }).inputValue(),
+    'smoke-asr-model'
+  )
   await page.getByLabel('弹幕目标', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('点击穿透', { exact: true }).count(), 0)
   const controlAlwaysOnTop = await electronApp.evaluate(({ BrowserWindow }) => {
