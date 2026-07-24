@@ -72,6 +72,14 @@ function initializeLoggingInternal(): void {
       if (action.stage === 'failed') auditLogger.error('action.failed', details)
       else auditLogger.info(`action.${action.stage}`, details)
     })
+    ipcMain.on('logging:session-lifecycle', (_event, payload: unknown) => {
+      const event = parseSessionLifecycleLog(payload)
+      if (!event) {
+        logger.warn('session.lifecycle.invalid-payload')
+        return
+      }
+      auditLogger.warn('session.lifecycle', event)
+    })
     loggingReady = true
   } catch (error) {
     try {
@@ -117,6 +125,31 @@ type ActionLog = {
   stage: 'started' | 'completed' | 'failed'
 }
 
+type SessionLifecycleLog = {
+  reason:
+    | 'backend-start-failed'
+    | 'backend-stop-failed'
+    | 'backend-stop-requested'
+    | 'emergency-stop'
+    | 'media-failure'
+  mediaKind?: 'camera' | 'display' | 'microphone'
+  error?: string
+}
+
+const SESSION_LIFECYCLE_REASONS = new Set<SessionLifecycleLog['reason']>([
+  'backend-start-failed',
+  'backend-stop-failed',
+  'backend-stop-requested',
+  'emergency-stop',
+  'media-failure'
+])
+
+const MEDIA_KINDS = new Set<NonNullable<SessionLifecycleLog['mediaKind']>>([
+  'camera',
+  'display',
+  'microphone'
+])
+
 function parseActionLog(value: unknown): ActionLog | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<ActionLog>
@@ -143,5 +176,30 @@ function parseActionLog(value: unknown): ActionLog | null {
     durationMs: candidate.durationMs,
     error: candidate.error?.slice(0, 500),
     stage: candidate.stage
+  }
+}
+
+function parseSessionLifecycleLog(value: unknown): SessionLifecycleLog | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Partial<SessionLifecycleLog>
+  if (typeof candidate.reason !== 'string' || !SESSION_LIFECYCLE_REASONS.has(candidate.reason)) {
+    return null
+  }
+  if (
+    candidate.mediaKind !== undefined &&
+    (typeof candidate.mediaKind !== 'string' || !MEDIA_KINDS.has(candidate.mediaKind))
+  ) {
+    return null
+  }
+  if (
+    candidate.error !== undefined &&
+    (typeof candidate.error !== 'string' || candidate.error.length > 500)
+  ) {
+    return null
+  }
+  return {
+    reason: candidate.reason,
+    mediaKind: candidate.mediaKind,
+    error: candidate.error
   }
 }

@@ -13,6 +13,8 @@ _SAFE_EXTRA_FIELDS = (
     "capability_checks",
     "client_request_id",
     "operation",
+    "outcome",
+    "previous_state",
     "provider_profile_id",
     "session_id",
 )
