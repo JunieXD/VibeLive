@@ -15,6 +15,16 @@ function readOverlayIpcEnvelope<T>(value: unknown): T | null {
   return value.payload as T;
 }
 
+let settingsListener: ((settings: OverlaySettings) => void) | null = null;
+let pendingSettings: OverlaySettings | null = null;
+
+ipcRenderer.on("overlay:settings-changed", (_event, message: unknown) => {
+  const settings = readOverlayIpcEnvelope<OverlaySettings>(message);
+  if (settings === null) return;
+  if (settingsListener) settingsListener(settings);
+  else pendingSettings = settings;
+});
+
 const api: OverlayApi = {
   onBarrage: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, message: unknown): void => {
@@ -32,12 +42,15 @@ const api: OverlayApi = {
     return () => ipcRenderer.removeListener("overlay:clear", handler);
   },
   onSettingsChanged: (listener) => {
-    const handler = (_event: Electron.IpcRendererEvent, message: unknown): void => {
-      const settings = readOverlayIpcEnvelope<OverlaySettings>(message);
-      if (settings !== null) listener(settings);
+    settingsListener = listener;
+    if (pendingSettings) {
+      const settings = pendingSettings;
+      pendingSettings = null;
+      listener(settings);
+    }
+    return () => {
+      if (settingsListener === listener) settingsListener = null;
     };
-    ipcRenderer.on("overlay:settings-changed", handler);
-    return () => ipcRenderer.removeListener("overlay:settings-changed", handler);
   }
 };
 

@@ -74,7 +74,7 @@ async function closeControlWindowAndWaitForExit(electronApp) {
       new Promise((_, reject) => {
         timeout = setTimeout(
           () => reject(new Error('Electron did not exit after its control window closed.')),
-          8_000
+          15_000
         )
       })
     ])
@@ -171,6 +171,16 @@ try {
     (await page.locator('body').innerText()).includes('Provider'),
     false,
     'English Provider copy is still visible after configuration.'
+  )
+  await page.getByRole('button', { name: '房间互动', exact: true }).click()
+  assert.equal(
+    await page.getByLabel('发送房间消息', { exact: true }).getAttribute('placeholder'),
+    '开始直播后可与 AI 观众互动'
+  )
+  assert.equal(
+    (await page.locator('body').innerText()).includes('Provider'),
+    false,
+    'English Provider copy is still visible in the configured interaction view.'
   )
 
   await page.getByRole('button', { name: /观众配置/ }).click()
@@ -305,7 +315,7 @@ try {
   assert.equal(await page.getByRole('button', { name: '手动新增梗' }).count(), 0)
 
   await page.getByRole('button', { name: '设置', exact: true }).click()
-  await page.getByRole('heading', { name: '弹幕覆盖层', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '弹幕窗口', exact: true }).waitFor()
   await page.getByLabel('弹幕目标', { exact: true }).waitFor()
   assert.equal(await page.getByLabel('点击穿透', { exact: true }).count(), 0)
   const controlAlwaysOnTop = await electronApp.evaluate(({ BrowserWindow }) => {
@@ -1147,6 +1157,11 @@ try {
   ) {
     throw new Error(`Unexpected live audience edit policy: ${JSON.stringify(liveEditPolicy)}`)
   }
+  const personaEditorDialog = page.getByRole('dialog', { name: /编辑/ })
+  await personaEditorDialog
+    .getByRole('button', { name: '关闭人格编辑', exact: true })
+    .click()
+  await personaEditorDialog.waitFor({ state: 'detached' })
   await page.getByRole('button', { name: '直播控制台', exact: true }).click()
 
   await page.getByRole('button', { name: '暂停', exact: true }).click()
@@ -1278,8 +1293,8 @@ try {
   await page.reload()
   await page.getByRole('heading', { name: '直播控制台', exact: true }).waitFor()
   if (
-    (await page.getByLabel('画中画位置').inputValue()) !== 'top-left' ||
-    (await page.getByLabel('画中画尺寸').inputValue()) !== 'large' ||
+    (await page.getByLabel('画中画位置').getAttribute('data-value')) !== 'top-left' ||
+    (await page.getByLabel('画中画尺寸').getAttribute('data-value')) !== 'large' ||
     !(await page.getByLabel('镜像').isChecked())
   ) {
     throw new Error('Versioned visual settings were not restored after reload.')
@@ -1365,6 +1380,96 @@ try {
   assert.deepEqual(restoredSettings, configuredSettings, 'Overlay settings were not persisted.')
   proof.restoredSettings = restoredSettings
 
+  await restartedPage.evaluate(() => window.advx.showOverlay())
+  let restartedOverlayPage = electronApp
+    .windows()
+    .find((candidate) => candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html'))
+  restartedOverlayPage ??= await electronApp.waitForEvent('window', {
+    predicate: (candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html')
+  })
+  await restartedOverlayPage.locator('.overlay-root').waitFor()
+  await restartedOverlayPage.waitForFunction(() => {
+    const root = document.querySelector('.overlay-root')
+    if (!(root instanceof HTMLElement)) return false
+    return getComputedStyle(root).getPropertyValue('--overlay-font-size').trim() === '30px'
+  })
+  const restoredRenderedSettings = await restartedOverlayPage.evaluate(() => {
+    const root = document.querySelector('.overlay-root')
+    if (!(root instanceof HTMLElement)) return null
+    const style = getComputedStyle(root)
+    return {
+      fontSize: style.getPropertyValue('--overlay-font-size').trim(),
+      fontFamily: style.getPropertyValue('--overlay-font-family').trim(),
+      fontWeight: style.getPropertyValue('--overlay-font-weight').trim(),
+      outline: style.getPropertyValue('--overlay-outline-shadow').trim(),
+      speed: style.getPropertyValue('--overlay-speed').trim(),
+      opacity: style.getPropertyValue('--overlay-opacity').trim(),
+      density: style.getPropertyValue('--overlay-density').trim(),
+      regionTop: style.getPropertyValue('--overlay-region-top').trim(),
+      regionBottom: style.getPropertyValue('--overlay-region-bottom').trim()
+    }
+  })
+  assert.ok(restoredRenderedSettings, 'Restarted Overlay styles were not readable.')
+  assert.equal(restoredRenderedSettings.fontSize, '30px')
+  assert.match(restoredRenderedSettings.fontFamily, /Segoe UI/)
+  assert.equal(restoredRenderedSettings.fontWeight, '400')
+  assert.match(restoredRenderedSettings.outline, /2px/)
+  assert.equal(restoredRenderedSettings.speed, '100')
+  assert.equal(restoredRenderedSettings.opacity, '0.55')
+  assert.equal(restoredRenderedSettings.density, '3')
+  assert.equal(restoredRenderedSettings.regionTop, '20%')
+  assert.equal(restoredRenderedSettings.regionBottom, '60%')
+  proof.restoredRenderedSettings = restoredRenderedSettings
+
+  await restartedPage.evaluate(() =>
+    window.advx.pushBarrage({
+      barrageId: 'restart-settings-proof',
+      audienceId: 'restart-proof-audience',
+      audienceName: '重启验证观众',
+      text: '重启后配置已应用',
+      color: '#ffffff',
+      mode: 'scroll',
+      createdAt: Date.now()
+    })
+  )
+  const restoredBarrage = restartedOverlayPage.getByText('重启后配置已应用', {
+    exact: true
+  })
+  await restoredBarrage.waitFor()
+  const restoredRenderedBarrage = await restoredBarrage.evaluate((element) => {
+    const root = document.querySelector('.overlay-root')
+    if (!(root instanceof HTMLElement)) return null
+    const style = getComputedStyle(element)
+    const rect = element.getBoundingClientRect()
+    return {
+      fontSize: style.fontSize,
+      fontFamily: style.fontFamily,
+      fontWeight: style.fontWeight,
+      opacity: style.opacity,
+      textShadow: style.textShadow,
+      animationDuration: style.animationDuration,
+      top: rect.top,
+      bottom: rect.bottom,
+      rootHeight: root.getBoundingClientRect().height
+    }
+  })
+  assert.ok(restoredRenderedBarrage, 'Restarted barrage styles were not readable.')
+  assert.equal(restoredRenderedBarrage.fontSize, '30px')
+  assert.match(restoredRenderedBarrage.fontFamily, /Segoe UI/)
+  assert.equal(restoredRenderedBarrage.fontWeight, '400')
+  assert.equal(restoredRenderedBarrage.opacity, '0.55')
+  assert.match(restoredRenderedBarrage.textShadow, /2px/)
+  assert.equal(restoredRenderedBarrage.animationDuration, '5s')
+  assert.ok(
+    restoredRenderedBarrage.top >= restoredRenderedBarrage.rootHeight * 0.2 - 1 &&
+      restoredRenderedBarrage.bottom <= restoredRenderedBarrage.rootHeight * 0.6 + 1,
+    'Restarted barrage escaped the restored display region.'
+  )
+  proof.restoredRenderedBarrage = restoredRenderedBarrage
+  await restartedPage.evaluate(() => window.advx.clearOverlay())
+  await restoredBarrage.waitFor({ state: 'detached' })
+
   const defaultPreviewSettings = {
     ...defaultOverlaySettings,
     targetDisplayId: restoredSettings.targetDisplayId
@@ -1378,7 +1483,7 @@ try {
   await restartedPage.getByRole('button', { name: '设置', exact: true }).click()
   await restartedPage.getByLabel('弹幕字体', { exact: true }).waitFor()
   assert.equal(
-    await restartedPage.getByLabel('弹幕字体', { exact: true }).inputValue(),
+    await restartedPage.getByLabel('弹幕字体', { exact: true }).getAttribute('data-value'),
     'bilibili'
   )
   assert.equal(await restartedPage.getByLabel('粗体', { exact: true }).isChecked(), true)
@@ -1388,13 +1493,6 @@ try {
   )
 
   await restartedPage.getByRole('button', { name: '滚动', exact: true }).click()
-  let restartedOverlayPage = electronApp
-    .windows()
-    .find((candidate) => candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html'))
-  restartedOverlayPage ??= await electronApp.waitForEvent('window', {
-    predicate: (candidate) =>
-      candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html')
-  })
   await restartedOverlayPage.locator('.overlay-barrage--scroll').waitFor()
   await restartedPage.getByRole('button', { name: '顶端', exact: true }).click()
   await restartedPage.getByRole('button', { name: '底端', exact: true }).click()
@@ -1410,6 +1508,10 @@ try {
 
   await restartedPage.evaluate(() => window.advx.clearOverlay())
   await restartedOverlayPage.locator('.overlay-barrage').first().waitFor({ state: 'detached' })
+  await restartedPage.evaluate(async () => {
+    const settings = await window.advx.getOverlaySettings()
+    await window.advx.setOverlaySettings({ ...settings, density: 7 })
+  })
   const mockBarrageEvents = [
     ['mock-scroll-1', '这波操作有点东西', 'scroll'],
     ['mock-scroll-2', '前方高能，请注意', 'scroll'],

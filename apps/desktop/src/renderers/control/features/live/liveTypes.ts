@@ -77,6 +77,7 @@ export type LiveChatProps = {
 export type RoomInteractionViewProps = LiveChatProps & {
   session: SessionState
   audienceSessionActive: boolean
+  providerConfigured: boolean
   audienceCount: number | null
   message: string
   messageSending: boolean

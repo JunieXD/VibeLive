@@ -299,6 +299,8 @@
 }
 
 .command-bar {
+  position: relative;
+  z-index: 4;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -382,6 +384,67 @@
   border: 1px solid var(--border-strong);
   background: transparent;
   color: var(--text-dim);
+}
+
+.command-button {
+  flex: 0 0 auto;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+.command-control {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.command-tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  z-index: 20;
+  width: max-content;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 9px 11px;
+  visibility: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 24%);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+  white-space: normal;
+}
+
+.command-tooltip::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--panel);
+  content: '';
+  transform: translate(-50%, -4px) rotate(45deg);
+}
+
+.command-control:hover .command-tooltip,
+.command-control:focus-within .command-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 .ghost-button:hover:not(:disabled),
@@ -1181,12 +1244,34 @@
     grid-template-columns: minmax(0, 1fr) 296px;
   }
 
+  .right-rail {
+    grid-template-rows:
+      minmax(105px, 1.35fr)
+      minmax(113px, 1.05fr)
+      minmax(106px, 0.9fr);
+    overflow-y: hidden;
+  }
+
+  .mini-meter {
+    width: 64px;
+  }
+
   .device-strip {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
+  }
+
+  .device-control {
+    grid-template-columns: 20px minmax(100px, 1fr) auto;
+    gap: 8px;
+  }
+
+  .device-control .ghost-button {
+    padding-inline: 8px;
+    white-space: nowrap;
   }
 
   .privacy-stack {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .visual-toolbar {

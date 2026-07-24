@@ -1,10 +1,12 @@
 import { AtSign, MessageSquareText, Send, Users } from 'lucide-react'
 import { LiveChat } from './LiveChat'
+import { getLiveMessagePlaceholder } from './liveCopy'
 import type { RoomInteractionViewProps } from './liveTypes'
 
 export function RoomInteractionView({
   session,
   audienceSessionActive,
+  providerConfigured,
   audienceCount,
   activity,
   chatListRef,
@@ -51,13 +53,11 @@ export function RoomInteractionView({
           onKeyDown={(event) => {
             if (event.key === 'Enter') onSendUserMessage()
           }}
-          placeholder={
-            !audienceSessionActive
-              ? '配置 Provider 后可与 AI 观众互动'
-              : isLive
-                ? '说点什么，AI 观众会回应你'
-                : '开始直播后可发送'
-          }
+          placeholder={getLiveMessagePlaceholder({
+            audienceSessionActive,
+            sessionStatus: session.status,
+            providerConfigured
+          })}
           disabled={!canMessage}
           aria-label="发送房间消息"
         />

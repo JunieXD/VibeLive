@@ -413,6 +413,9 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
           <RoomInteractionView
             session={session}
             audienceSessionActive={media.audienceSessionActive}
+            providerConfigured={
+              providerProfileAvailable || (backend.status?.providersConfigured ?? false)
+            }
             audienceCount={
               media.audienceSessionActive ? liveAudience.audience?.active_count ?? null : 0
             }
