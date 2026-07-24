@@ -31,6 +31,7 @@ from advx_backend.domain.observation_wave import (
     ViewerVisualInputMode,
 )
 from advx_backend.providers.model.openai_compatible import (
+    JSON_MODE_RESPONSE_FORMAT,
     OpenAICompatibleConfig,
     OpenAICompatibleHttpError,
     OpenAICompatibleProvider,
@@ -94,12 +95,16 @@ class OpenAICompatibleViewerRuntimeConfig:
     request_timeout_seconds: float = 30.0
 
 
-_VIEWER_JSON_EXAMPLE: Final = (
+_VIEWER_BARRAGE_JSON_EXAMPLE: Final = (
     '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
     '"viewer_sequence":1,"action":"barrage","intent":"react_to_host",'
-    '"target":{"kind":"host","viewer_instance_id":null,"event_id":"event-id"},'
-    '"text":"这波漂亮","reaction_type":"comment",'
-    '"evidence_refs":[{"source":"event","event_id":"event-id","frame_index":null}]}'
+    '"target":null,"text":"这波漂亮","reaction_type":"comment",'
+    '"evidence_refs":[]}'
+)
+_VIEWER_SILENCE_JSON_EXAMPLE: Final = (
+    '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
+    '"viewer_sequence":1,"action":"silence","intent":"silence",'
+    '"target":null,"text":null,"reaction_type":"silence","evidence_refs":[]}'
 )
 _SUMMARY_JSON_EXAMPLE: Final = '{"summary":"画面中的关键变化"}'
 _VIEWER_SYSTEM_PROMPT: Final = (
@@ -110,7 +115,11 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "public background, not proof that you personally attended an earlier stream. Use only "
     "evidence references present in the input. Prefer a natural Chinese message of "
     "20 characters or fewer. Return exactly one JSON object, with no Markdown or prose. "
-    f"Use this shape: {_VIEWER_JSON_EXAMPLE}"
+    f"For a barrage use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE} "
+    f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE} "
+    "For a host, scene, or room target, viewer_instance_id and event_id must both be null. "
+    "For a viewer target, provide viewer_instance_id only; for an event target, provide event_id "
+    "only. Never use an empty string for text."
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
     "Summarize only visible, decision-relevant changes across the ordered frame bundle. "
@@ -484,6 +493,7 @@ class OpenAICompatibleViewerRuntimeProvider:
             "stream": False,
             "n": 1,
             "max_tokens": _ROLE_OUTPUT_TOKEN_BUDGET,
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
         }
         payload.update(default_reasoning_options(self.config.base_url, model_id))
         return payload

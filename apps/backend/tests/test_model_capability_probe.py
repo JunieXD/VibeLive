@@ -3,13 +3,20 @@ import json
 import httpx
 import pytest
 
-from advx_backend.contracts.viewer_runtime import ProviderRuntimeSpec
+from advx_backend.contracts.viewer_runtime import (
+    ProviderRuntimeSpec,
+    ViewerAction,
+    ViewerGenerationResponse,
+)
 from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleConfig,
+    OpenAICompatibleProtocolError,
     OpenAICompatibleProvider,
     default_reasoning_options,
 )
 from advx_backend.providers.model.viewer_runtime import (
+    _VIEWER_BARRAGE_JSON_EXAMPLE,
+    _VIEWER_SILENCE_JSON_EXAMPLE,
     OpenAICompatibleViewerRuntimeConfig,
     OpenAICompatibleViewerRuntimeProvider,
 )
@@ -49,7 +56,7 @@ async def test_role_payload_uses_json_examples_and_stepfun_low_reasoning() -> No
         )
         await provider.aclose()
 
-    assert "response_format" not in payload
+    assert payload["response_format"] == {"type": "json_object"}
     assert payload["reasoning_effort"] == "low"
     assert payload["messages"] == [
         {
@@ -69,6 +76,18 @@ def test_stepfun_flash_defaults_to_low_reasoning_effort() -> None:
         "https://api.stepfun.com/step_plan/v1",
         "step-router-v1",
     ) == {}
+
+
+def test_viewer_json_examples_satisfy_the_runtime_contract() -> None:
+    barrage = ViewerGenerationResponse.model_validate(json.loads(_VIEWER_BARRAGE_JSON_EXAMPLE))
+    silence = ViewerGenerationResponse.model_validate(json.loads(_VIEWER_SILENCE_JSON_EXAMPLE))
+
+    assert barrage.action is ViewerAction.BARRAGE
+    assert barrage.target is None
+    assert barrage.text == "这波漂亮"
+    assert silence.action is ViewerAction.SILENCE
+    assert silence.target is None
+    assert silence.text is None
     assert default_reasoning_options(
         "https://models.example/v1",
         "step-3.7-flash",
@@ -81,7 +100,7 @@ async def test_image_probe_allows_the_production_output_budget() -> None:
         payload = json.loads(request.content)
         assert payload["max_tokens"] == 4_096
         assert isinstance(payload["messages"][0]["content"], list)
-        assert "response_format" not in payload
+        assert payload["response_format"] == {"type": "json_object"}
         assert payload["messages"][0]["content"][0]["text"] == (
             'Return exactly this JSON object and no Markdown or prose: {"ok":true}.'
         )
@@ -116,6 +135,39 @@ async def test_image_probe_allows_the_production_output_budget() -> None:
 
 
 @pytest.mark.asyncio
+async def test_probe_falls_back_when_json_mode_is_explicitly_unsupported() -> None:
+    requests: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if "response_format" in payload:
+            return httpx.Response(
+                400,
+                json={"error": {"message": "response_format json_object is unsupported"}},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}
+                ]
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = provider_with(client)
+
+    check = await provider._probe_chat(capability="viewer_json_output", model_id="vision-model")
+
+    assert check.status.value == "passed"
+    assert requests[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in requests[1]
+    await provider.aclose()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_probe_reports_output_token_exhaustion_without_reading_reasoning() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -144,6 +196,31 @@ async def test_probe_reports_output_token_exhaustion_without_reading_reasoning()
 
     assert check.status.value == "failed"
     assert check.error_code == "output_token_limit"
+    await provider.aclose()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_candidate_parser_rejects_a_truncated_json_mode_response() -> None:
+    client = httpx.AsyncClient()
+    provider = provider_with(client)
+    response = httpx.Response(
+        200,
+        json={
+            "choices": [
+                {
+                    "message": {"content": '{"candidates":['},
+                    "finish_reason": "length",
+                }
+            ]
+        },
+    )
+
+    with pytest.raises(OpenAICompatibleProtocolError, match="output token budget") as raised:
+        provider._parse_candidates(response)
+
+    assert raised.value.error_code == "output_token_limit"
+
     await provider.aclose()
     await client.aclose()
 

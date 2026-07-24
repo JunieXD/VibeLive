@@ -18,6 +18,7 @@ from advx_backend.application.ports.memory import MemoryEvidence, RoomMemoryCand
 from advx_backend.contracts.debug import AiCallRole
 from advx_backend.domain.memory import RoomMemoryType
 from advx_backend.providers.model.openai_compatible import (
+    JSON_MODE_RESPONSE_FORMAT,
     OpenAICompatibleConfig,
     OpenAICompatibleHttpError,
     OpenAICompatibleProvider,
@@ -170,6 +171,7 @@ class OpenAICompatibleMemoryExtractor:
             "stream": False,
             "n": 1,
             "max_tokens": 4_096,
+            "response_format": JSON_MODE_RESPONSE_FORMAT,
         }
         payload.update(
             default_reasoning_options(
