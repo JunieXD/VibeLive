@@ -29,6 +29,8 @@ export type DesktopSource = {
 
 export type BarrageMode = 'scroll' | 'top' | 'bottom'
 
+export type BarrageDisplayMode = 'overlay' | 'floating'
+
 export type ColorTheme = 'light' | 'dark'
 
 export type BarrageEvent = {
@@ -254,6 +256,7 @@ export type OverlayRegion = {
 export type OverlayFontFamily = 'bilibili' | 'yahei' | 'system'
 
 export type OverlaySettings = {
+  displayMode: BarrageDisplayMode
   targetDisplayId: number
   fontSizePx: number
   fontFamily: OverlayFontFamily
@@ -276,10 +279,10 @@ export type ControlApi = {
   listOverlayTargets: () => Promise<OverlayTarget[]>
   getOverlaySettings: () => Promise<OverlaySettings>
   setOverlaySettings: (settings: OverlaySettings) => Promise<OverlaySettings>
-  showOverlay: () => Promise<void>
+  showOverlay: () => Promise<boolean>
   hideOverlay: () => Promise<void>
   clearOverlay: () => Promise<void>
-  pushBarrage: (event: BarrageEvent) => Promise<void>
+  pushBarrage: (event: BarrageEvent) => Promise<boolean>
   saveModelConfig: (config: ModelConfig) => Promise<SaveModelConfigResult>
   getModelConfigStatus: () => Promise<ModelConfigStatus>
   getBackendStatus: () => Promise<BackendRuntimeStatus>
@@ -386,6 +389,7 @@ export type ControlApi = {
   onCloseRequested: (listener: () => void) => () => void
   onEmergencyStop: (listener: () => void) => () => void
   onOverlaySettingsChanged: (listener: (settings: OverlaySettings) => void) => () => void
+  onOverlayVisibilityChanged: (listener: (visible: boolean) => void) => () => void
   onBackendStatus: (listener: (status: BackendRuntimeStatus) => void) => () => void
   onBackendBarrage: (listener: (event: BackendBarrageEvent) => void) => () => void
   onBackendViewerEvent: (listener: (event: BackendViewerEvent) => void) => () => void
@@ -395,4 +399,13 @@ export type OverlayApi = {
   onBarrage: (listener: (event: BarrageEvent) => void) => () => void
   onClear: (listener: () => void) => () => void
   onSettingsChanged: (listener: (settings: OverlaySettings) => void) => () => void
+}
+
+export type FloatingChatApi = {
+  onBarrage: (listener: (event: BarrageEvent) => void) => () => void
+  onClear: (listener: () => void) => () => void
+  minimize: () => Promise<void>
+  hide: () => Promise<void>
+  clear: () => Promise<void>
+  submitText: (text: string) => Promise<void>
 }

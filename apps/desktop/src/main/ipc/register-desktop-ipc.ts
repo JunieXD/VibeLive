@@ -66,12 +66,18 @@ import {
   setOverlaySettings
 } from "../overlay-settings";
 import {
-  applyOverlaySettings,
-  clearOverlay,
-  hideOverlay,
-  pushBarrage,
-  showOverlay
-} from "../windows/overlay";
+  applyBarrageOutputSettings,
+  clearBarrageOutputs,
+  hideBarrageOutputs,
+  pushBarrageToOutputs,
+  setBarrageOutputVisibilityListener,
+  showBarrageOutputs
+} from "../windows/barrage-outputs";
+import {
+  isFloatingChatSender,
+  markFloatingChatRendererReady,
+  minimizeFloatingChat
+} from "../windows/floating-chat";
 import { applyControlWindowTheme } from "../windows/control";
 
 let selectedSourceId: string | null = null;
@@ -696,7 +702,7 @@ function applyOverlayWindowState(
   settings: OverlaySettings
 ): void {
   const controlWindow = getControlWindow();
-  applyOverlaySettings(settings);
+  applyBarrageOutputSettings(settings);
 
   if (controlWindow && !controlWindow.isDestroyed()) {
     controlWindow.setAlwaysOnTop(false);
@@ -725,6 +731,26 @@ export function registerDesktopIpc(
       throw new Error("This API is only available to the control window.");
     }
   };
+  const assertFloatingChatSender = (event: Electron.IpcMainInvokeEvent): void => {
+    if (!isFloatingChatSender(event.sender.id)) {
+      throw new Error("This API is only available to the floating chat window.");
+    }
+  };
+  const assertTextSender = (event: Electron.IpcMainInvokeEvent): void => {
+    if (
+      event.sender.id !== getControlWindow()?.webContents.id &&
+      !isFloatingChatSender(event.sender.id)
+    ) {
+      throw new Error("This API is only available to an ADVX interaction window.");
+    }
+  };
+
+  setBarrageOutputVisibilityListener((visible) => {
+    const controlWindow = getControlWindow();
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("overlay:visibility-changed", visible);
+    }
+  });
 
   backendClient.onStatus((status) => {
     const controlWindow = getControlWindow();
@@ -778,17 +804,51 @@ export function registerDesktopIpc(
       cameraCaptureAuthorization = null;
     }
   });
-  ipcMain.handle("overlay:list-targets", listOverlayTargets);
-  ipcMain.handle("overlay:get-settings", getOverlaySettings);
-  ipcMain.handle("overlay:set-settings", async (_event, settings: OverlaySettings) => {
+  ipcMain.handle("overlay:list-targets", (event) => {
+    assertControlSender(event);
+    return listOverlayTargets();
+  });
+  ipcMain.handle("overlay:get-settings", (event) => {
+    assertControlSender(event);
+    return getOverlaySettings();
+  });
+  ipcMain.handle("overlay:set-settings", async (event, settings: OverlaySettings) => {
+    assertControlSender(event);
     const savedSettings = await setOverlaySettings(settings);
     applyOverlayWindowState(getControlWindow, savedSettings);
     return savedSettings;
   });
-  ipcMain.handle("overlay:show", showOverlay);
-  ipcMain.handle("overlay:hide", hideOverlay);
-  ipcMain.handle("overlay:clear", clearOverlay);
-  ipcMain.handle("overlay:push", (_event, event: BarrageEvent) => pushBarrage(event));
+  ipcMain.handle("overlay:show", (event) => {
+    assertControlSender(event);
+    return showBarrageOutputs();
+  });
+  ipcMain.handle("overlay:hide", (event) => {
+    assertControlSender(event);
+    hideBarrageOutputs();
+  });
+  ipcMain.handle("overlay:clear", (event) => {
+    assertControlSender(event);
+    clearBarrageOutputs();
+  });
+  ipcMain.handle("overlay:push", (event, barrage: BarrageEvent) => {
+    assertControlSender(event);
+    return pushBarrageToOutputs(barrage);
+  });
+  ipcMain.handle("floating-chat:minimize", (event) => {
+    assertFloatingChatSender(event);
+    minimizeFloatingChat();
+  });
+  ipcMain.handle("floating-chat:hide", (event) => {
+    assertFloatingChatSender(event);
+    hideBarrageOutputs();
+  });
+  ipcMain.handle("floating-chat:clear", (event) => {
+    assertFloatingChatSender(event);
+    clearBarrageOutputs();
+  });
+  ipcMain.on("floating-chat:ready", (event) => {
+    markFloatingChatRendererReady(event.sender.id);
+  });
   ipcMain.handle("config:save-model", (event, config: ModelConfig) => {
     assertControlSender(event);
     return saveModelConfig(config, backendClient);
@@ -890,7 +950,7 @@ export function registerDesktopIpc(
     return stopped;
   });
   ipcMain.handle("backend:submit-text", (event, text: string, target?: TextSubmitTarget) => {
-    assertControlSender(event);
+    assertTextSender(event);
     if (typeof text !== "string" || !text.trim() || text.length > 4_000) {
       throw new Error("文字输入无效。");
     }

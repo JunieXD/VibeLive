@@ -54,7 +54,7 @@ export function useSessionMediaControls({
   audienceAvailable,
   onAudienceSessionActiveChange
 }: UseSessionMediaControlsOptions) {
-  const [overlayVisible, setOverlayVisible] = useState(true)
+  const [overlayVisible, setOverlayVisible] = useState(false)
   const devicesRef = useRef(devices)
   const onSystemActivityRef = useRef(onSystemActivity)
   const onSessionStartedRef = useRef(onSessionStarted)
@@ -99,7 +99,7 @@ export function useSessionMediaControls({
     ])
     if (hideResult.status === 'fulfilled') setOverlayVisible(false)
     if (clearResult.status === 'fulfilled' && hideResult.status === 'fulfilled') return null
-    return '悬浮层未能完全关闭，请使用紧急停止快捷键后重试。'
+    return '弹幕窗口未能完全关闭，请使用紧急停止快捷键后重试。'
   }, [])
 
   fatalMediaRef.current = (kind, error) => {
@@ -212,12 +212,11 @@ export function useSessionMediaControls({
 
       if (backendSessionStarted) setAudienceSessionActive(true)
       try {
-        await window.advx.showOverlay()
-        setOverlayVisible(true)
+        setOverlayVisible(await window.advx.showOverlay())
       } catch (error) {
         setOverlayVisible(false)
         onSystemActivityRef.current(
-          `悬浮层未能显示：${describeBackendError(error, '连接异常。')} 直播将继续。`
+          `弹幕窗口未能显示：${describeBackendError(error, '连接异常。')} 直播将继续。`
         )
       }
       if (!devices.operation.isCurrent(operationId)) {
@@ -340,6 +339,10 @@ export function useSessionMediaControls({
   useEffect(
     () => window.advx.onEmergencyStop(() => void stopSession(true, 'emergency-stop')),
     [stopSession]
+  )
+  useEffect(
+    () => window.advx.onOverlayVisibilityChanged(setOverlayVisible),
+    []
   )
 
   const toggleGoLive = useCallback((): void => {
@@ -483,8 +486,7 @@ export function useSessionMediaControls({
   ])
 
   const showOverlay = useCallback(async (): Promise<void> => {
-    await window.advx.showOverlay()
-    setOverlayVisible(true)
+    setOverlayVisible(await window.advx.showOverlay())
   }, [])
   const hideOverlay = useCallback(async (): Promise<void> => {
     await window.advx.hideOverlay()

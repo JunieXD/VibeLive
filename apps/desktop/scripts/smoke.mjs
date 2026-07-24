@@ -390,6 +390,7 @@ try {
 
   assert.deepEqual(
     {
+      displayMode: configuredSettings.displayMode,
       fontSizePx: configuredSettings.fontSizePx,
       fontFamily: configuredSettings.fontFamily,
       bold: configuredSettings.bold,
@@ -400,6 +401,7 @@ try {
       region: configuredSettings.region
     },
     {
+      displayMode: 'overlay',
       fontSizePx: 30,
       fontFamily: 'system',
       bold: false,
@@ -409,6 +411,80 @@ try {
       density: 3,
       region: { topPercent: 20, bottomPercent: 60 }
     }
+  )
+
+  await page.getByRole('button', { name: '互动悬浮窗', exact: true }).click()
+  await page.waitForTimeout(350)
+  assert.equal(
+    await page.evaluate(async () => (await window.advx.getOverlaySettings()).displayMode),
+    'floating'
+  )
+  await page.evaluate(async () => {
+    await window.advx.showOverlay()
+    for (let index = 0; index < 4; index += 1) {
+      await window.advx.pushBarrage({
+        barrageId: `floating-chat-${index}`,
+        audienceId: `floating-audience-${index % 3}`,
+        audienceName: index === 0 ? '羊-有毒的' : `互动观众 ${index + 1}`,
+        text: [
+          '这么帅',
+          '坐在牛客坐牢',
+          '开个签到题就不会了',
+          'wa 了3发了'
+        ][index],
+        color: index === 0 ? '#65c9e5' : '#78bfa4',
+        createdAt: Date.now() + index,
+        mode: 'scroll'
+      })
+    }
+  })
+
+  let floatingChatPage = electronApp
+    .windows()
+    .find((candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+    )
+  floatingChatPage ??= await electronApp.waitForEvent('window', {
+    predicate: (candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+  })
+  await floatingChatPage.getByText('wa 了3发了', { exact: true }).waitFor()
+  const floatingChatProof = await floatingChatPage.evaluate(() => ({
+    title: document.querySelector('.titlebar-brand strong')?.textContent?.trim(),
+    rows: document.querySelectorAll('.message-row').length,
+    audienceCount: document.querySelector('.interaction-summary span')?.textContent?.trim(),
+    overflow:
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    composerVisible:
+      document.querySelector('.composer') instanceof HTMLElement &&
+      document.querySelector('.composer')?.getBoundingClientRect().height > 0,
+    controls: document.querySelectorAll('.window-actions button').length
+  }))
+  assert.equal(floatingChatProof.title, '直播互动')
+  assert.equal(floatingChatProof.rows, 4)
+  assert.equal(floatingChatProof.audienceCount, '3')
+  assert.ok(floatingChatProof.overflow <= 1, 'Floating chat overflowed horizontally.')
+  assert.equal(floatingChatProof.composerVisible, true)
+  assert.equal(floatingChatProof.controls, 2)
+  await floatingChatPage.screenshot({
+    path: resolve(artifactDirectory, 'floating-chat-window.png')
+  })
+  await floatingChatPage.getByTitle('关闭互动窗').click()
+  await electronApp.evaluate(async ({ BrowserWindow }) => {
+    const floatingWindow = BrowserWindow.getAllWindows().find((window) =>
+      window.webContents.getURL().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+    )
+    if (!floatingWindow) throw new Error('Floating chat window was not created.')
+    for (let attempt = 0; attempt < 20 && floatingWindow.isVisible(); attempt += 1) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25))
+    }
+    if (floatingWindow.isVisible()) throw new Error('Floating chat window did not hide.')
+  })
+  await page.getByRole('button', { name: '屏幕弹幕', exact: true }).click()
+  await page.waitForTimeout(350)
+  assert.equal(
+    await page.evaluate(async () => (await window.advx.getOverlaySettings()).displayMode),
+    'overlay'
   )
 
   await page.screenshot({
@@ -1459,6 +1535,7 @@ try {
   )
   console.log(`Settings screenshot: ${resolve(artifactDirectory, 'overlay-settings.png')}`)
   console.log(`Overlay screenshot: ${resolve(artifactDirectory, 'overlay-renderer.png')}`)
+  console.log(`Floating chat: ${resolve(artifactDirectory, 'floating-chat-window.png')}`)
   console.log(`Three-mode mock: ${resolve(artifactDirectory, 'overlay-modes-mock.png')}`)
   console.log(`Proof: ${resolve(artifactDirectory, 'overlay-smoke-proof.json')}`)
 } finally {

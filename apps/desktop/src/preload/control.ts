@@ -210,6 +210,12 @@ const api: ControlApi = {
     ipcRenderer.on("overlay:settings-changed", handler);
     return () => ipcRenderer.removeListener("overlay:settings-changed", handler);
   },
+  onOverlayVisibilityChanged: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, visible: boolean): void =>
+      listener(visible);
+    ipcRenderer.on("overlay:visibility-changed", handler);
+    return () => ipcRenderer.removeListener("overlay:visibility-changed", handler);
+  },
   onBackendStatus: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, status: BackendRuntimeStatus): void =>
       listener(status);

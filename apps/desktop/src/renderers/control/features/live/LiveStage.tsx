@@ -394,7 +394,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           type="button"
           disabled={!isSessionActive}
           onClick={() => void onToggleOverlay()}
-          title={overlayVisible ? '隐藏弹幕覆盖层' : '显示弹幕覆盖层'}
+          title={overlayVisible ? '隐藏弹幕窗口' : '显示弹幕窗口'}
         >
           {overlayVisible ? <EyeOff size={16} /> : <Eye size={16} />}
           {overlayVisible ? '隐藏' : '显示'}
