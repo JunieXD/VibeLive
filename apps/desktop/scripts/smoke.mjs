@@ -482,6 +482,8 @@ try {
   })
 
   await page.getByRole('button', { name: '直播控制台', exact: true }).click()
+  await page.getByRole('button', { name: '更换来源', exact: true }).waitFor()
+  await page.locator('.screen-video').waitFor()
   const cameraPermission = await page.evaluate(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true })
@@ -527,7 +529,7 @@ try {
     throw new Error('A camera stream was published after emergency stop invalidated its request.')
   }
 
-  await page.getByRole('button', { name: '选择来源', exact: true }).click()
+  await page.getByRole('button', { name: '更换来源', exact: true }).click()
   await page.locator('[data-source-option]').first().waitFor()
   const sourceCount = await page.locator('[data-source-option]').count()
   assert.ok(sourceCount >= 1, 'Desktop source IPC returned no sources.')
@@ -653,7 +655,7 @@ try {
 
   await page.evaluate(() => window.advx.clearOverlay())
   await page.getByRole('button', { name: '直播控制台', exact: true }).click()
-  await page.getByRole('button', { name: '选择来源', exact: true }).click()
+  await page.getByRole('button', { name: '更换来源', exact: true }).click()
   await page.locator('[data-source-option]').first().waitFor()
 
   await page.evaluate(() => {
@@ -678,7 +680,7 @@ try {
   })
   await page.waitForFunction(() => {
     const button = [...document.querySelectorAll('button')].find(
-      (candidate) => candidate.textContent?.trim() === '选择来源'
+      (candidate) => candidate.textContent?.trim() === '更换来源'
     )
     return button instanceof HTMLButtonElement && !button.disabled
   })
@@ -689,27 +691,27 @@ try {
   await page.waitForFunction(
     () => globalThis.__advxSmokePendingDisplayTrack?.readyState === 'ended'
   )
-  if ((await page.locator('video').count()) !== 0) {
+  if ((await page.locator('.video-stage video').count()) !== 0) {
     throw new Error('A display stream was published after emergency stop invalidated its request.')
   }
 
-  await page.getByRole('button', { name: '选择来源', exact: true }).click()
+  await page.getByRole('button', { name: '更换来源', exact: true }).click()
   await page.locator('[data-source-option]').first().click()
   await page.getByRole('button', { name: '使用此来源', exact: true }).click()
   try {
-    await page.locator('video').waitFor({ timeout: 15_000 })
+    await page.locator('.screen-video').waitFor({ timeout: 15_000 })
   } catch (error) {
     console.error(`Control surface after display capture failure:\n${await page.locator('body').innerText()}`)
     throw error
   }
-  const displayTrackState = await page.locator('video').evaluate((video) => {
+  const displayTrackState = await page.locator('.screen-video').evaluate((video) => {
     const stream = video.srcObject
     return stream instanceof MediaStream ? stream.getVideoTracks()[0]?.readyState : undefined
   })
   if (displayTrackState !== 'live') {
     throw new Error(`Expected a live display track, received ${displayTrackState ?? 'none'}.`)
   }
-  await page.locator('video').evaluate((video) => {
+  await page.locator('.screen-video').evaluate((video) => {
     globalThis.__advxSmokeDisplayTrack = video.srcObject?.getVideoTracks()[0]
   })
   const selectedSourceName = await page.locator('.stage-source .panel-subtitle').textContent()
@@ -761,7 +763,7 @@ try {
       .find((window) => window.webContents.getURL().includes('/control/'))
       ?.webContents.send('session:emergency-stop')
   })
-  await page.locator('video').waitFor({ state: 'detached' })
+  await page.locator('.video-stage video').waitFor({ state: 'detached' })
   await page.waitForFunction(() => {
     const button = [...document.querySelectorAll('button')].find(
       (candidate) => candidate.textContent?.trim() === '授权并检测'
@@ -1121,21 +1123,26 @@ try {
   await page.getByRole('button', { name: '直播控制台', exact: true }).click()
 
   await page.getByRole('button', { name: '暂停', exact: true }).click()
-  await page.waitForFunction(() => document.body.textContent?.includes('屏幕 已暂停'))
-  if ((await page.locator('video').count()) !== 0) {
-    throw new Error('A visual preview remained live after pause.')
+  await page.waitForFunction(() => document.body.textContent?.includes('观察已暂停'))
+  await page.waitForFunction(
+    () =>
+      document.body.textContent?.includes('屏幕 预览中') &&
+      document.body.textContent?.includes('摄像头 预览中')
+  )
+  if ((await page.locator('.video-stage video').count()) !== 2) {
+    throw new Error('Visual preview was not kept live while observation was paused.')
   }
   const pausedDisplayTrackState = await page.evaluate(
     () => globalThis.__advxSmokeDisplayTrack?.readyState
   )
-  if (pausedDisplayTrackState !== 'ended') {
-    throw new Error(`Display track was not released on pause: ${pausedDisplayTrackState}.`)
+  if (pausedDisplayTrackState !== 'live') {
+    throw new Error(`Display track stopped on pause: ${pausedDisplayTrackState}.`)
   }
   const pausedCameraTrackState = await page.evaluate(
     () => globalThis.__advxSmokeCameraTrack?.readyState
   )
-  if (pausedCameraTrackState !== 'ended') {
-    throw new Error(`Camera track was not released on pause: ${pausedCameraTrackState}.`)
+  if (pausedCameraTrackState !== 'live') {
+    throw new Error(`Camera track stopped on pause: ${pausedCameraTrackState}.`)
   }
   const pausedMicrophoneTrackState = await page.evaluate(
     () => globalThis.__advxSmokeMicrophoneTrack?.readyState
@@ -1211,20 +1218,25 @@ try {
 
   await page.getByRole('button', { name: '结束直播', exact: true }).click()
   await page.waitForFunction(() => document.body.textContent?.includes('未开播'))
-  if ((await page.locator('video').count()) !== 0) {
-    throw new Error('Display preview remained live after stop.')
+  await page.waitForFunction(
+    () =>
+      document.body.textContent?.includes('屏幕 预览中') &&
+      document.body.textContent?.includes('摄像头 预览中')
+  )
+  if ((await page.locator('.video-stage video').count()) !== 2) {
+    throw new Error('Visual preview did not remain mounted after stop.')
   }
   const stoppedDisplayTrackState = await page.evaluate(
     () => globalThis.__advxSmokeDisplayTrack?.readyState
   )
-  if (stoppedDisplayTrackState !== 'ended') {
-    throw new Error(`Display track was not released on stop: ${stoppedDisplayTrackState}.`)
+  if (stoppedDisplayTrackState !== 'live') {
+    throw new Error(`Display track stopped with the live session: ${stoppedDisplayTrackState}.`)
   }
   const stoppedCameraTrackState = await page.evaluate(
     () => globalThis.__advxSmokeCameraTrack?.readyState
   )
-  if (stoppedCameraTrackState !== 'ended') {
-    throw new Error(`Camera track was not released on stop: ${stoppedCameraTrackState}.`)
+  if (stoppedCameraTrackState !== 'live') {
+    throw new Error(`Camera track stopped with the live session: ${stoppedCameraTrackState}.`)
   }
   const stoppedMicrophoneTrackState = await page.evaluate(
     () => globalThis.__advxSmokeMicrophoneTrack?.readyState
@@ -1246,8 +1258,13 @@ try {
     throw new Error('Versioned visual settings were not restored after reload.')
   }
   await page.getByRole('button', { name: '开启摄像头', exact: true }).waitFor()
-  if ((await page.locator('.video-stage video').count()) !== 0) {
-    throw new Error('Camera or display tracks were restored from disk after reload.')
+  await page.getByRole('button', { name: '更换来源', exact: true }).waitFor()
+  await page.locator('.screen-video').waitFor()
+  if (
+    (await page.locator('.screen-video').count()) !== 1 ||
+    (await page.locator('.camera-video').count()) !== 0
+  ) {
+    throw new Error('Reload did not restore the default live desktop-only preview.')
   }
   const postGrantCameraPermission = await page.evaluate(async () => {
     try {
@@ -1267,7 +1284,7 @@ try {
   await page.locator('[data-audience-range] input').first().fill('7')
 
   console.log(
-    `Monorepo desktop smoke passed: ${sourceCount} sources, six audience modes, 32 personas, live edit policy, Shared Brain-only meme controls, camera denied before explicit enable, ${cameraDevices} camera entries, three visual modes, ${compressedKilobytes} KB composite JPEG, versioned settings restore, microphone meter peak ${microphonePeak}%, and complete pause/stop track cleanup.`
+    `Monorepo desktop smoke passed: default live desktop capture, ${sourceCount} sources, background preview continuity, six audience modes, 32 personas, live edit policy, Shared Brain-only meme controls, camera denied before explicit enable, ${cameraDevices} camera entries, three visual modes, ${compressedKilobytes} KB composite JPEG, versioned settings restore, microphone meter peak ${microphonePeak}%, continuous visual preview across pause/stop, and microphone cleanup.`
   )
   console.log(`Screenshot: ${resolve(artifactDirectory, 'control-console.png')}`)
   console.log(`Saved model credentials: ${resolve(artifactDirectory, 'model-config-saved.png')}`)

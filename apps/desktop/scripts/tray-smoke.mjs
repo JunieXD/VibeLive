@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -114,6 +114,38 @@ try {
   await page.getByRole('heading', { name: '直播控制台', exact: true }).waitFor()
   await page.waitForFunction(() => document.body.textContent?.includes('后端 · 已连接'))
 
+  const logPath = resolve(userDataDirectory, 'logs', 'advx.log')
+  await waitFor(
+    async () => {
+      const contents = await readFile(logPath, 'utf8')
+      return contents.includes('app.start') && contents.includes('backend.ready')
+    },
+    'The application and backend startup logs were not persisted'
+  )
+  const rendererLogSentinel = `renderer-log-${Date.now()}`
+  await page.evaluate((sentinel) => console.warn(sentinel), rendererLogSentinel)
+  await waitFor(
+    async () => (await readFile(logPath, 'utf8')).includes(rendererLogSentinel),
+    'Renderer console output was not aggregated into the application log'
+  )
+  const auditedAction = 'overlay:hide'
+  await page.evaluate(() => window.advx.hideOverlay())
+  await waitFor(
+    async () => {
+      const contents = await readFile(logPath, 'utf8')
+      return (
+        contents.includes('action.started') &&
+        contents.includes('action.completed') &&
+        contents.includes(auditedAction)
+      )
+    },
+    'A high-value renderer action was not persisted'
+  )
+  const crashUploadsEnabled = await electronApp.evaluate(({ crashReporter }) =>
+    crashReporter.getUploadToServer()
+  )
+  assert.equal(crashUploadsEnabled, false)
+
   const trayState = await waitFor(
     () =>
       electronApp.evaluate(() => {
@@ -212,7 +244,11 @@ try {
   )
 
   proof = {
+    auditedAction,
+    crashUploadsEnabled,
     trayState,
+    logPath,
+    rendererLogSentinel,
     duplicateInstanceExitCode: secondExitCode,
     managedChildProcessIds: childProcessIds,
     leakedProcessIds

@@ -4,6 +4,7 @@ import {
   desktopCapturer,
   ipcMain,
   safeStorage,
+  screen,
   session,
   systemPreferences
 } from "electron";
@@ -98,9 +99,15 @@ async function listDesktopSources(controlWindow: BrowserWindow | null): Promise<
     BrowserWindow.getAllWindows().map((window) => window.getMediaSourceId())
   );
   if (controlWindow) internalSourceIds.add(controlWindow.getMediaSourceId());
+  const primaryDisplayId = String(screen.getPrimaryDisplay().id);
+  const sourceRank = (source: (typeof sources)[number]): number => {
+    if (!source.id.startsWith("screen:")) return 2;
+    return source.display_id === primaryDisplayId ? 0 : 1;
+  };
 
   return sources
     .filter((source) => !internalSourceIds.has(source.id))
+    .sort((left, right) => sourceRank(left) - sourceRank(right))
     .map((source) => ({
       id: source.id,
       name: source.name,

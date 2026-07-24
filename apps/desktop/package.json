@@ -7,6 +7,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:capture": "pnpm build && node scripts/capture-smoke.mjs",
     "smoke:tray": "pnpm build && node scripts/tray-smoke.mjs",
     "smoke:runtime": "pnpm build && node scripts/runtime-smoke.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -14,6 +15,7 @@
   },
   "dependencies": {
     "@advx/contracts": "workspace:*",
+    "electron-log": "^5.4.4",
     "lucide-react": "^1.25.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

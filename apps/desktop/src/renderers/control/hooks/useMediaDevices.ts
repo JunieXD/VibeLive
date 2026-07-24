@@ -6,6 +6,7 @@ import {
   bindMediaStreamToVideo,
   calculateMicrophoneLevel,
   describeMediaError,
+  getDefaultDesktopSource,
   stopMediaStream
 } from '../media'
 import {
@@ -279,7 +280,7 @@ export function useMediaDevices({
       setScreenPermission('granted')
       track.addEventListener('ended', () => {
         if (captureStreamRef.current !== stream) return
-        invalidate()
+        if (sessionStatusRef.current !== 'stopping') invalidate()
         captureStreamRef.current = null
         setCaptureStream(null)
         if (visualSettingsRef.current.mode === 'pip' && cameraStreamRef.current) {
@@ -330,7 +331,7 @@ export function useMediaDevices({
       setCameraPermission('granted')
       track.addEventListener('ended', () => {
         if (cameraStreamRef.current !== stream) return
-        invalidate()
+        if (sessionStatusRef.current !== 'stopping') invalidate()
         cameraStreamRef.current = null
         setCameraStream(null)
         setCameraEnabled(false)
@@ -412,7 +413,7 @@ export function useMediaDevices({
       setMicrophonePermission('granted')
       track.addEventListener('ended', () => {
         if (microphoneStreamRef.current !== stream) return
-        invalidate()
+        if (sessionStatusRef.current !== 'stopping') invalidate()
         microphoneStreamRef.current = null
         const activeProcessor = audioProcessorRef.current
         audioProcessorRef.current = null
@@ -464,6 +465,44 @@ export function useMediaDevices({
       finish(id)
     }
   }, [begin, cameraEnabled, finish, isCurrent, startCapture])
+
+  useEffect(() => {
+    if (selectedSource) return
+    let cancelled = false
+
+    void window.advx
+      .listDesktopSources()
+      .then(async (sources) => {
+        if (cancelled || captureStreamRef.current) return
+        const source = getDefaultDesktopSource(sources)
+        if (!source) return
+        const id = begin()
+        if (id === null) return
+        try {
+          await startCapture(id, source.id)
+          if (!cancelled && isCurrent(id)) setSelectedSource(source)
+        } catch (error) {
+          if (!cancelled && isCurrent(id)) {
+            void window.advx
+              .getMediaAccessStatus()
+              .then((status) => setScreenPermission(status.screen))
+              .catch(() => undefined)
+            onSystemActivityRef.current(describeMediaError(error, 'display'))
+          }
+        } finally {
+          finish(id)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          onSystemActivityRef.current('无法读取默认桌面来源，请检查系统录屏权限。')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [begin, finish, isCurrent, selectedSource, startCapture])
 
   const requestMicrophoneAccess = useCallback(async () => {
     const id = begin()

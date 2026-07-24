@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer as electronIpcRenderer } from "electron";
 import type {
   BackendBarrageEvent,
   BackendRuntimeStatus,
@@ -6,6 +6,92 @@ import type {
   ModelConfig,
   OverlaySettings
 } from "../shared/contracts";
+
+const AUDITED_CHANNELS = new Set([
+  "app:confirm-close",
+  "audience:save-workspace",
+  "backend:provider-probe",
+  "backend:restart",
+  "backend:runtime-apply",
+  "backend:runtime-recover",
+  "backend:runtime-rollback",
+  "backend:session-pause",
+  "backend:session-resume",
+  "backend:session-start",
+  "backend:session-stop",
+  "backend:submit-text",
+  "config:save-model",
+  "desktop:select-source",
+  "media:authorize-camera-capture",
+  "media:cancel-camera-capture-authorization",
+  "media:request-camera",
+  "media:request-microphone",
+  "overlay:clear",
+  "overlay:hide",
+  "overlay:set-settings",
+  "overlay:show",
+  "shared-brain:meme-auto-ingest-set",
+  "shared-brain:meme-candidate-approve",
+  "shared-brain:meme-candidate-reject",
+  "shared-brain:meme-edit",
+  "shared-brain:meme-mutate",
+  "shared-brain:memory-delete",
+  "shared-brain:memory-edit",
+  "shared-brain:memory-reset",
+  "shared-brain:memory-revoke"
+]);
+
+function writeActionLog(
+  stage: "started" | "completed" | "failed",
+  channel: string,
+  details: { durationMs?: number; error?: unknown } = {}
+): void {
+  try {
+    electronIpcRenderer.send("logging:action", {
+      channel,
+      durationMs: details.durationMs,
+      error:
+        details.error instanceof Error
+          ? `${details.error.name}: ${details.error.message}`
+          : details.error === undefined
+            ? undefined
+            : String(details.error),
+      stage
+    });
+  } catch {
+    // Audit logging is best-effort and must never change the original IPC result.
+  }
+}
+
+const invoke: typeof electronIpcRenderer.invoke = async (channel, ...args) => {
+  if (!AUDITED_CHANNELS.has(channel)) {
+    return electronIpcRenderer.invoke(channel, ...args);
+  }
+
+  const startedAt = Date.now();
+  writeActionLog("started", channel);
+  try {
+    const result = await electronIpcRenderer.invoke(channel, ...args);
+    writeActionLog("completed", channel, { durationMs: Date.now() - startedAt });
+    return result;
+  } catch (error) {
+    writeActionLog("failed", channel, {
+      durationMs: Date.now() - startedAt,
+      error
+    });
+    throw error;
+  }
+};
+
+const ipcRenderer: Pick<
+  typeof electronIpcRenderer,
+  "invoke" | "on" | "removeListener"
+> = {
+  invoke,
+  on: (channel, listener) => electronIpcRenderer.on(channel, listener),
+  removeListener: (channel, listener) =>
+    electronIpcRenderer.removeListener(channel, listener)
+};
 
 const api: ControlApi = {
   listDesktopSources: () => ipcRenderer.invoke("desktop:list-sources"),

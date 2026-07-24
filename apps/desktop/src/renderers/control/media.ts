@@ -1,7 +1,15 @@
+import type { DesktopSource } from '../../shared/contracts'
+
 export type MediaKind = 'display' | 'microphone' | 'camera'
 
 type StoppableMediaStream = Pick<MediaStream, 'getTracks'>
 type StreamVideoElement = Pick<HTMLVideoElement, 'pause' | 'play' | 'srcObject'>
+
+export function getDefaultDesktopSource(
+  sources: readonly DesktopSource[]
+): DesktopSource | null {
+  return sources.find((source) => source.kind === 'screen') ?? sources[0] ?? null
+}
 
 export function stopMediaStream(stream: StoppableMediaStream | null): void {
   stream?.getTracks().forEach((track) => track.stop())

@@ -53,7 +53,8 @@ export function createControlWindow(): BrowserWindow {
       preload: join(__dirname, "../preload/control.js"),
       contextIsolation: true,
       sandbox: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   });
 

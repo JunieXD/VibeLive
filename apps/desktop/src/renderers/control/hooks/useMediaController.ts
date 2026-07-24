@@ -101,23 +101,23 @@ export function useMediaController({
       devices.cameraStream !== null
     ) ?? devices.visualSettings.mode
   const captureStatus =
-    sessionStatus === 'paused'
-      ? '已暂停'
-      : devices.captureStream
+    devices.captureStream
+      ? sessionStatus === 'running' || sessionStatus === 'starting'
         ? '采集中'
-        : devices.selectedSource
-          ? '待启动'
-          : '未连接'
+        : '预览中'
+      : devices.selectedSource
+        ? '待启动'
+        : '未连接'
   const cameraStatus =
-    sessionStatus === 'paused'
-      ? '已暂停'
-      : devices.cameraStream
+    devices.cameraStream
+      ? sessionStatus === 'running' || sessionStatus === 'starting'
         ? '采集中'
-        : devices.cameraPermission === 'denied' || devices.cameraPermission === 'restricted'
-          ? '权限受限'
-          : devices.cameraEnabled
-            ? '待启动'
-            : '已关闭'
+        : '预览中'
+      : devices.cameraPermission === 'denied' || devices.cameraPermission === 'restricted'
+        ? '权限受限'
+        : devices.cameraEnabled
+          ? '待启动'
+          : '已关闭'
   const microphoneStatus =
     sessionStatus === 'paused'
       ? '已暂停'

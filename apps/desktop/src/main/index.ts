@@ -25,6 +25,11 @@ import {
   initializeOverlaySettings,
   reconcileOverlayTarget
 } from "./overlay-settings";
+import {
+  backendLogger,
+  initializeLogging,
+  logger
+} from "./logging";
 import { createControlWindow } from "./windows/control";
 import { hideOverlay } from "./windows/overlay";
 
@@ -68,6 +73,7 @@ function createBackendProcessController(): BackendProcessController {
     externalOverride === "1" ||
     (externalOverride !== "0" && process.env.ADVX_BACKEND_URL !== undefined);
   if (externallyManaged) {
+    logger.info("backend.mode.external", { baseUrl: backendBaseUrl });
     return new ExternalBackendProcess({ baseUrl: backendBaseUrl });
   }
 
@@ -90,7 +96,8 @@ function createBackendProcessController(): BackendProcessController {
         ),
       cwd: process.resourcesPath,
       env: environment,
-      baseUrl: backendBaseUrl
+      baseUrl: backendBaseUrl,
+      logger: backendLogger
     });
   }
 
@@ -113,7 +120,8 @@ function createBackendProcessController(): BackendProcessController {
     ],
     cwd: repositoryRoot,
     env: environment,
-    baseUrl: backendBaseUrl
+    baseUrl: backendBaseUrl,
+    logger: backendLogger
   });
 }
 
@@ -127,6 +135,7 @@ async function initializeBackend(restart = false): Promise<BackendRuntimeStatus>
   }
 
   backendInitialization = (async () => {
+    logger.info("backend.initialize.started", { restart });
     if (restart) await backendClient.stop();
     backendClient.beginStartup();
     try {
@@ -134,8 +143,10 @@ async function initializeBackend(restart = false): Promise<BackendRuntimeStatus>
       else await controller.start();
       await backendClient.start();
       backendRestartAttempts = 0;
+      logger.info("backend.initialize.completed", { restart });
       return backendClient.currentStatus();
     } catch (error) {
+      logger.error("backend.initialize.failed", { error, restart });
       backendClient.failStartup(error);
       throw error;
     }
@@ -149,6 +160,10 @@ function scheduleBackendRecovery(exit: BackendProcessExit): void {
   if (quitRequested || backendRestartTimer) return;
   backendRestartAttempts += 1;
   if (backendRestartAttempts > 3) {
+    logger.error("backend.recovery.exhausted", {
+      attempt: backendRestartAttempts,
+      ...exit
+    });
     backendClient.failStartup(
       new Error(
         `本地后端连续退出，已停止自动恢复（${exit.signal ?? `exit ${exit.code ?? "unknown"}`}）。`
@@ -158,6 +173,11 @@ function scheduleBackendRecovery(exit: BackendProcessExit): void {
   }
   backendClient.beginStartup();
   const delayMs = [500, 1_500, 3_000][backendRestartAttempts - 1] ?? 3_000;
+  logger.warn("backend.recovery.scheduled", {
+    attempt: backendRestartAttempts,
+    delayMs,
+    ...exit
+  });
   backendRestartTimer = setTimeout(() => {
     backendRestartTimer = null;
     void initializeBackend().catch(() => scheduleBackendRecovery(exit));
@@ -166,6 +186,7 @@ function scheduleBackendRecovery(exit: BackendProcessExit): void {
 
 function openControlWindow(): BrowserWindow {
   const window = createControlWindow();
+  logger.info("window.control.opened", { webContentsId: window.webContents.id });
   allowControlWindowClose = false;
   controlWindowCloseRequested = false;
   window.on("close", (event) => {
@@ -181,6 +202,7 @@ function openControlWindow(): BrowserWindow {
     }, 5_000);
   });
   window.on("closed", () => {
+    logger.info("window.control.closed");
     if (controlWindowCloseFallback) clearTimeout(controlWindowCloseFallback);
     controlWindowCloseFallback = null;
     if (controlWindow === window) controlWindow = null;
@@ -209,6 +231,7 @@ function confirmControlWindowClose(): void {
 }
 
 function prepareApplicationShutdown(): void {
+  if (hasSingleInstanceLock) logger.info("app.shutdown.started");
   quitRequested = true;
   globalShortcut.unregisterAll();
   screen.removeListener("display-added", syncOverlayToDisplays);
@@ -241,6 +264,7 @@ function syncOverlayToDisplays(): void {
 }
 
 async function initializeApplication(): Promise<void> {
+  logger.info("app.initialize.started");
   screen.on("display-added", syncOverlayToDisplays);
   screen.on("display-removed", syncOverlayToDisplays);
   screen.on("display-metrics-changed", syncOverlayToDisplays);
@@ -256,6 +280,7 @@ async function initializeApplication(): Promise<void> {
   }
   backendProcess = createBackendProcessController();
   backendProcess.onUnexpectedExit((exit) => {
+    logger.warn("backend.process.unexpected-exit", exit);
     void backendClient.stop().finally(() => scheduleBackendRecovery(exit));
   });
   registerDesktopIpc(
@@ -287,6 +312,7 @@ async function initializeApplication(): Promise<void> {
   }
 
   const emergencyShortcutRegistered = globalShortcut.register("CommandOrControl+Shift+X", () => {
+    logger.warn("action.emergency-stop");
     hideOverlay();
     controlWindow?.webContents.send("session:emergency-stop");
     controlWindow?.show();
@@ -295,6 +321,7 @@ async function initializeApplication(): Promise<void> {
   if (!emergencyShortcutRegistered) {
     console.error("Failed to register the Overlay emergency shortcut");
   }
+  logger.info("app.initialize.completed");
 
   app.on("activate", () => {
     if (quitRequested || appShutdownPromise) return;
@@ -311,7 +338,11 @@ if (!hasSingleInstanceLock) {
   quitRequested = true;
   app.quit();
 } else {
-  app.on("second-instance", showControlWindow);
+  initializeLogging();
+  app.on("second-instance", () => {
+    logger.info("app.second-instance.focus-requested");
+    showControlWindow();
+  });
   void app
     .whenReady()
     .then(initializeApplication)
@@ -337,6 +368,7 @@ app.on("before-quit", (event) => {
 
   prepareApplicationShutdown();
   appShutdownPromise = stopApplicationResources().finally(() => {
+    if (hasSingleInstanceLock) logger.info("app.shutdown.completed");
     appShutdownComplete = true;
     allowControlWindowClose = true;
     if (controlWindow && !controlWindow.isDestroyed()) controlWindow.destroy();

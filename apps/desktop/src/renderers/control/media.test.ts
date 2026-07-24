@@ -3,10 +3,32 @@ import {
   bindMediaStreamToVideo,
   calculateMicrophoneLevel,
   describeMediaError,
+  getDefaultDesktopSource,
   stopMediaStream
 } from './media'
 
 describe('desktop media helpers', () => {
+  it('prefers a desktop screen over application windows', () => {
+    const windowSource = {
+      id: 'window:1:0',
+      name: 'Editor',
+      thumbnailUrl: 'window',
+      appIconUrl: null,
+      kind: 'window'
+    } as const
+    const screenSource = {
+      id: 'screen:0:0',
+      name: 'Screen 1',
+      thumbnailUrl: 'screen',
+      appIconUrl: null,
+      kind: 'screen'
+    } as const
+
+    expect(getDefaultDesktopSource([windowSource, screenSource])).toBe(screenSource)
+    expect(getDefaultDesktopSource([windowSource])).toBe(windowSource)
+    expect(getDefaultDesktopSource([])).toBeNull()
+  })
+
   it('stops every track in a media stream', () => {
     const firstStop = vi.fn()
     const secondStop = vi.fn()

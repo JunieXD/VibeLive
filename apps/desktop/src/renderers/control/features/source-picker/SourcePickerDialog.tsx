@@ -1,6 +1,7 @@
 import { MonitorUp, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
 import type { DesktopSource } from '../../../../shared/contracts'
+import { getDefaultDesktopSource } from '../../media'
 
 export type SourcePickerDialogProps = {
   onClose: () => void
@@ -26,7 +27,7 @@ export function SourcePickerDialog({
       setSelectedId((current) =>
         nextSources.some((source) => source.id === current)
           ? current
-          : (nextSources[0]?.id ?? null)
+          : getDefaultDesktopSource(nextSources)?.id ?? null
       )
     } catch {
       setError('无法读取屏幕来源，请检查系统录屏权限。')

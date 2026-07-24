@@ -229,8 +229,6 @@ export function useSessionMediaControls({
     } catch (error) {
       if (!devices.operation.isCurrent(operationId)) return
       setAudienceSessionActive(false)
-      if (devices.captureStreamRef.current === displayStream) devices.stopCapture()
-      if (devices.cameraStreamRef.current === cameraStream) devices.stopCamera()
       if (devices.microphoneStreamRef.current === microphoneStream) {
         await devices.stopMicrophone()
       }
@@ -249,8 +247,6 @@ export function useSessionMediaControls({
       })
     } finally {
       if (!devices.operation.isCurrent(operationId)) {
-        if (devices.captureStreamRef.current === displayStream) devices.stopCapture()
-        if (devices.cameraStreamRef.current === cameraStream) devices.stopCamera()
         if (devices.microphoneStreamRef.current === microphoneStream) {
           await devices.stopMicrophone()
         }
@@ -266,15 +262,17 @@ export function useSessionMediaControls({
     syncBackendSession
   ])
 
-  const stopSession = useCallback(async (): Promise<void> => {
+  const stopSession = useCallback(async (releaseVisualPreview = false): Promise<void> => {
     const devices = devicesRef.current
     const operationId = devices.operation.begin(true)
     if (operationId === null) return
     let backendSessionActive = backendSessionActiveRef.current
     sessionStatusRef.current = 'stopping'
     dispatchSession({ type: 'stop' })
-    devices.stopCapture()
-    devices.stopCamera()
+    if (releaseVisualPreview) {
+      devices.stopCapture()
+      devices.stopCamera()
+    }
     try {
       await devices.stopMicrophone()
     } catch (error) {
@@ -320,7 +318,7 @@ export function useSessionMediaControls({
     syncBackendSession
   ])
 
-  useEffect(() => window.advx.onEmergencyStop(() => void stopSession()), [stopSession])
+  useEffect(() => window.advx.onEmergencyStop(() => void stopSession(true)), [stopSession])
 
   const toggleGoLive = useCallback((): void => {
     const active = ['starting', 'running', 'paused', 'stopping'].includes(sessionStatus)
@@ -332,16 +330,12 @@ export function useSessionMediaControls({
     const devices = devicesRef.current
     const operationId = devices.operation.begin()
     if (operationId === null) return
-    let displayStream: MediaStream | null = null
-    let cameraStream: MediaStream | null = null
     let microphoneStream: MediaStream | null = null
     let failureKind: FatalMediaKind = 'display'
     if (sessionStatus === 'running') {
       restoreMicrophoneOnResumeRef.current = devices.microphoneStreamRef.current !== null
       sessionStatusRef.current = 'paused'
       dispatchSession({ type: 'pause' })
-      devices.stopCapture()
-      devices.stopCamera()
       try {
         await devices.stopMicrophone()
       } catch (error) {
@@ -377,18 +371,19 @@ export function useSessionMediaControls({
         const requirements = requiredVisualSources(devices.visualSettingsRef.current.mode)
         if (requirements.screen) {
           failureKind = 'display'
-          displayStream = await devices.startCapture(
-            operationId,
-            devices.selectedSource?.id ?? ''
-          )
+          if (!devices.captureStreamRef.current) {
+            await devices.startCapture(operationId, devices.selectedSource?.id ?? '')
+          }
           if (!devices.operation.isCurrent(operationId)) return
         }
         if (requirements.camera) {
           failureKind = 'camera'
-          cameraStream = await devices.startCamera(
-            operationId,
-            devices.visualSettingsRef.current.cameraDeviceId || undefined
-          )
+          if (!devices.cameraStreamRef.current) {
+            await devices.startCamera(
+              operationId,
+              devices.visualSettingsRef.current.cameraDeviceId || undefined
+            )
+          }
           if (!devices.operation.isCurrent(operationId)) return
         }
         if (restoreMicrophoneOnResumeRef.current) {
@@ -429,8 +424,6 @@ export function useSessionMediaControls({
         }
       } catch (error) {
         if (!devices.operation.isCurrent(operationId)) return
-        if (devices.captureStreamRef.current === displayStream) devices.stopCapture()
-        if (devices.cameraStreamRef.current === cameraStream) devices.stopCamera()
         if (devices.microphoneStreamRef.current === microphoneStream) {
           await devices.stopMicrophone()
         }
@@ -449,8 +442,6 @@ export function useSessionMediaControls({
         })
       } finally {
         if (!devices.operation.isCurrent(operationId)) {
-          if (devices.captureStreamRef.current === displayStream) devices.stopCapture()
-          if (devices.cameraStreamRef.current === cameraStream) devices.stopCamera()
           if (devices.microphoneStreamRef.current === microphoneStream) {
             await devices.stopMicrophone()
           }
