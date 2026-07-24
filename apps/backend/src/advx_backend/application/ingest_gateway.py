@@ -27,6 +27,9 @@ class IngestGateway:
             raise RuntimeError("the ingest gateway is already configured")
         self._port = port
 
+    def clear(self) -> None:
+        self._port = None
+
     async def submit_text(self, input: TextInput) -> IngestReceipt:
         return await self._require_port().submit_text(input)
 

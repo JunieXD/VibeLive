@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -40,18 +41,26 @@ class ReactionSchedulerConfig:
     observation_ttl_ms: int = 30_000
     max_tracked_sessions: int = 32
     max_pending_observations_per_session: int = 1
+    observation_merge_window_ms: int = 0
 
     def __post_init__(self) -> None:
         _require_positive_int("observation_ttl_ms", self.observation_ttl_ms)
         _require_positive_int("max_tracked_sessions", self.max_tracked_sessions)
         if self.max_pending_observations_per_session != 1:
             raise ValueError("max_pending_observations_per_session must be exactly one")
+        if (
+            isinstance(self.observation_merge_window_ms, bool)
+            or not isinstance(self.observation_merge_window_ms, int)
+            or self.observation_merge_window_ms < 0
+        ):
+            raise ValueError("observation_merge_window_ms must be a non-negative integer")
 
 
 @dataclass(slots=True)
 class _ScheduledObservation:
     observation: Observation
-    completion: asyncio.Future[ReactionResult | None]
+    completions: list[asyncio.Future[ReactionResult | None]]
+    merge_window_ms: int
 
 
 @dataclass(slots=True)
@@ -78,11 +87,13 @@ class LatestWinsReactionScheduler:
         session_tasks: SessionTaskScope,
         clock: Clock,
         config: ReactionSchedulerConfig | None = None,
+        merge_window_provider: Callable[[str], Awaitable[int]] | None = None,
     ) -> None:
         self._executor = executor
         self._session_tasks = session_tasks
         self._clock = clock
         self._config = ReactionSchedulerConfig() if config is None else config
+        self._merge_window_provider = merge_window_provider
         self._lock = asyncio.Lock()
         self._sessions: OrderedDict[str, _SessionSchedule] = OrderedDict()
 
@@ -104,6 +115,7 @@ class LatestWinsReactionScheduler:
         if self._is_expired(observation):
             completion.set_result(None)
             return completion
+        merge_window_ms = await self._merge_window_ms(observation.session_id)
 
         async with self._lock:
             schedule = self._sessions.get(observation.session_id)
@@ -117,10 +129,18 @@ class LatestWinsReactionScheduler:
                 self._sessions.move_to_end(observation.session_id)
 
             if schedule.pending is not None:
-                self._resolve(schedule.pending.completion, None)
+                if schedule.pending.merge_window_ms:
+                    schedule.pending.observation = self._merge_observations(
+                        schedule.pending.observation,
+                        observation,
+                    )
+                    schedule.pending.completions.append(completion)
+                    return completion
+                self._resolve_all(schedule.pending.completions, None)
             scheduled = _ScheduledObservation(
                 observation=observation,
-                completion=completion,
+                completions=[completion],
+                merge_window_ms=merge_window_ms,
             )
             schedule.pending = scheduled
 
@@ -188,10 +208,10 @@ class LatestWinsReactionScheduler:
                 return
 
             if schedule.pending is not None:
-                self._resolve(schedule.pending.completion, None)
+                self._resolve_all(schedule.pending.completions, None)
                 schedule.pending = None
             if schedule.running is not None:
-                self._resolve(schedule.running.completion, None)
+                self._resolve_all(schedule.running.completions, None)
                 schedule.running = None
             worker = schedule.worker
             schedule.worker = None
@@ -232,11 +252,18 @@ class LatestWinsReactionScheduler:
                         schedule.worker = None
                         self._remove_if_idle(session_id, schedule)
                         return
+                if scheduled.merge_window_ms:
+                    await asyncio.sleep(scheduled.merge_window_ms / 1_000)
+                async with self._lock:
+                    if self._sessions.get(session_id) is not schedule:
+                        return
+                    if schedule.pending is not scheduled:
+                        continue
                     schedule.pending = None
                     schedule.running = scheduled
 
                 result = await self._execute(scheduled)
-                self._resolve(scheduled.completion, result)
+                self._resolve_all(scheduled.completions, result)
 
                 async with self._lock:
                     if self._sessions.get(session_id) is schedule and schedule.running is scheduled:
@@ -245,10 +272,10 @@ class LatestWinsReactionScheduler:
             async with self._lock:
                 if self._sessions.get(session_id) is schedule:
                     if schedule.running is not None:
-                        self._resolve(schedule.running.completion, None)
+                        self._resolve_all(schedule.running.completions, None)
                         schedule.running = None
                     if schedule.pending is not None:
-                        self._resolve(schedule.pending.completion, None)
+                        self._resolve_all(schedule.pending.completions, None)
                         schedule.pending = None
                     schedule.worker = None
                     self._remove_if_idle(session_id, schedule)
@@ -287,6 +314,14 @@ class LatestWinsReactionScheduler:
     def _is_expired(self, observation: Observation) -> bool:
         return self._clock.now_ms() >= observation.created_at_ms + self._config.observation_ttl_ms
 
+    async def _merge_window_ms(self, session_id: str) -> int:
+        if self._merge_window_provider is None:
+            return self._config.observation_merge_window_ms
+        value = await self._merge_window_provider(session_id)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError("dynamic observation merge window must be non-negative")
+        return value
+
     @staticmethod
     def _resolve(
         completion: asyncio.Future[ReactionResult | None],
@@ -294,6 +329,91 @@ class LatestWinsReactionScheduler:
     ) -> None:
         if not completion.done():
             completion.set_result(result)
+
+    @classmethod
+    def _resolve_all(
+        cls,
+        completions: list[asyncio.Future[ReactionResult | None]],
+        result: ReactionResult | None,
+    ) -> None:
+        for completion in completions:
+            cls._resolve(completion, result)
+
+    @staticmethod
+    def _merge_observations(first: Observation, latest: Observation) -> Observation:
+        if first.session_id != latest.session_id:
+            raise ValueError("cannot merge observations from different sessions")
+        frames = {
+            frame.frame_id: frame
+            for frame in (*first.frames, *latest.frames)
+        }
+        events = {
+            event.event_id: event
+            for event in (*first.room_events, *latest.room_events)
+        }
+        target_viewer_id, target_persona_id, target_ambiguous = (
+            LatestWinsReactionScheduler._merge_targets(first, latest)
+        )
+        return Observation(
+            session_id=first.session_id,
+            observation_id=latest.observation_id,
+            created_at_ms=min(first.created_at_ms, latest.created_at_ms),
+            frames=tuple(
+                sorted(frames.values(), key=lambda item: (item.created_at_ms, item.frame_id))
+            ),
+            room_events=tuple(
+                sorted(events.values(), key=lambda item: (item.sequence, item.event_id))
+            ),
+            trigger_event_ids=tuple(
+                dict.fromkeys((*first.trigger_event_ids, *latest.trigger_event_ids))
+            ),
+            trigger_frame_ids=tuple(
+                dict.fromkeys((*first.trigger_frame_ids, *latest.trigger_frame_ids))
+            ),
+            user_context={**first.user_context, **latest.user_context},
+            target_viewer_id=target_viewer_id,
+            target_persona_id=target_persona_id,
+            target_ambiguous=target_ambiguous,
+        )
+
+    @staticmethod
+    def _merge_targets(
+        first: Observation,
+        latest: Observation,
+    ) -> tuple[str | None, str | None, bool]:
+        if first.target_ambiguous or latest.target_ambiguous:
+            return None, None, True
+        targets = {
+            ("viewer", target)
+            for target in (first.target_viewer_id, latest.target_viewer_id)
+            if target is not None
+        }
+        targets.update(
+            ("persona", target)
+            for target in (first.target_persona_id, latest.target_persona_id)
+            if target is not None
+        )
+        for observation in (first, latest):
+            trigger_ids = set(observation.trigger_event_ids)
+            if not trigger_ids:
+                continue
+            for event in observation.room_events:
+                if trigger_ids and event.event_id not in trigger_ids:
+                    continue
+                viewer = event.payload.get("target_viewer_id")
+                persona = event.payload.get("target_persona_id")
+                if isinstance(viewer, str) and viewer:
+                    targets.add(("viewer", viewer))
+                if isinstance(persona, str) and persona:
+                    targets.add(("persona", persona))
+        if len(targets) != 1:
+            return None, None, len(targets) > 1
+        kind, target = next(iter(targets))
+        return (
+            (target, None, False)
+            if kind == "viewer"
+            else (None, target, False)
+        )
 
     def _remove_if_idle(self, session_id: str, schedule: _SessionSchedule) -> None:
         if (

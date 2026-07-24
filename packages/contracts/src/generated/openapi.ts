@@ -39,6 +39,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/configuration/providers/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discover Provider Models */
+        get: operations["discover_provider_models_configuration_providers_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/configuration/providers/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Probe Provider Capabilities */
+        post: operations["probe_provider_capabilities_configuration_providers_probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions/current": {
         parameters: {
             query?: never;
@@ -124,10 +158,849 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/debug/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query Traces */
+        get: operations["query_traces_debug_traces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/debug/traces/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Export Traces */
+        post: operations["export_traces_debug_traces_export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/debug/runtime/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runtime Snapshot */
+        get: operations["runtime_snapshot_debug_runtime__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/debug/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replay */
+        post: operations["replay_debug_replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Runtime Session */
+        post: operations["start_runtime_session_runtime_sessions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current Runtime Session */
+        get: operations["current_runtime_session_runtime_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/sessions/{session_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Runtime */
+        post: operations["apply_runtime_runtime_sessions__session_id__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/sessions/{session_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Runtime */
+        post: operations["rollback_runtime_runtime_sessions__session_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runtime/sessions/{session_id}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recover Runtime */
+        post: operations["recover_runtime_runtime_sessions__session_id__recover_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/rooms/{room_id}/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Memories */
+        get: operations["list_memories_shared_brain_rooms__room_id__memories_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/rooms/{room_id}/memory-head": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Memory Head */
+        get: operations["get_memory_head_shared_brain_rooms__room_id__memory_head_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/rooms/{room_id}/memories/{memory_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Memory */
+        get: operations["get_memory_shared_brain_rooms__room_id__memories__memory_id__get"];
+        /** Edit Memory */
+        put: operations["edit_memory_shared_brain_rooms__room_id__memories__memory_id__put"];
+        post?: never;
+        /** Delete Memory */
+        delete: operations["delete_memory_shared_brain_rooms__room_id__memories__memory_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/maintenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Maintain Memes */
+        post: operations["maintain_memes_shared_brain_modes__namespace_id__memes_maintenance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/rooms/{room_id}/memories/{memory_id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Merge Memory */
+        post: operations["merge_memory_shared_brain_rooms__room_id__memories__memory_id__merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/rooms/{room_id}/memories/{memory_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replace Memory */
+        post: operations["replace_memory_shared_brain_rooms__room_id__memories__memory_id__replace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/memory-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Commit Memory Candidate */
+        post: operations["commit_memory_candidate_shared_brain_memory_candidates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/rooms/{room_id}/memories/{memory_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Memory */
+        post: operations["revoke_memory_shared_brain_rooms__room_id__memories__memory_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/rooms/{room_id}/memories/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Memories */
+        post: operations["reset_memories_shared_brain_rooms__room_id__memories_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Memes */
+        get: operations["list_memes_shared_brain_modes__namespace_id__memes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Active Memes */
+        get: operations["list_active_memes_shared_brain_modes__namespace_id__memes_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/meme-candidates/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pending Candidates */
+        get: operations["list_pending_candidates_shared_brain_modes__namespace_id__meme_candidates_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/auto-ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Auto Ingest */
+        get: operations["get_auto_ingest_shared_brain_modes__namespace_id__auto_ingest_get"];
+        /** Set Auto Ingest */
+        put: operations["set_auto_ingest_shared_brain_modes__namespace_id__auto_ingest_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/meme-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Commit Meme Candidate */
+        post: operations["commit_meme_candidate_shared_brain_meme_candidates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/legacy-memes/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Legacy Meme */
+        post: operations["import_legacy_meme_shared_brain_modes__namespace_id__legacy_memes_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/meme-candidates/{candidate_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Meme Candidate */
+        post: operations["approve_meme_candidate_shared_brain_modes__namespace_id__meme_candidates__candidate_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/meme-candidates/{candidate_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Meme Candidate */
+        post: operations["reject_meme_candidate_shared_brain_modes__namespace_id__meme_candidates__candidate_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Edit Meme */
+        put: operations["edit_meme_shared_brain_modes__namespace_id__memes__meme_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo Mode Meme */
+        post: operations["undo_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__undo_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke Mode Meme */
+        post: operations["revoke_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Mode Meme */
+        post: operations["disable_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Mode Meme */
+        post: operations["restore_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restart Mode Meme */
+        post: operations["restart_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__restart_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pin Mode Meme */
+        post: operations["pin_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__pin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}/unpin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unpin Mode Meme */
+        post: operations["unpin_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__unpin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shared-brain/modes/{namespace_id}/memes/{meme_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Mode Meme */
+        post: operations["archive_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AmbienceMode
+         * @enum {string}
+         */
+        AmbienceMode: "natural" | "continuous";
+        /** AutoIngestRequest */
+        AutoIngestRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** AutoIngestResponse */
+        AutoIngestResponse: {
+            /** Namespace Id */
+            namespace_id: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Revision */
+            revision: number;
+        };
+        /** CandidateCommitResponse */
+        CandidateCommitResponse: {
+            /** Accepted */
+            accepted: boolean;
+            /**
+             * Pending
+             * @default false
+             */
+            pending: boolean;
+            /** Result Id */
+            result_id?: string | null;
+            /** Revision */
+            revision?: number | null;
+            /** Head Revision */
+            head_revision?: number | null;
+            /**
+             * Created
+             * @default false
+             */
+            created: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** CanonicalRuntimeSpec */
+        CanonicalRuntimeSpec: {
+            /**
+             * Protocol Version
+             * @default 2
+             * @constant
+             */
+            protocol_version: 2;
+            /**
+             * Audience Contract Version
+             * @default 1
+             * @constant
+             */
+            audience_contract_version: 1;
+            /** Config Revision */
+            config_revision: number;
+            room: components["schemas"]["Room"];
+            /** Active Mode Id */
+            active_mode_id: string;
+            /** Personas */
+            personas: components["schemas"]["PersonaTemplate"][];
+            /** Modes */
+            modes: components["schemas"]["ModeDefinition"][];
+            provider: components["schemas"]["ProviderRuntimeSpec"];
+            settings?: components["schemas"]["RuntimeSettings"];
+        };
+        /** CrowdDecision */
+        CrowdDecision: {
+            /** Decision Id */
+            decision_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Observation Id */
+            observation_id: string;
+            /** Selected Viewer Ids */
+            selected_viewer_ids?: string[];
+            /** Reason Codes */
+            reason_codes?: string[];
+            /** Evidence Event Ids */
+            evidence_event_ids?: string[];
+            /** Evidence Frame Indexes */
+            evidence_frame_indexes?: number[];
+            /** @default director */
+            decision_source: components["schemas"]["DecisionSource"];
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Expires At Ms */
+            expires_at_ms: number;
+        };
+        /** DebugContextReferences */
+        DebugContextReferences: {
+            /** Event Ids */
+            event_ids?: string[];
+            /** Frame Hashes */
+            frame_hashes?: string[];
+            /** Memory Ids */
+            memory_ids?: string[];
+        };
+        /** DebugMemeSnapshot */
+        DebugMemeSnapshot: {
+            /** Ids */
+            ids?: string[];
+            /** Candidate Ids */
+            candidate_ids?: string[];
+        };
+        /** DebugMemorySnapshot */
+        DebugMemorySnapshot: {
+            /**
+             * Revision
+             * @default 0
+             */
+            revision: number;
+            /** Ids */
+            ids?: string[];
+        };
+        /** DebugQueueSnapshot */
+        DebugQueueSnapshot: {
+            /** Depth */
+            depth?: number | null;
+            /** Capacity */
+            capacity?: number | null;
+        };
+        /** DebugRuntimeSnapshot */
+        DebugRuntimeSnapshot: {
+            /**
+             * Protocol Version
+             * @default 2
+             * @constant
+             */
+            protocol_version: 2;
+            /**
+             * Redacted
+             * @default true
+             * @constant
+             */
+            redacted: true;
+            /** Session Id */
+            session_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Accepting Results */
+            accepting_results: boolean;
+            config: components["schemas"]["CanonicalRuntimeSpec"];
+            pool: components["schemas"]["DebugViewerPoolSnapshot"];
+            /** Waves */
+            waves?: components["schemas"]["ObservationWaveTrace"][];
+            /** Director Budgets */
+            director_budgets?: components["schemas"]["DirectorBudgetTrace"][];
+            queue?: components["schemas"]["DebugQueueSnapshot"] | null;
+            telemetry?: components["schemas"]["ViewerRuntimeTelemetry"] | null;
+            context_refs?: components["schemas"]["DebugContextReferences"];
+            memory?: components["schemas"]["DebugMemorySnapshot"];
+            memes?: components["schemas"]["DebugMemeSnapshot"];
+            /** History */
+            history?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Unavailable */
+            unavailable?: string[];
+        };
+        /** DebugViewerPoolSnapshot */
+        DebugViewerPoolSnapshot: {
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Mode Id */
+            mode_id: string;
+            /** Session Seed */
+            session_seed: string;
+            /** Viewers */
+            viewers?: components["schemas"]["ViewerInstance"][];
+        };
+        /**
+         * DecisionSource
+         * @enum {string}
+         */
+        DecisionSource: "director" | "fallback";
+        /** DirectorBudgetTrace */
+        DirectorBudgetTrace: {
+            /** Minimum */
+            minimum: number;
+            /** Maximum */
+            maximum: number;
+            /** Available Viewer Ids */
+            available_viewer_ids?: string[];
+            /** Forced Viewer Ids */
+            forced_viewer_ids?: string[];
+        };
+        /**
+         * DirectorFailureMode
+         * @enum {string}
+         */
+        DirectorFailureMode: "strict" | "resilient";
+        /** ExpectedRevisionRequest */
+        ExpectedRevisionRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /** FrameBundleSettings */
+        FrameBundleSettings: {
+            /**
+             * Frame Bundle Size
+             * @default 3
+             */
+            frame_bundle_size: number;
+            /**
+             * Frame Window Ms
+             * @default 10000
+             */
+            frame_window_ms: number;
+            /** @default change_peaks */
+            frame_selection_strategy: components["schemas"]["FrameSelectionStrategy"];
+            /**
+             * Frame Max Dimension
+             * @default 1280
+             */
+            frame_max_dimension: number;
+            /**
+             * Frame Quality
+             * @default 80
+             */
+            frame_quality: number;
+        };
+        /**
+         * FrameSelectionStrategy
+         * @enum {string}
+         */
+        FrameSelectionStrategy: "latest_n" | "evenly_spaced" | "change_peaks";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -138,22 +1011,454 @@ export interface components {
             /**
              * Status
              * @default ok
-             * @constant
+             * @enum {string}
              */
-            status: "ok";
+            status: "ok" | "degraded";
             /**
              * Protocol Version
+             * @default 2
+             * @constant
+             */
+            protocol_version: 2;
+            /** Persistence Error */
+            persistence_error?: {
+                [key: string]: string;
+            } | null;
+        };
+        JsonValue: unknown;
+        /** LegacyMemeImportRequest */
+        LegacyMemeImportRequest: {
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Legacy Meme Id */
+            legacy_meme_id: string;
+            /** Text */
+            text: string;
+            /** Legacy Created At Ms */
+            legacy_created_at_ms?: number | null;
+        };
+        /** LegacyMemeImportResponse */
+        LegacyMemeImportResponse: {
+            /** Candidate Id */
+            candidate_id: string;
+            /** Meme Id */
+            meme_id: string;
+            /** Provenance Event Id */
+            provenance_event_id: string;
+            /** Created */
+            created: boolean;
+        };
+        /** MemeCandidate */
+        MemeCandidate: {
+            /** Candidate Id */
+            candidate_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Observation Id */
+            observation_id: string;
+            /** Namespace Id */
+            namespace_id: string;
+            /** Text */
+            text: string;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /** Evidence Event Ids */
+            evidence_event_ids: string[];
+            /** Evidence Frame Indexes */
+            evidence_frame_indexes?: number[];
+            /** @default pending */
+            outcome: components["schemas"]["MemeCandidateOutcome"];
+            /** Created At Ms */
+            created_at_ms: number;
+        };
+        /**
+         * MemeCandidateOutcome
+         * @enum {string}
+         */
+        MemeCandidateOutcome: "pending" | "accepted" | "rejected";
+        /** MemeEditRequest */
+        MemeEditRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Text */
+            text: string;
+            /** Intensity */
+            intensity?: number | null;
+        };
+        /** MemeMaintenanceResponse */
+        MemeMaintenanceResponse: {
+            /** Archived Meme Ids */
+            archived_meme_ids: string[];
+        };
+        /** MemoryCandidateRequest */
+        MemoryCandidateRequest: {
+            /** Candidate Id */
+            candidate_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Base Revision */
+            base_revision: number;
+            /** Memory Id */
+            memory_id: string;
+            memory_type: components["schemas"]["RoomMemoryType"];
+            /** Content */
+            content: string;
+            /** Evidence Event Ids */
+            evidence_event_ids: string[];
+            /** Tags */
+            tags?: string[];
+            /**
+             * Origin
+             * @default extracted
+             */
+            origin: string;
+            /**
+             * Importance
+             * @default 0.5
+             */
+            importance: number;
+            /**
+             * Confidence
+             * @default 0.5
+             */
+            confidence: number;
+        };
+        /** MemoryEditRequest */
+        MemoryEditRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Content */
+            content: string;
+            /**
+             * Confidence
+             * @default 0.5
+             */
+            confidence: number;
+            /** Evidence Event Ids */
+            evidence_event_ids?: string[] | null;
+        };
+        /** MemoryHeadResponse */
+        MemoryHeadResponse: {
+            /** Room Id */
+            room_id: string;
+            /** Revision */
+            revision: number;
+        };
+        /** MemoryMergeRequest */
+        MemoryMergeRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Source Memory Id */
+            source_memory_id: string;
+            /** Source Expected Revision */
+            source_expected_revision: number;
+            /** Content */
+            content: string;
+        };
+        /** MemoryReferenceTrace */
+        MemoryReferenceTrace: {
+            /** Room Id */
+            room_id: string;
+            /** Memory Revision */
+            memory_revision: number;
+            /** Memory Ids */
+            memory_ids?: string[];
+        };
+        /** MemoryReplaceRequest */
+        MemoryReplaceRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Replacement Memory Id */
+            replacement_memory_id: string;
+            /** Content */
+            content: string;
+            /** Evidence Event Ids */
+            evidence_event_ids: string[];
+        };
+        /** MemoryResetResponse */
+        MemoryResetResponse: {
+            /** Deleted Count */
+            deleted_count: number;
+        };
+        /** ModeDefinition */
+        ModeDefinition: {
+            /** Mode Id */
+            mode_id: string;
+            /** Namespace Id */
+            namespace_id: string;
+            /** Revision */
+            revision: number;
+            /** Viewer Count */
+            viewer_count: number;
+            /** Persona Ids */
+            persona_ids: string[];
+            /** Persona Weights */
+            persona_weights: {
+                [key: string]: number;
+            };
+            /** Persona Overrides */
+            persona_overrides?: {
+                [key: string]: components["schemas"]["PersonaOverride"];
+            };
+            normal_response_range: components["schemas"]["ResponseRange"];
+            highlight_response_range: components["schemas"]["ResponseRange"];
+            /** @default natural */
+            ambience: components["schemas"]["AmbienceMode"];
+        };
+        /** ModeMeme */
+        ModeMeme: {
+            /** Meme Id */
+            meme_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Namespace Id */
+            namespace_id: string;
+            /** Text */
+            text: string;
+            /**
+             * Intensity
+             * @default 0.5
+             */
+            intensity: number;
+            /** Source Candidate Id */
+            source_candidate_id: string;
+            /** @default active */
+            state: components["schemas"]["ModeMemeState"];
+            /**
+             * Pinned
+             * @default false
+             */
+            pinned: boolean;
+            /**
+             * Use Count
+             * @default 0
+             */
+            use_count: number;
+            /** Revision */
+            revision: number;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Updated At Ms */
+            updated_at_ms: number;
+        };
+        /**
+         * ModeMemeState
+         * @enum {string}
+         */
+        ModeMemeState: "active" | "disabled" | "archived" | "revoked";
+        /**
+         * ObservationTrigger
+         * @enum {string}
+         */
+        ObservationTrigger: "user_text" | "final_voice" | "screen_change" | "ambient_tick";
+        /**
+         * ObservationWaveStatus
+         * @enum {string}
+         */
+        ObservationWaveStatus: "completed" | "empty" | "failed" | "skipped";
+        /** ObservationWaveTrace */
+        ObservationWaveTrace: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            trace_kind: "observation_wave";
+            /**
+             * Trace Schema Version
              * @default 1
              * @constant
              */
-            protocol_version: 1;
+            trace_schema_version: 1;
+            /** Trace Id */
+            trace_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Config Hash */
+            config_hash: string;
+            /** Observation Id */
+            observation_id: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Deadline At Ms */
+            deadline_at_ms: number;
+            /** Triggers */
+            triggers: components["schemas"]["ObservationTrigger"][];
+            /** Event Ids */
+            event_ids?: string[];
+            /** Trigger Event Ids */
+            trigger_event_ids?: string[];
+            /** Frame Hashes */
+            frame_hashes?: string[];
+            memory: components["schemas"]["MemoryReferenceTrace"];
+            director_status: components["schemas"]["ObservationWaveStatus"];
+            /** Selected Viewer Ids */
+            selected_viewer_ids?: string[];
+            /**
+             * Decision Id
+             * @default null
+             */
+            decision_id: string | null;
+            /** @default null */
+            decision_source: components["schemas"]["DecisionSource"] | null;
+            /** Reason Codes */
+            reason_codes?: string[];
+            /**
+             * Failure Reason
+             * @default null
+             */
+            failure_reason: string | null;
+        };
+        /** PersonaOverride */
+        PersonaOverride: {
+            /** Display Name */
+            display_name?: string | null;
+            /** Traits */
+            traits?: string[] | null;
+            /** Speech Style */
+            speech_style?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /** Behavior */
+            behavior?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /** Trigger Preferences */
+            trigger_preferences?: string[] | null;
+            /** Avoid Patterns */
+            avoid_patterns?: string[] | null;
+            /** Silence Bias */
+            silence_bias?: number | null;
+            /** Burst Bias */
+            burst_bias?: number | null;
+            /** Repetition Bias */
+            repetition_bias?: number | null;
+            /** Cooldown Ms */
+            cooldown_ms?: number | null;
+            /** Content Flags */
+            content_flags?: string[] | null;
+        };
+        /** PersonaTemplate */
+        PersonaTemplate: {
+            /** Persona Id */
+            persona_id: string;
+            /** Document Version */
+            document_version: number;
+            /** Revision */
+            revision: number;
+            /** Content Hash */
+            content_hash: string;
+            /** Display Name */
+            display_name: string;
+            /** Role */
+            role: string;
+            /** Traits */
+            traits?: string[];
+            /** Speech Style */
+            speech_style?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Behavior */
+            behavior?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Trigger Preferences */
+            trigger_preferences?: string[];
+            /** Avoid Patterns */
+            avoid_patterns?: string[];
+            /** Silence Bias */
+            silence_bias: number;
+            /** Burst Bias */
+            burst_bias: number;
+            /** Repetition Bias */
+            repetition_bias: number;
+            /** Cooldown Ms */
+            cooldown_ms: number;
+            /** Content Flags */
+            content_flags?: string[];
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** PromptManifest */
+        PromptManifest: {
+            /** Template Id */
+            template_id: string;
+            /** Template Revision */
+            template_revision: number;
+            /** Input Hash */
+            input_hash: string;
+            /** Sections */
+            sections?: string[];
+        };
+        /** ProviderCapabilityCheck */
+        ProviderCapabilityCheck: {
+            /** Capability */
+            capability: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "passed" | "failed" | "blocked" | "skipped";
+            /** Model Id */
+            model_id?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Http Status */
+            http_status?: number | null;
+        };
+        /** ProviderCapabilityProbeResult */
+        ProviderCapabilityProbeResult: {
+            /** Provider Profile Id */
+            provider_profile_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "passed" | "failed" | "blocked" | "skipped";
+            /** Discovered Model Ids */
+            discovered_model_ids: string[];
+            /** Checks */
+            checks: components["schemas"]["ProviderCapabilityCheck"][];
         };
         /** ProviderConfigurationRequest */
         ProviderConfigurationRequest: {
+            /**
+             * Provider Profile Id
+             * @default default
+             */
+            provider_profile_id: string;
             /** Model Base Url */
             model_base_url: string;
             /** Model Name */
             model_name: string;
+            /** Director Model */
+            director_model?: string | null;
+            /** Viewer Model */
+            viewer_model?: string | null;
+            /** Memory Model */
+            memory_model?: string | null;
+            /** Visual Summary Model */
+            visual_summary_model?: string | null;
             /** Model Api Key */
             model_api_key: string;
             /** Asr Api Key */
@@ -163,12 +1468,427 @@ export interface components {
         ProviderConfigurationStatus: {
             /** Configured */
             configured: boolean;
+            /** Provider Profile Id */
+            provider_profile_id?: string | null;
             /** Model Base Url */
             model_base_url?: string | null;
             /** Model Name */
             model_name?: string | null;
+            /** Director Model */
+            director_model?: string | null;
+            /** Viewer Model */
+            viewer_model?: string | null;
+            /** Memory Model */
+            memory_model?: string | null;
+            /** Visual Summary Model */
+            visual_summary_model?: string | null;
             /** Asr Model */
             asr_model?: string | null;
+        };
+        /** ProviderModelDiscovery */
+        ProviderModelDiscovery: {
+            /** Provider Profile Id */
+            provider_profile_id: string;
+            /** Model Ids */
+            model_ids: string[];
+        };
+        /** ProviderRuntimeSpec */
+        ProviderRuntimeSpec: {
+            /** Provider Profile Id */
+            provider_profile_id: string;
+            /** Director Model */
+            director_model: string;
+            /** Viewer Model */
+            viewer_model: string;
+            /** Memory Model */
+            memory_model: string;
+            /** Visual Summary Model */
+            visual_summary_model: string;
+        };
+        /** ProviderTrace */
+        ProviderTrace: {
+            /** Provider Role */
+            provider_role: string;
+            /** Model Id */
+            model_id: string;
+            /** Queued At Ms */
+            queued_at_ms: number;
+            /** Dispatched At Ms */
+            dispatched_at_ms?: number | null;
+            /** Completed At Ms */
+            completed_at_ms?: number | null;
+        };
+        /** RecordedOutputConsumption */
+        RecordedOutputConsumption: {
+            /**
+             * Provider Role
+             * @enum {string}
+             */
+            provider_role: "director" | "viewer" | "memory" | "visual_summary" | "asr";
+            /** Generation Request Id */
+            generation_request_id: string;
+            /** Call Index */
+            call_index: number;
+            /** Runtime Request Id */
+            runtime_request_id?: string | null;
+        };
+        /** RecordedProviderOutput */
+        RecordedProviderOutput: {
+            /** Generation Request Id */
+            generation_request_id: string;
+            /**
+             * Provider Role
+             * @enum {string}
+             */
+            provider_role: "director" | "viewer" | "memory" | "visual_summary" | "asr";
+            /** Output */
+            output: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /** RecordedReplayEvidence */
+        RecordedReplayEvidence: {
+            /** Director Decisions */
+            director_decisions: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Selected Viewer Ids */
+            selected_viewer_ids: string[];
+            /** Barrages */
+            barrages: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Memories */
+            memories: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Traces */
+            traces: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Consumed Provider Roles */
+            consumed_provider_roles: ("director" | "viewer" | "memory" | "visual_summary" | "asr")[];
+            /** Consumed Provider Outputs */
+            consumed_provider_outputs: components["schemas"]["RecordedOutputConsumption"][];
+            /**
+             * External Transport Call Count
+             * @default 0
+             * @constant
+             */
+            external_transport_call_count: 0;
+        };
+        /** ReplayBundle */
+        ReplayBundle: {
+            /**
+             * Replay Schema Version
+             * @default 1
+             * @constant
+             */
+            replay_schema_version: 1;
+            /**
+             * Protocol Version
+             * @default 2
+             * @constant
+             */
+            protocol_version: 2;
+            /**
+             * Audience Contract Version
+             * @default 1
+             * @constant
+             */
+            audience_contract_version: 1;
+            /** Bundle Id */
+            bundle_id: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Seed */
+            seed: number;
+            /** Virtual Clock Start Ms */
+            virtual_clock_start_ms: number;
+            /** Config Hash */
+            config_hash: string;
+            canonical_runtime_spec: components["schemas"]["CanonicalRuntimeSpec"];
+            /** Input Refs */
+            input_refs?: string[];
+            /** Events */
+            events: components["schemas"]["ReplayEvent"][];
+            /** Recorded Provider Outputs */
+            recorded_provider_outputs: components["schemas"]["RecordedProviderOutput"][];
+            /**
+             * Recorded Outputs Digest
+             * @default null
+             */
+            recorded_outputs_digest: string | null;
+            /** Traces */
+            traces?: components["schemas"]["ViewerRequestTrace"][];
+            /**
+             * Redacted
+             * @default true
+             * @constant
+             */
+            redacted: true;
+        };
+        /** ReplayEvent */
+        ReplayEvent: {
+            /** Sequence */
+            sequence: number;
+            /** Event Type */
+            event_type: string;
+            /** Occurred At Ms */
+            occurred_at_ms: number;
+            /** Payload */
+            payload?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /**
+         * ReplayMode
+         * @enum {string}
+         */
+        ReplayMode: "recorded" | "live";
+        /** ReplayRequest */
+        ReplayRequest: {
+            /** @default recorded */
+            mode: components["schemas"]["ReplayMode"];
+            bundle: components["schemas"]["ReplayBundle"];
+            /**
+             * Allow External Provider Calls
+             * @default false
+             */
+            allow_external_provider_calls: boolean;
+        };
+        /** ReplayResult */
+        ReplayResult: {
+            /** Bundle Id */
+            bundle_id: string;
+            mode: components["schemas"]["ReplayMode"];
+            /** Deterministic Proof */
+            deterministic_proof: boolean;
+            /** Credentialed Provider Proof */
+            credentialed_provider_proof: boolean;
+            /** Event Count */
+            event_count: number;
+            /** Trace Count */
+            trace_count: number;
+            /** Completed At Ms */
+            completed_at_ms: number;
+            /**
+             * Replay Digest
+             * @default null
+             */
+            replay_digest: string | null;
+            /** @default null */
+            recorded_evidence: components["schemas"]["RecordedReplayEvidence"] | null;
+            /**
+             * Provider Profile Id
+             * @default null
+             */
+            provider_profile_id: string | null;
+            /**
+             * External Transport Call Count
+             * @default 0
+             */
+            external_transport_call_count: number;
+        };
+        /** ResponseRange */
+        ResponseRange: {
+            /** Minimum */
+            minimum: number;
+            /** Maximum */
+            maximum: number;
+        };
+        /** Room */
+        Room: {
+            /** Room Id */
+            room_id: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Revision
+             * @default 1
+             */
+            revision: number;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Updated At Ms */
+            updated_at_ms: number;
+        };
+        /** RoomLongTermMemory */
+        RoomLongTermMemory: {
+            /** Memory Id */
+            memory_id: string;
+            /** Room Id */
+            room_id: string;
+            memory_type: components["schemas"]["RoomMemoryType"];
+            /** Content */
+            content: string;
+            /** Evidence Event Ids */
+            evidence_event_ids: string[];
+            /** Confidence */
+            confidence: number;
+            /** Revision */
+            revision: number;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Updated At Ms */
+            updated_at_ms: number;
+            /** Revoked At Ms */
+            revoked_at_ms?: number | null;
+        };
+        /**
+         * RoomMemoryType
+         * @enum {string}
+         */
+        RoomMemoryType: "user_preference" | "real_world_fact" | "room_lore" | "shared_experience";
+        /** RuntimeApplyRequest */
+        RuntimeApplyRequest: {
+            /** Apply Id */
+            apply_id: string;
+            /** Base Revision */
+            base_revision: number;
+            /**
+             * Audience Contract Version
+             * @default 1
+             * @constant
+             */
+            audience_contract_version: 1;
+            canonical_runtime_spec: components["schemas"]["CanonicalRuntimeSpec"];
+            /** Client Config Hash */
+            client_config_hash: string;
+            /** @default null */
+            provider_candidate: components["schemas"]["RuntimeModelProviderCandidate"] | null;
+        };
+        /** RuntimeDiffSummary */
+        RuntimeDiffSummary: {
+            /** Changed Paths */
+            changed_paths?: string[];
+            /** Added Viewer Ids */
+            added_viewer_ids?: string[];
+            /** Retained Viewer Ids */
+            retained_viewer_ids?: string[];
+            /** Reset Viewer Ids */
+            reset_viewer_ids?: string[];
+            /** Removed Viewer Ids */
+            removed_viewer_ids?: string[];
+        };
+        /** RuntimeModelProviderCandidate */
+        RuntimeModelProviderCandidate: {
+            /**
+             * Provider Profile Id
+             * @default default
+             */
+            provider_profile_id: string;
+            /** Model Base Url */
+            model_base_url: string;
+            /** Model Name */
+            model_name: string;
+            /** Director Model */
+            director_model?: string | null;
+            /** Viewer Model */
+            viewer_model?: string | null;
+            /** Memory Model */
+            memory_model?: string | null;
+            /** Visual Summary Model */
+            visual_summary_model?: string | null;
+            /** Model Api Key */
+            model_api_key: string;
+        };
+        /** RuntimeRollbackRequest */
+        RuntimeRollbackRequest: {
+            /** Apply Id */
+            apply_id: string;
+            /** Base Revision */
+            base_revision: number;
+            /** Target Revision */
+            target_revision: number;
+            /**
+             * Audience Contract Version
+             * @default 1
+             * @constant
+             */
+            audience_contract_version: 1;
+            /** @default null */
+            provider_candidate: components["schemas"]["RuntimeModelProviderCandidate"] | null;
+        };
+        /** RuntimeSessionSnapshot */
+        RuntimeSessionSnapshot: {
+            /** Session Id */
+            session_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Config Revision */
+            config_revision: number;
+            /** Config Hash */
+            config_hash: string;
+            canonical_runtime_spec: components["schemas"]["CanonicalRuntimeSpec"];
+            /** Viewers */
+            viewers?: components["schemas"]["ViewerInstance"][];
+            /** Apply Id */
+            apply_id?: string | null;
+            diff?: components["schemas"]["RuntimeDiffSummary"];
+            /**
+             * Recovered
+             * @default false
+             */
+            recovered: boolean;
+        };
+        /** RuntimeSessionStartRequest */
+        RuntimeSessionStartRequest: {
+            /** Client Request Id */
+            client_request_id: string;
+            canonical_runtime_spec: components["schemas"]["CanonicalRuntimeSpec"];
+            /** Client Config Hash */
+            client_config_hash: string;
+        };
+        /** RuntimeSettings */
+        RuntimeSettings: {
+            frame_bundle?: components["schemas"]["FrameBundleSettings"];
+            /** @default direct_frames */
+            viewer_visual_input_mode: components["schemas"]["ViewerVisualInputMode"];
+            /** @default strict */
+            director_failure_mode: components["schemas"]["DirectorFailureMode"];
+            /**
+             * Max In Flight Viewer Requests
+             * @default 12
+             */
+            max_in_flight_viewer_requests: number;
+            /**
+             * Viewer Request Ttl Ms
+             * @default 15000
+             */
+            viewer_request_ttl_ms: number;
+            /**
+             * Viewer Queue Capacity
+             * @default 64
+             */
+            viewer_queue_capacity: number;
+            /**
+             * Observation Merge Window Ms
+             * @default 250
+             */
+            observation_merge_window_ms: number;
+            /**
+             * Screen Change Threshold
+             * @default 0.2
+             */
+            screen_change_threshold: number;
+            /**
+             * Screen Change Cooldown Ms
+             * @default 2000
+             */
+            screen_change_cooldown_ms: number;
+            /**
+             * Ambient Tick Cooldown Ms
+             * @default 5000
+             */
+            ambient_tick_cooldown_ms: number;
+            /**
+             * Max Consecutive Ambient Waves
+             * @default 2
+             */
+            max_consecutive_ambient_waves: number;
         };
         /** SessionSnapshot */
         SessionSnapshot: {
@@ -187,6 +1907,70 @@ export interface components {
          * @enum {string}
          */
         SessionState: "idle" | "starting" | "running" | "paused" | "stopping" | "error";
+        /** SideEffectTrace */
+        SideEffectTrace: {
+            /** Published Barrage Id */
+            published_barrage_id?: string | null;
+            /** Memory Candidate Ids */
+            memory_candidate_ids?: string[];
+            meme_candidate?: components["schemas"]["MemeCandidate"] | null;
+        };
+        /** TraceQuery */
+        TraceQuery: {
+            /**
+             * Room Id
+             * @default null
+             */
+            room_id: string | null;
+            /**
+             * Session Id
+             * @default null
+             */
+            session_id: string | null;
+            /**
+             * Observation Id
+             * @default null
+             */
+            observation_id: string | null;
+            /**
+             * Viewer Instance Id
+             * @default null
+             */
+            viewer_instance_id: string | null;
+            /** @default null */
+            response_status: components["schemas"]["TraceResponseStatus"] | null;
+            /**
+             * Cursor
+             * @default null
+             */
+            cursor: string | null;
+            /**
+             * Limit
+             * @default 100
+             */
+            limit: number;
+        };
+        /** TraceQueryResponse */
+        TraceQueryResponse: {
+            /** Items */
+            items: components["schemas"]["ViewerRequestTrace"][];
+            /** Waves */
+            waves?: components["schemas"]["ObservationWaveTrace"][];
+            /**
+             * Next Cursor
+             * @default null
+             */
+            next_cursor: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /**
+         * TraceResponseStatus
+         * @enum {string}
+         */
+        TraceResponseStatus: "queued" | "dispatched" | "completed" | "silence" | "published" | "rejected" | "expired" | "cancelled" | "stale" | "failed";
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -200,6 +1984,215 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** ValidationTrace */
+        ValidationTrace: {
+            /** Accepted */
+            accepted: boolean;
+            /** Codes */
+            codes?: string[];
+        };
+        /** ViewerInstance */
+        ViewerInstance: {
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Persona Id */
+            persona_id: string;
+            /** Persona Revision */
+            persona_revision: number;
+            /** Ordinal */
+            ordinal: number;
+            /** Display Name */
+            display_name: string;
+            variant: components["schemas"]["ViewerInstanceVariant"];
+            private_state?: components["schemas"]["ViewerPrivateState"];
+            /**
+             * Viewer Sequence
+             * @default 0
+             */
+            viewer_sequence: number;
+            /** @default active */
+            lifecycle_state: components["schemas"]["ViewerLifecycleState"];
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Removed At Ms */
+            removed_at_ms?: number | null;
+        };
+        /** ViewerInstanceVariant */
+        ViewerInstanceVariant: {
+            /** Expression Length */
+            expression_length: number;
+            /** Skepticism */
+            skepticism: number;
+            /** Encouragement */
+            encouragement: number;
+            /** Meme Affinity */
+            meme_affinity: number;
+            /** Focus */
+            focus: string;
+            /** Silence Tendency */
+            silence_tendency: number;
+        };
+        /**
+         * ViewerLifecycleState
+         * @enum {string}
+         */
+        ViewerLifecycleState: "active" | "removed";
+        /** ViewerPrivateState */
+        ViewerPrivateState: {
+            /**
+             * Revision
+             * @default 1
+             */
+            revision: number;
+            /** Published Event Ids */
+            published_event_ids?: string[];
+            /** Direct Interaction Event Ids */
+            direct_interaction_event_ids?: string[];
+            /** Attention */
+            attention?: string[];
+            /** Mood */
+            mood?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Cooldown Until Ms */
+            cooldown_until_ms?: number | null;
+        };
+        /** ViewerRequestTrace */
+        ViewerRequestTrace: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            trace_kind: "viewer_request";
+            /**
+             * Trace Schema Version
+             * @default 1
+             * @constant
+             */
+            trace_schema_version: 1;
+            /** Trace Id */
+            trace_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Config Hash */
+            config_hash: string;
+            /** Observation Id */
+            observation_id: string;
+            director_budget: components["schemas"]["DirectorBudgetTrace"];
+            director_decision: components["schemas"]["CrowdDecision"];
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Viewer Sequence */
+            viewer_sequence: number;
+            /** Persona Revision */
+            persona_revision: number;
+            instance_variant: components["schemas"]["ViewerInstanceVariant"];
+            /** Public Context Event Ids */
+            public_context_event_ids?: string[];
+            /** Private State Event Ids */
+            private_state_event_ids?: string[];
+            memory: components["schemas"]["MemoryReferenceTrace"];
+            /** Frame Hashes */
+            frame_hashes?: string[];
+            prompt_manifest: components["schemas"]["PromptManifest"];
+            provider: components["schemas"]["ProviderTrace"];
+            response_status: components["schemas"]["TraceResponseStatus"];
+            validation: components["schemas"]["ValidationTrace"];
+            /**
+             * Retry Count
+             * @default 0
+             */
+            retry_count: number;
+            /**
+             * Stale Or Cancel Reason
+             * @default null
+             */
+            stale_or_cancel_reason: string | null;
+            side_effects?: components["schemas"]["SideEffectTrace"];
+        };
+        /** ViewerRuntimeTelemetry */
+        ViewerRuntimeTelemetry: {
+            /**
+             * Selected
+             * @default 0
+             */
+            selected: number;
+            /**
+             * Queued
+             * @default 0
+             */
+            queued: number;
+            /**
+             * Dispatched
+             * @default 0
+             */
+            dispatched: number;
+            /**
+             * Completed
+             * @default 0
+             */
+            completed: number;
+            /**
+             * Silence
+             * @default 0
+             */
+            silence: number;
+            /**
+             * Published
+             * @default 0
+             */
+            published: number;
+            /**
+             * Rejected
+             * @default 0
+             */
+            rejected: number;
+            /**
+             * Expired
+             * @default 0
+             */
+            expired: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Stale
+             * @default 0
+             */
+            stale: number;
+            /**
+             * Cancelled
+             * @default 0
+             */
+            cancelled: number;
+            /**
+             * Superseded
+             * @default 0
+             */
+            superseded: number;
+            /**
+             * Retry
+             * @default 0
+             */
+            retry: number;
+        };
+        /**
+         * ViewerVisualInputMode
+         * @enum {string}
+         */
+        ViewerVisualInputMode: "direct_frames" | "shared_summary";
         /** ClientAudioCommit */
         ClientAudioCommit: {
             /** Protocol Version */
@@ -264,10 +2257,10 @@ export interface components {
         BackendPong: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -280,10 +2273,10 @@ export interface components {
         BackendReady: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -295,10 +2288,10 @@ export interface components {
         BarrageEventMessage: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -310,14 +2303,28 @@ export interface components {
         BarrageSnapshot: {
             /** Barrage Id */
             barrage_id: string;
+            /** Room Id */
+            room_id: string;
             /** Session Id */
             session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
             /** Observation Id */
             observation_id: string;
-            /** Request Id */
-            request_id: string;
-            /** Audience Id */
-            audience_id: string;
+            /** Generation Request Id */
+            generation_request_id: string;
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Persona Id */
+            persona_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Viewer Sequence */
+            viewer_sequence: number;
+            /** Reaction Type */
+            reaction_type: string;
+            /** Evidence Refs */
+            evidence_refs?: components["schemas"]["EvidenceRef"][];
             /** Text */
             text: string;
             /** Created At Ms */
@@ -325,14 +2332,33 @@ export interface components {
             /** Expires At Ms */
             expires_at_ms: number;
         };
+        /** EvidenceRef */
+        EvidenceRef: {
+            source: components["schemas"]["EvidenceSource"];
+            /**
+             * Event Id
+             * @default null
+             */
+            event_id: string | null;
+            /**
+             * Frame Index
+             * @default null
+             */
+            frame_index: number | null;
+        };
+        /**
+         * EvidenceSource
+         * @enum {string}
+         */
+        EvidenceSource: "event" | "frame";
         /** IngestAck */
         IngestAck: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -361,10 +2387,10 @@ export interface components {
         IngestRejected: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -395,10 +2421,10 @@ export interface components {
         RealtimeProtocolError: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -422,10 +2448,10 @@ export interface components {
         SessionStatusEvent: {
             /**
              * Protocol Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            protocol_version: 1;
+            protocol_version: 2;
             /**
              * @description discriminator enum property added by openapi-typescript
              * @enum {string}
@@ -463,6 +2489,180 @@ export interface components {
             /** Body Length */
             body_length: number;
         };
+        /** RuntimeApplyResponse */
+        RuntimeApplyResponse: {
+            /** Apply Id */
+            apply_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Config Revision */
+            config_revision: number;
+            /** Config Hash */
+            config_hash: string;
+            /** Applied At Ms */
+            applied_at_ms: number;
+            diff: components["schemas"]["RuntimeDiffSummary"];
+        };
+        /** RuntimeQueryResponse */
+        RuntimeQueryResponse: {
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Config Revision */
+            config_revision: number;
+            /** Config Hash */
+            config_hash: string;
+            canonical_runtime_spec: components["schemas"]["CanonicalRuntimeSpec"];
+            /** Viewers */
+            viewers: components["schemas"]["ViewerInstance"][];
+        };
+        /** FrameBundle */
+        FrameBundle: {
+            /** Bundle Id */
+            bundle_id: string;
+            settings: components["schemas"]["FrameBundleSettings"];
+            /** Frames */
+            frames: components["schemas"]["FrameBundleItem"][];
+        };
+        /** FrameBundleItem */
+        FrameBundleItem: {
+            /** Frame Id */
+            frame_id: string;
+            /** Frame Index */
+            frame_index: number;
+            /** Captured At Ms */
+            captured_at_ms: number;
+            /** Width */
+            width: number;
+            /** Height */
+            height: number;
+            /** Encoding */
+            encoding: string;
+            /** Content Hash */
+            content_hash: string;
+            /** Data Ref */
+            data_ref: string;
+            /**
+             * Change Score
+             * @default 0
+             */
+            change_score: number;
+        };
+        /** RoomMemorySlice */
+        RoomMemorySlice: {
+            /** Room Id */
+            room_id: string;
+            /** Memory Revision */
+            memory_revision: number;
+            /** Memory Ids */
+            memory_ids?: string[];
+            /** Items */
+            items?: components["schemas"]["RoomLongTermMemory"][];
+        };
+        /** ViewerGenerationRequest */
+        ViewerGenerationRequest: {
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Observation Id */
+            observation_id: string;
+            /** Generation Request Id */
+            generation_request_id: string;
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Viewer Sequence */
+            viewer_sequence: number;
+            /** Persona Revision */
+            persona_revision: number;
+            instance_variant: components["schemas"]["ViewerInstanceVariant"];
+            /** Mode Context */
+            mode_context: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            visual_input_mode: components["schemas"]["ViewerVisualInputMode"];
+            /** @default null */
+            frame_bundle: components["schemas"]["FrameBundle"] | null;
+            /**
+             * Shared Visual Summary
+             * @default null
+             */
+            shared_visual_summary: string | null;
+            /** Input Event Ids */
+            input_event_ids?: string[];
+            /** Public Context Event Ids */
+            public_context_event_ids?: string[];
+            viewer_private_state: components["schemas"]["ViewerPrivateState"];
+            room_memory_slice: components["schemas"]["RoomMemorySlice"];
+            /** Deadline At Ms */
+            deadline_at_ms: number;
+        };
+        /**
+         * ViewerAction
+         * @enum {string}
+         */
+        ViewerAction: "barrage" | "silence";
+        /** ViewerGenerationResponse */
+        ViewerGenerationResponse: {
+            /** Generation Request Id */
+            generation_request_id: string;
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Viewer Sequence */
+            viewer_sequence: number;
+            action: components["schemas"]["ViewerAction"];
+            /**
+             * Text
+             * @default null
+             */
+            text: string | null;
+            /** Reaction Type */
+            reaction_type: string;
+            /** Evidence Refs */
+            evidence_refs?: components["schemas"]["EvidenceRef"][];
+        };
+        /** ViewerBarrageEvent */
+        ViewerBarrageEvent: {
+            /** Barrage Id */
+            barrage_id: string;
+            /** Room Id */
+            room_id: string;
+            /** Session Id */
+            session_id: string;
+            /** Audience Epoch */
+            audience_epoch: number;
+            /** Observation Id */
+            observation_id: string;
+            /** Generation Request Id */
+            generation_request_id: string;
+            /** Viewer Instance Id */
+            viewer_instance_id: string;
+            /** Persona Id */
+            persona_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Viewer Sequence */
+            viewer_sequence: number;
+            /** Reaction Type */
+            reaction_type: string;
+            /** Evidence Refs */
+            evidence_refs?: components["schemas"]["EvidenceRef"][];
+            /** Text */
+            text: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Expires At Ms */
+            expires_at_ms: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -496,7 +2696,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path?: never;
             cookie?: never;
@@ -527,7 +2727,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path?: never;
             cookie?: never;
@@ -558,11 +2758,77 @@ export interface operations {
             };
         };
     };
+    discover_provider_models_configuration_providers_models_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderModelDiscovery"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probe_provider_capabilities_configuration_providers_probe_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ProviderConfigurationRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderCapabilityProbeResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     current_session_sessions_current_get: {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path?: never;
             cookie?: never;
@@ -593,7 +2859,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path?: never;
             cookie?: never;
@@ -601,12 +2867,12 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionSnapshot"];
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -624,7 +2890,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path: {
                 session_id: string;
@@ -657,7 +2923,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path: {
                 session_id: string;
@@ -690,7 +2956,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "X-ADVX-Protocol-Version": "1";
+                "X-ADVX-Protocol-Version": "2";
             };
             path: {
                 session_id: string;
@@ -706,6 +2972,1373 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_traces_debug_traces_get: {
+        parameters: {
+            query?: {
+                room_id?: string | null;
+                session_id?: string | null;
+                observation_id?: string | null;
+                viewer_instance_id?: string | null;
+                response_status?: components["schemas"]["TraceResponseStatus"] | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceQueryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_traces_debug_traces_export_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TraceQuery"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    runtime_snapshot_debug_runtime__session_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DebugRuntimeSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_debug_replay_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplayRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_runtime_session_runtime_sessions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeSessionStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    current_runtime_session_runtime_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_runtime_runtime_sessions__session_id__apply_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_runtime_runtime_sessions__session_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeRollbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recover_runtime_runtime_sessions__session_id__recover_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSessionSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_memories_shared_brain_rooms__room_id__memories_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoomLongTermMemory"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_memory_head_shared_brain_rooms__room_id__memory_head_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryHeadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_memory_shared_brain_rooms__room_id__memories__memory_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoomLongTermMemory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_memory_shared_brain_rooms__room_id__memories__memory_id__put: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoomLongTermMemory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_memory_shared_brain_rooms__room_id__memories__memory_id__delete: {
+        parameters: {
+            query: {
+                expected_revision: number;
+            };
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    maintain_memes_shared_brain_modes__namespace_id__memes_maintenance_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemeMaintenanceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_memory_shared_brain_rooms__room_id__memories__memory_id__merge_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryMergeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoomLongTermMemory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_memory_shared_brain_rooms__room_id__memories__memory_id__replace_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryReplaceRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoomLongTermMemory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_memory_candidate_shared_brain_memory_candidates_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateCommitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_memory_shared_brain_rooms__room_id__memories__memory_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+                memory_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoomLongTermMemory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_memories_shared_brain_rooms__room_id__memories_reset_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                room_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_memes_shared_brain_modes__namespace_id__memes_get: {
+        parameters: {
+            query?: {
+                active_only?: boolean;
+            };
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_active_memes_shared_brain_modes__namespace_id__memes_active_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pending_candidates_shared_brain_modes__namespace_id__meme_candidates_pending_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemeCandidate"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_auto_ingest_shared_brain_modes__namespace_id__auto_ingest_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoIngestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_auto_ingest_shared_brain_modes__namespace_id__auto_ingest_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoIngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutoIngestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_meme_candidate_shared_brain_meme_candidates_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemeCandidate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateCommitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_legacy_meme_shared_brain_modes__namespace_id__legacy_memes_import_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LegacyMemeImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LegacyMemeImportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_meme_candidate_shared_brain_modes__namespace_id__meme_candidates__candidate_id__approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CandidateCommitResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_meme_candidate_shared_brain_modes__namespace_id__meme_candidates__candidate_id__reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                candidate_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemeCandidate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_meme_shared_brain_modes__namespace_id__memes__meme_id__put: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemeEditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    undo_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__undo_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__revoke_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__disable_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restart_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__restart_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pin_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__pin_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__unpin_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_mode_meme_shared_brain_modes__namespace_id__memes__meme_id__archive_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "2";
+            };
+            path: {
+                namespace_id: string;
+                meme_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModeMeme"];
                 };
             };
             /** @description Validation Error */

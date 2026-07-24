@@ -138,6 +138,98 @@ class SessionService:
         await self._publish(starting, running)
         return running
 
+    async def activate_runtime_session(
+        self,
+        session_id: str,
+        *,
+        started_at_ms: int,
+    ) -> SessionStatus:
+        """Adopt a runtime-owned durable Session without inserting it again."""
+
+        if not session_id:
+            raise ValueError("session_id must not be empty")
+        if started_at_ms < 0:
+            raise ValueError("started_at_ms must be nonnegative")
+        async with self._lock:
+            if self._state is not SessionState.IDLE:
+                current = self._snapshot()
+                if current.session_id == session_id:
+                    return current
+                raise SessionAlreadyActiveError(current)
+
+            if self._session_resources is not None:
+                try:
+                    await self._session_resources.start_session(session_id)
+                except asyncio.CancelledError:
+                    await asyncio.shield(
+                        self._cleanup_adopted_start(session_id)
+                    )
+                    raise
+                except Exception as error:
+                    logger.exception(
+                        "failed to activate runtime session resources",
+                        extra={"session_id": session_id},
+                    )
+                    await asyncio.shield(
+                        self._cleanup_adopted_start(session_id)
+                    )
+                    raise SessionInitializationError from error
+            self._idle.clear()
+            self._session_id = session_id
+            self._started_at_ms = started_at_ms
+            starting = self._transition(
+                SessionState.STARTING,
+                now=started_at_ms,
+            )
+            running = self._transition(SessionState.RUNNING)
+
+        await self._publish(starting, running)
+        return running
+
+    async def abandon_runtime_session(self, session_id: str) -> SessionStatus:
+        """Compensate a failed runtime start without touching durable records."""
+
+        async with self._lock:
+            current = self._require_session(session_id)
+            if not can_stop_session(current.state):
+                raise InvalidSessionStateError(
+                    action="abandon",
+                    status=current,
+                    allowed_states={
+                        SessionState.STARTING,
+                        SessionState.RUNNING,
+                        SessionState.PAUSED,
+                        SessionState.ERROR,
+                    },
+                )
+            stopping = self._transition(SessionState.STOPPING)
+            tasks = self._detach_tasks()
+
+        await self._cancel_tasks(tasks)
+        if self._session_resources is not None:
+            try:
+                await self._session_resources.stop_session(session_id)
+            except Exception as error:
+                logger.warning(
+                    "failed to clean up abandoned runtime session resources",
+                    extra={
+                        "session_id": session_id,
+                        "error_type": type(error).__name__,
+                    },
+                )
+        async with self._lock:
+            if (
+                self._session_id != session_id
+                or self._state is not SessionState.STOPPING
+            ):
+                raise SessionNotFoundError(session_id)
+            self._session_id = None
+            self._started_at_ms = None
+            idle = self._transition(SessionState.IDLE)
+            self._idle.set()
+        await self._publish(stopping, idle)
+        return idle
+
     async def pause(self, session_id: str) -> SessionStatus:
         async with self._lock:
             current = self._require_session(session_id)
@@ -369,6 +461,20 @@ class SessionService:
                         "error_type": type(error).__name__,
                     },
                 )
+
+    async def _cleanup_adopted_start(self, session_id: str) -> None:
+        if self._session_resources is None:
+            return
+        try:
+            await self._session_resources.stop_session(session_id)
+        except Exception as error:
+            logger.warning(
+                "failed to clean up adopted runtime session resources",
+                extra={
+                    "session_id": session_id,
+                    "error_type": type(error).__name__,
+                },
+            )
 
     @staticmethod
     async def _cancel_tasks(tasks: tuple[asyncio.Task[Any], ...]) -> None:

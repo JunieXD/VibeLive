@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -5,6 +6,9 @@ from pathlib import Path
 from advx_backend.application.audience_service import AudienceService
 from advx_backend.application.barrage_pipeline import BarragePipeline
 from advx_backend.application.context_builder import ContextBuilder
+from advx_backend.application.debug_service import DebugService
+from advx_backend.application.director_service import DirectorService
+from advx_backend.application.frame_metadata import StoredFrameMetadataResolver
 from advx_backend.application.frame_store import InMemoryFrameStore
 from advx_backend.application.generation_policies import (
     DefaultAudienceSelector,
@@ -14,6 +18,7 @@ from advx_backend.application.generation_policies import (
 from advx_backend.application.generation_service import GenerationService
 from advx_backend.application.ingest_gateway import IngestGateway
 from advx_backend.application.ingest_service import IngestService
+from advx_backend.application.memory_extractor import RoomMemoryExtractor
 from advx_backend.application.ports.asr import AsrProvider
 from advx_backend.application.ports.generation import (
     AudienceSelector,
@@ -27,10 +32,49 @@ from advx_backend.application.ports.persistence import UnitOfWorkFactory
 from advx_backend.application.reaction_scheduler import LatestWinsReactionScheduler
 from advx_backend.application.reaction_service import ReactionService
 from advx_backend.application.realtime_broker import RealtimeBroker
+from advx_backend.application.replay_service import ReplayService
+from advx_backend.application.room_event_persistence import (
+    PersistentRuntimeRoomEventStore,
+)
 from advx_backend.application.room_service import RoomService
+from advx_backend.application.runtime_capability_probe import (
+    ProductionRuntimeCapabilityProbe,
+    create_stepfun_final_audio_probe,
+)
+from advx_backend.application.runtime_config_service import RuntimeCapabilityProbe
+from advx_backend.application.runtime_provider import (
+    RuntimeProviderController,
+    RuntimeProviderRouter,
+)
+from advx_backend.application.runtime_session_service import RuntimeSessionService
+from advx_backend.application.runtime_state import RuntimeStateStore
 from advx_backend.application.session_resources import SessionResources
 from advx_backend.application.session_service import SessionService
+from advx_backend.application.shared_brain_adapters import (
+    SharedBrainMemeCandidateSink,
+    SharedBrainMemoryExtractionSink,
+)
+from advx_backend.application.shared_brain_service import SharedBrainService
+from advx_backend.application.transcript_target_resolver import (
+    RuntimeTranscriptTargetResolver,
+)
+from advx_backend.application.viewer_barrage_pipeline import ViewerBarragePipeline
+from advx_backend.application.viewer_policies import (
+    ActiveModeDirectorBudgetPolicy,
+    DeterministicDirectorFallbackPolicy,
+)
+from advx_backend.application.viewer_pool_service import ViewerPoolService
+from advx_backend.application.viewer_runtime import ViewerRuntime
+from advx_backend.application.viewer_runtime_adapters import (
+    PersistentViewerRoomWriter,
+    RealtimeViewerBarragePublisher,
+)
+from advx_backend.application.viewer_runtime_coordinator import (
+    ViewerRuntimeCoordinator,
+)
+from advx_backend.contracts.configuration import ProviderConfigurationRequest
 from advx_backend.domain.barrage import BarragePolicy
+from advx_backend.infrastructure.logging import TraceStore
 from advx_backend.infrastructure.persistence.sqlite import (
     DatabaseConfig,
     SQLiteDatabase,
@@ -40,9 +84,10 @@ from advx_backend.infrastructure.persistence.sqlite import (
 from advx_backend.infrastructure.security.local_token import create_local_token
 from advx_backend.infrastructure.system import SystemClock, UuidIdGenerator
 from advx_backend.providers.asr import StepFunAsrConfig, StepFunAsrProvider
-from advx_backend.providers.model import OpenAICompatibleConfig, OpenAICompatibleProvider
+from advx_backend.providers.model import OpenAICompatibleProvider
 
 BACKEND_VERSION = "0.1.0"
+logger = logging.getLogger(__name__)
 LOCAL_TOKEN_ENV = "ADVX_LOCAL_TOKEN"
 DATA_DIRECTORY_ENV = "ADVX_DATA_DIR"
 MODEL_BASE_URL_ENV = "ADVX_MODEL_BASE_URL"
@@ -103,6 +148,23 @@ class ProviderPipelineAlreadyConfiguredError(RuntimeError):
 
 
 @dataclass
+class ProviderConfigurationStore:
+    request: ProviderConfigurationRequest | None = field(
+        default=None,
+        repr=False,
+    )
+
+    def current(self) -> ProviderConfigurationRequest | None:
+        return self.request
+
+    def set(self, request: ProviderConfigurationRequest) -> None:
+        self.request = request
+
+    def clear(self) -> None:
+        self.request = None
+
+
+@dataclass
 class BackendRuntime:
     session_service: SessionService
     realtime_broker: RealtimeBroker
@@ -121,12 +183,31 @@ class BackendRuntime:
     barrage_pipeline: BarragePipeline
     session_resources: SessionResources
     ingest_gateway: IngestGateway
+    debug_service: DebugService
+    replay_service: ReplayService
+    shared_brain_service: SharedBrainService
+    room_event_store: PersistentRuntimeRoomEventStore
+    runtime_session_service: RuntimeSessionService
+    runtime_state: RuntimeStateStore
+    provider_configuration_store: ProviderConfigurationStore
+    provider_controller: RuntimeProviderController
+    provider_router: RuntimeProviderRouter
     pipeline_config: PipelineConfig
     local_token: str = field(repr=False)
     ingest_service: IngestService | None = field(default=None, init=False)
     reaction_scheduler: LatestWinsReactionScheduler | None = field(default=None, init=False)
+    viewer_runtime: ViewerRuntime | None = field(default=None, init=False)
+    viewer_runtime_coordinator: ViewerRuntimeCoordinator | None = field(
+        default=None,
+        init=False,
+    )
     external_provider_config: ExternalProviderConfig | None = field(default=None, init=False)
     _owned_model_provider: OpenAICompatibleProvider | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _owned_asr_provider: StepFunAsrProvider | None = field(
         default=None,
         init=False,
         repr=False,
@@ -136,8 +217,20 @@ class BackendRuntime:
     async def startup(self) -> None:
         if self._started:
             return
-        await self.database.start()
-        await self.session_record_store.recover_interrupted(ended_at_ms=self.clock.now_ms())
+        try:
+            await self.database.start()
+            await self.session_record_store.recover_interrupted(
+                ended_at_ms=self.clock.now_ms()
+            )
+        except Exception as error:
+            # Keep the control plane alive for machine-readable health and recovery.
+            logger.exception("SQLite startup failed; runtime is persistence-degraded")
+            if self.database.started:
+                await self.database.mark_startup_failed(
+                    code="sqlite_recovery_failed",
+                    error=error,
+                )
+            return
         await self.audience_service.initialize_builtin_audiences()
         self._started = True
 
@@ -146,11 +239,27 @@ class BackendRuntime:
             await self.session_service.shutdown()
         finally:
             try:
-                if self._owned_model_provider is not None:
-                    await self._owned_model_provider.aclose()
+                if self.viewer_runtime_coordinator is not None:
+                    await self.viewer_runtime_coordinator.wait_for_background_tasks()
             finally:
-                await self.database.close()
-                self._started = False
+                try:
+                    await self.provider_controller.aclose()
+                finally:
+                    try:
+                        if self._owned_model_provider is not None:
+                            await self._owned_model_provider.aclose()
+                    finally:
+                        self._owned_model_provider = None
+                        self._owned_asr_provider = None
+                        self.external_provider_config = None
+                        self.provider_configuration_store.clear()
+                        self.ingest_service = None
+                        self.reaction_scheduler = None
+                        self.viewer_runtime = None
+                        self.viewer_runtime_coordinator = None
+                        self.ingest_gateway.clear()
+                        await self.database.close()
+                        self._started = False
 
     def build_generation_service(
         self,
@@ -201,6 +310,13 @@ class BackendRuntime:
             publisher=self.realtime_broker,
         )
 
+    async def observation_merge_window_ms(self, session_id: str) -> int:
+        try:
+            committed = await self.runtime_state.snapshot(session_id)
+        except KeyError:
+            return 0
+        return committed.spec.settings.observation_merge_window_ms
+
     def configure_ingest_pipeline(
         self,
         *,
@@ -218,6 +334,7 @@ class BackendRuntime:
             executor=reaction_service,
             session_tasks=self.session_service,
             clock=self.clock,
+            merge_window_provider=self.observation_merge_window_ms,
         )
         ingest_service = IngestService(
             room_service=self.room_service,
@@ -228,6 +345,7 @@ class BackendRuntime:
             session_tasks=self.session_service,
             clock=self.clock,
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
+            voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
         )
         self.session_resources.add_resource(ingest_service)
         self.ingest_gateway.configure(ingest_service)
@@ -239,8 +357,44 @@ class BackendRuntime:
         self,
         config: ExternalProviderConfig,
     ) -> IngestService:
-        if self.external_provider_config is not None:
-            if self.external_provider_config == config:
+        request = ProviderConfigurationRequest(
+            provider_profile_id="default",
+            model_base_url=config.model_base_url,
+            model_name=config.model_name,
+            model_api_key=config.model_api_key,
+            asr_api_key=config.asr_api_key,
+        )
+        return self._configure_viewer_runtime_pipeline(
+            request=request,
+            external_config=config,
+        )
+
+    def configure_provider_profile(
+        self,
+        request: ProviderConfigurationRequest,
+    ) -> IngestService:
+        return self._configure_viewer_runtime_pipeline(
+            request=request,
+            external_config=ExternalProviderConfig(
+                model_base_url=request.model_base_url,
+                model_name=request.model_name,
+                model_api_key=request.model_api_key,
+                asr_api_key=request.asr_api_key,
+            ),
+        )
+
+    def _configure_viewer_runtime_pipeline(
+        self,
+        *,
+        request: ProviderConfigurationRequest,
+        external_config: ExternalProviderConfig,
+        viewer_provider_override: object | None = None,
+        memory_extractor_override: RoomMemoryExtractor | None = None,
+        asr_provider_override: AsrProvider | None = None,
+    ) -> IngestService:
+        configured = self.provider_configuration_store.current()
+        if configured is not None:
+            if configured == request:
                 assert self.ingest_service is not None
                 return self.ingest_service
             raise ProviderPipelineAlreadyConfiguredError(
@@ -251,28 +405,124 @@ class BackendRuntime:
                 "the ingest pipeline was configured without external provider ownership"
             )
 
-        model_provider = OpenAICompatibleProvider(
-            OpenAICompatibleConfig(
-                base_url=config.model_base_url,
-                model=config.model_name,
-                api_key=config.model_api_key,
-            ),
-            frame_resolver=self.frame_store,
+        self.provider_controller.install_initial(
+            request,
+            viewer_provider=viewer_provider_override,
+            memory_extractor=memory_extractor_override,
         )
-        asr_provider = StepFunAsrProvider(
-            StepFunAsrConfig(
-                api_key=config.asr_api_key,
-                base_url=config.asr_base_url,
-                model=config.asr_model,
+        viewer_provider = self.provider_router
+        memory_extractor = self.provider_router
+        owned_asr_provider = (
+            StepFunAsrProvider(
+                StepFunAsrConfig(
+                    api_key=external_config.asr_api_key,
+                    base_url=external_config.asr_base_url,
+                    model=external_config.asr_model,
+                )
             )
+            if asr_provider_override is None
+            else None
         )
-        ingest_service = self.configure_ingest_pipeline(
+        asr_provider = (
+            owned_asr_provider
+            if asr_provider_override is None
+            else asr_provider_override
+        )
+        viewer_runtime = ViewerRuntime(
+            provider=viewer_provider,
+            barrage_pipeline=ViewerBarragePipeline(
+                clock=self.clock,
+                id_generator=self.id_generator,
+            ),
+            session_fence=self.runtime_state,
+            publisher=RealtimeViewerBarragePublisher(self.realtime_broker),
+            room_service=PersistentViewerRoomWriter(
+                room_service=self.room_service,
+                runtime_state=self.runtime_state,
+                session_factory=self.database.session_factory,
+            ),
+            clock=self.clock,
+            id_generator=self.id_generator,
+            max_in_flight=12,
+            trace_recorder=self.debug_service,
+        )
+        director = DirectorService(
+            provider=viewer_provider,
+            budget_policy=ActiveModeDirectorBudgetPolicy(),
+            fallback=DeterministicDirectorFallbackPolicy(),
+            clock=self.clock,
+        )
+        coordinator = ViewerRuntimeCoordinator(
+            runtime_state=self.runtime_state,
+            director=director,
+            viewer_runtime=viewer_runtime,
+            frame_metadata=StoredFrameMetadataResolver(
+                frame_store=self.frame_store,
+            ),
+            memory_reader=self.shared_brain_service,
+            visual_summarizer=viewer_provider,
+            meme_sink=SharedBrainMemeCandidateSink(self.shared_brain_service),
+            memory_extraction_sink=SharedBrainMemoryExtractionSink(
+                extractor=memory_extractor,
+                service=self.shared_brain_service,
+            ),
+        )
+        self.debug_service.bind_runtime_agent(coordinator)
+        scheduler = LatestWinsReactionScheduler(
+            executor=coordinator,
+            session_tasks=self.session_service,
+            clock=self.clock,
+            merge_window_provider=self.observation_merge_window_ms,
+        )
+        ingest_service = IngestService(
+            room_service=self.room_service,
+            context_builder=self.context_builder,
+            frame_store=self.frame_store,
             asr_provider=asr_provider,
-            model_provider=model_provider,
+            scheduler=scheduler,
+            session_tasks=self.session_service,
+            clock=self.clock,
+            max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
+            voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
         )
-        self.external_provider_config = config
-        self._owned_model_provider = model_provider
+        self.session_resources.add_resource(viewer_runtime)
+        self.session_resources.add_resource(coordinator)
+        self.session_resources.add_resource(ingest_service)
+        self.ingest_gateway.configure(ingest_service)
+        self.external_provider_config = external_config
+        self._owned_asr_provider = owned_asr_provider
+        self.viewer_runtime = viewer_runtime
+        self.viewer_runtime_coordinator = coordinator
+        self.reaction_scheduler = scheduler
+        self.ingest_service = ingest_service
         return ingest_service
+
+    def configure_recorded_runtime_pipeline(
+        self,
+        *,
+        request: ProviderConfigurationRequest,
+        viewer_provider: object,
+        memory_extractor: RoomMemoryExtractor,
+        asr_provider: AsrProvider,
+    ) -> IngestService:
+        """Configure the production graph with isolated deterministic adapters."""
+
+        return self._configure_viewer_runtime_pipeline(
+            request=request,
+            external_config=ExternalProviderConfig(
+                model_base_url=request.model_base_url,
+                model_name=request.model_name,
+                model_api_key=request.model_api_key,
+                asr_api_key=request.asr_api_key,
+            ),
+            viewer_provider_override=viewer_provider,
+            memory_extractor_override=memory_extractor,
+            asr_provider_override=asr_provider,
+        )
+
+    @property
+    def provider_configuration(self) -> ProviderConfigurationRequest | None:
+        return self.provider_configuration_store.current()
 
 
 def build_runtime(
@@ -280,6 +530,7 @@ def build_runtime(
     local_token: str | None = None,
     data_directory: str | Path | None = None,
     pipeline_config: PipelineConfig | None = None,
+    runtime_capability_probe: RuntimeCapabilityProbe | None = None,
 ) -> BackendRuntime:
     token = create_local_token() if local_token is None else local_token
     if not token:
@@ -297,11 +548,19 @@ def build_runtime(
     broker = RealtimeBroker()
     clock = SystemClock()
     id_generator = UuidIdGenerator()
+    runtime_state = RuntimeStateStore()
+    room_event_store = PersistentRuntimeRoomEventStore(
+        session_factory=database.session_factory,
+        runtime_state=runtime_state,
+        max_events=active_pipeline_config.room_event_capacity,
+        event_ttl_ms=active_pipeline_config.room_event_ttl_ms,
+    )
     room_service = RoomService(
         clock=clock,
         id_generator=id_generator,
         event_capacity=active_pipeline_config.room_event_capacity,
         event_ttl_ms=active_pipeline_config.room_event_ttl_ms,
+        event_persister=room_event_store.persist,
     )
     context_builder = ContextBuilder(
         room_service=room_service,
@@ -350,12 +609,55 @@ def build_runtime(
         resources=(audience_service,),
     )
     ingest_gateway = IngestGateway()
+    debug_service = DebugService(
+        TraceStore(
+            max_items=1_000,
+            path=resolved_data_directory / "debug" / "viewer-traces.jsonl",
+        ),
+        runtime_state=runtime_state,
+    )
+    replay_service = ReplayService()
+    shared_brain_service = SharedBrainService(
+        session_factory=database.session_factory,
+        runtime_state=runtime_state,
+        clock=clock,
+        room_service=room_service,
+        room_event_store=room_event_store,
+        observation_provenance=debug_service,
+    )
+    provider_configuration_store = ProviderConfigurationStore()
+    provider_controller = RuntimeProviderController(
+        frame_resolver=frame_store,
+        configuration_committer=provider_configuration_store.set,
+    )
+    provider_router = RuntimeProviderRouter(runtime_state)
     session_service = SessionService(
         clock=clock,
         id_generator=id_generator,
         publisher=broker,
         session_records=session_record_store,
         session_resources=session_resources,
+        app_version=BACKEND_VERSION,
+    )
+    session_resources.add_resource(runtime_state)
+    runtime_session_service = RuntimeSessionService(
+        session_factory=database.session_factory,
+        viewer_pool=ViewerPoolService(id_generator=id_generator),
+        clock=clock,
+        id_generator=id_generator,
+        capability_probe=(
+            ProductionRuntimeCapabilityProbe(
+                configuration_provider=provider_configuration_store.current,
+                asr_probe=create_stepfun_final_audio_probe(),
+            )
+            if runtime_capability_probe is None
+            else runtime_capability_probe
+        ),
+        runtime_state=runtime_state,
+        session_service=session_service,
+        room_service=room_service,
+        room_event_recovery=room_event_store,
+        provider_controller=provider_controller,
         app_version=BACKEND_VERSION,
     )
     return BackendRuntime(
@@ -376,6 +678,15 @@ def build_runtime(
         barrage_pipeline=barrage_pipeline,
         session_resources=session_resources,
         ingest_gateway=ingest_gateway,
+        debug_service=debug_service,
+        replay_service=replay_service,
+        shared_brain_service=shared_brain_service,
+        room_event_store=room_event_store,
+        runtime_session_service=runtime_session_service,
+        runtime_state=runtime_state,
+        provider_configuration_store=provider_configuration_store,
+        provider_controller=provider_controller,
+        provider_router=provider_router,
         pipeline_config=active_pipeline_config,
         local_token=token,
     )
@@ -396,8 +707,9 @@ def build_runtime_from_environment() -> BackendRuntime:
         missing = [name for name, value in provider_values.items() if not value]
         if missing:
             raise ValueError(f"external provider environment is incomplete: {', '.join(missing)}")
-        runtime.configure_external_provider_pipeline(
-            ExternalProviderConfig(
+        runtime.configure_provider_profile(
+            ProviderConfigurationRequest(
+                provider_profile_id="default",
                 model_base_url=provider_values["model_base_url"] or "",
                 model_name=provider_values["model_name"] or "",
                 model_api_key=provider_values["model_api_key"] or "",

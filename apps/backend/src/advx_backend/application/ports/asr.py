@@ -26,6 +26,34 @@ class TranscriptSegment(BaseModel):
     started_at_ms: int = Field(ge=0)
     ended_at_ms: int = Field(ge=0)
     final: bool
+    utterance_id: str | None = None
+    revision: int = Field(default=1, ge=1)
+
+
+class TranscriptTargetResolution(BaseModel):
+    resolver_id: str = Field(min_length=1, max_length=128)
+    target_viewer_id: str | None = Field(default=None, min_length=1, max_length=128)
+    target_persona_id: str | None = Field(default=None, min_length=1, max_length=128)
+    ambiguous: bool = False
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "TranscriptTargetResolution":
+        targets = sum(
+            value is not None
+            for value in (self.target_viewer_id, self.target_persona_id)
+        )
+        if targets > 1:
+            raise ValueError("a transcript can target either a Viewer or a Persona")
+        if self.ambiguous and targets:
+            raise ValueError("an ambiguous transcript target must broadcast")
+        return self
+
+
+class TranscriptTargetResolver(Protocol):
+    async def resolve(
+        self,
+        segment: TranscriptSegment,
+    ) -> TranscriptTargetResolution: ...
 
 
 class AsrProvider(Protocol):

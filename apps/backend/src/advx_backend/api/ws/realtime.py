@@ -2,6 +2,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
+from anyio import CancelScope
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
@@ -186,19 +187,23 @@ def create_realtime_router(
                         await _send_error(websocket, violation, send_lock=send_lock)
                         await websocket.close(code=violation.close_code)
                         return
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, asyncio.CancelledError):
             return
         finally:
-            if status_sender is not None:
-                status_sender.cancel()
-                await asyncio.gather(status_sender, return_exceptions=True)
-            if barrage_sender is not None:
-                barrage_sender.cancel()
-                await asyncio.gather(barrage_sender, return_exceptions=True)
-            if subscription is not None:
-                await broker.unsubscribe(subscription)
-            if barrage_subscription is not None:
-                await broker.unsubscribe_barrages(barrage_subscription)
+            with CancelScope(shield=True):
+                senders = tuple(
+                    sender
+                    for sender in (status_sender, barrage_sender)
+                    if sender is not None
+                )
+                for sender in senders:
+                    sender.cancel()
+                if senders:
+                    await asyncio.gather(*senders, return_exceptions=True)
+                if subscription is not None:
+                    await broker.unsubscribe(subscription)
+                if barrage_subscription is not None:
+                    await broker.unsubscribe_barrages(barrage_subscription)
 
     return router
 

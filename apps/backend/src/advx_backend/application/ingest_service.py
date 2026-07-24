@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from advx_backend.application.context_builder import ContextBuilder
-from advx_backend.application.ports.asr import AsrProvider, AudioChunk, TranscriptSegment
+from advx_backend.application.ports.asr import (
+    AsrProvider,
+    AudioChunk,
+    TranscriptSegment,
+    TranscriptTargetResolver,
+)
 from advx_backend.application.ports.generation import SessionTaskScope
 from advx_backend.application.ports.ingest import (
     AudioCommit,
@@ -87,9 +92,16 @@ class IngestService:
         session_tasks: SessionTaskScope,
         clock: Clock,
         max_tracked_input_ids: int = 1_024,
+        voice_target_resolver: TranscriptTargetResolver | None = None,
+        max_final_transcript_attempts: int = 3,
+        final_transcript_retry_backoff_ms: int = 25,
     ) -> None:
         if max_tracked_input_ids < 1:
             raise ValueError("max_tracked_input_ids must be at least one")
+        if max_final_transcript_attempts < 1:
+            raise ValueError("max_final_transcript_attempts must be at least one")
+        if final_transcript_retry_backoff_ms < 0:
+            raise ValueError("final_transcript_retry_backoff_ms must not be negative")
         self._room_service = room_service
         self._context_builder = context_builder
         self._frame_store = frame_store
@@ -98,8 +110,13 @@ class IngestService:
         self._session_tasks = session_tasks
         self._clock = clock
         self._max_tracked_input_ids = max_tracked_input_ids
+        self._voice_target_resolver = voice_target_resolver
+        self._max_final_transcript_attempts = max_final_transcript_attempts
+        self._final_transcript_retry_backoff_ms = final_transcript_retry_backoff_ms
         self._active_session_id: str | None = None
         self._seen_inputs: OrderedDict[str, _TrackedInput] = OrderedDict()
+        self._seen_utterances: OrderedDict[str, int] = OrderedDict()
+        self._partial_transcripts: dict[str, TranscriptSegment] = {}
         self._timestamp_floors: dict[IngestInputKind, int] = {}
         self._pending_audio_id: str | None = None
         self._result_task: asyncio.Task[None] | None = None
@@ -135,6 +152,12 @@ class IngestService:
             name=f"ingest-asr-results:{session_id}",
         )
 
+    def set_voice_target_resolver(
+        self,
+        resolver: TranscriptTargetResolver | None,
+    ) -> None:
+        self._voice_target_resolver = resolver
+
     async def stop_session(self, session_id: str) -> None:
         async with self._lock:
             if self._active_session_id != session_id:
@@ -167,15 +190,25 @@ class IngestService:
         )
         appended = False
         try:
-            await self._room_service.append_event(
+            payload = {"input_id": input.input_id}
+            if input.target_viewer_id is not None:
+                payload["target_viewer_id"] = input.target_viewer_id
+            if input.target_persona_id is not None:
+                payload["target_persona_id"] = input.target_persona_id
+            event = await self._room_service.append_event(
                 input.session_id,
                 source_type=RoomEventSource.USER_TEXT,
                 source_id="host",
                 text=input.text.strip(),
-                payload={"input_id": input.input_id},
+                payload=payload,
             )
             appended = True
-            await self._schedule_observation(input.session_id)
+            await self._schedule_observation(
+                input.session_id,
+                trigger_event_ids=(event.event_id,),
+                target_viewer_id=input.target_viewer_id,
+                target_persona_id=input.target_persona_id,
+            )
         except BaseException:
             await self._settle(input.input_id, accepted=appended)
             raise
@@ -197,7 +230,10 @@ class IngestService:
             frame = await self._frame_store.store(input)
             stored = True
             await self._context_builder.append_frame_ref(input.session_id, frame)
-            await self._schedule_observation(input.session_id)
+            await self._schedule_observation(
+                input.session_id,
+                trigger_frame_ids=(frame.frame_id,),
+            )
         except BaseException:
             await self._settle(input.input_id, accepted=stored)
             raise
@@ -255,7 +291,7 @@ class IngestService:
         while True:
             try:
                 async for segment in self._asr_provider.results():
-                    await self._handle_transcript(session_id, segment)
+                    await self._consume_transcript(session_id, segment)
                 return
             except asyncio.CancelledError:
                 raise
@@ -267,12 +303,72 @@ class IngestService:
                     extra={"session_id": session_id, "error_type": type(error).__name__},
                 )
 
+    async def _consume_transcript(
+        self,
+        session_id: str,
+        segment: TranscriptSegment,
+    ) -> None:
+        attempts = self._max_final_transcript_attempts if segment.final else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                await self._handle_transcript(session_id, segment)
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if attempt >= attempts:
+                    logger.error(
+                        "final ASR segment exhausted bounded retries",
+                        extra={
+                            "session_id": session_id,
+                            "utterance_id": segment.utterance_id,
+                            "revision": segment.revision,
+                            "attempts": attempts,
+                            "error_type": type(error).__name__,
+                        },
+                    )
+                    return
+                if self._final_transcript_retry_backoff_ms:
+                    await asyncio.sleep(
+                        self._final_transcript_retry_backoff_ms / 1_000
+                    )
+
     async def _handle_transcript(self, session_id: str, segment: TranscriptSegment) -> None:
-        if not segment.final or not segment.text.strip() or segment.session_id != session_id:
+        if not segment.text.strip() or segment.session_id != session_id:
+            return
+        if not segment.final:
+            async with self._lock:
+                if self._active_session_id == session_id:
+                    self._partial_transcripts[session_id] = segment
             return
         if not await self._session_tasks.accepts_results(session_id):
             return
-        await self._room_service.append_event(
+        # Providers may resend a final segment; utterance IDs make this boundary idempotent.
+        utterance_id = segment.utterance_id or (
+            f"{session_id}:{segment.started_at_ms}:"
+            f"{segment.ended_at_ms}:{segment.text.strip()}"
+        )
+        utterance_key = f"{session_id}\0{utterance_id}"
+        async with self._lock:
+            if self._seen_utterances.get(utterance_key, 0) >= segment.revision:
+                return
+        target_viewer_id: str | None = None
+        target_persona_id: str | None = None
+        target_payload: dict[str, object] = {}
+        if self._voice_target_resolver is not None:
+            resolution = await self._voice_target_resolver.resolve(segment)
+            target_payload = {
+                "target_resolver_id": resolution.resolver_id,
+                "target_ambiguous": resolution.ambiguous,
+            }
+            if not resolution.ambiguous:
+                target_viewer_id = resolution.target_viewer_id
+                target_persona_id = resolution.target_persona_id
+                if target_viewer_id is not None:
+                    target_payload["target_viewer_id"] = target_viewer_id
+                if target_persona_id is not None:
+                    target_payload["target_persona_id"] = target_persona_id
+        event = await self._room_service.append_event(
             session_id,
             source_type=RoomEventSource.USER_VOICE,
             source_id="host",
@@ -281,14 +377,47 @@ class IngestService:
                 "final": True,
                 "started_at_ms": segment.started_at_ms,
                 "ended_at_ms": segment.ended_at_ms,
+                "utterance_id": utterance_id,
+                "revision": segment.revision,
+                **target_payload,
             },
         )
-        await self._schedule_observation(session_id)
+        async with self._lock:
+            committed_revision = self._seen_utterances.get(utterance_key, 0)
+            if segment.revision > committed_revision:
+                self._seen_utterances[utterance_key] = segment.revision
+                self._seen_utterances.move_to_end(utterance_key)
+                while len(self._seen_utterances) > self._max_tracked_input_ids:
+                    self._seen_utterances.popitem(last=False)
+            self._partial_transcripts.pop(session_id, None)
+        await self._schedule_observation(
+            session_id,
+            trigger_event_ids=(event.event_id,),
+            target_viewer_id=target_viewer_id,
+            target_persona_id=target_persona_id,
+        )
 
-    async def _schedule_observation(self, session_id: str) -> None:
+    def partial_transcript_snapshot(self, session_id: str) -> TranscriptSegment | None:
+        return self._partial_transcripts.get(session_id)
+
+    async def _schedule_observation(
+        self,
+        session_id: str,
+        *,
+        trigger_event_ids: tuple[str, ...] = (),
+        trigger_frame_ids: tuple[str, ...] = (),
+        target_viewer_id: str | None = None,
+        target_persona_id: str | None = None,
+    ) -> None:
         if not await self._session_tasks.accepts_results(session_id):
             return
-        observation = await self._context_builder.build(session_id)
+        observation = await self._context_builder.build(
+            session_id,
+            trigger_event_ids=trigger_event_ids,
+            trigger_frame_ids=trigger_frame_ids,
+            target_viewer_id=target_viewer_id,
+            target_persona_id=target_persona_id,
+        )
         await self._scheduler.submit(observation)
 
     async def _reserve(
@@ -423,5 +552,7 @@ class IngestService:
 
     def _reset_tracking(self) -> None:
         self._seen_inputs.clear()
+        self._seen_utterances.clear()
+        self._partial_transcripts.clear()
         self._timestamp_floors.clear()
         self._pending_audio_id = None

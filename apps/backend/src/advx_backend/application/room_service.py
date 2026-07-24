@@ -1,6 +1,6 @@
 import asyncio
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 
 from advx_backend.application.ports.session import Clock, IdGenerator
 from advx_backend.domain.room import RoomEvent, RoomEventSource
@@ -37,6 +37,7 @@ class RoomService:
         id_generator: IdGenerator,
         event_capacity: int,
         event_ttl_ms: int,
+        event_persister: Callable[[RoomEvent], Awaitable[None]] | None = None,
     ) -> None:
         if event_capacity < 1:
             raise ValueError("event_capacity must be at least one")
@@ -47,6 +48,7 @@ class RoomService:
         self._id_generator = id_generator
         self._event_capacity = event_capacity
         self._event_ttl_ms = event_ttl_ms
+        self._event_persister = event_persister
         self._events: deque[RoomEvent] = deque(maxlen=event_capacity)
         self._active_session_id: str | None = None
         self._next_sequence = 1
@@ -105,6 +107,40 @@ class RoomService:
                 text=text,
                 payload={} if payload is None else payload,
             )
+            if self._event_persister is not None:
+                await self._event_persister(event)
+            self._events.append(event)
+            self._next_sequence += 1
+            return event
+
+    async def append_event_after(
+        self,
+        session_id: str,
+        *,
+        source_type: RoomEventSource | str,
+        persist: Callable[[RoomEvent], Awaitable[None]],
+        event_id: str | None = None,
+        source_id: str | None = None,
+        text: str | None = None,
+        payload: Mapping[str, object] | None = None,
+    ) -> RoomEvent:
+        """Append only after the caller's durable write succeeds."""
+
+        async with self._lock:
+            self._require_active(session_id)
+            now = self._clock.now_ms()
+            self._evict_expired(now)
+            event = RoomEvent(
+                event_id=event_id or self._id_generator.new_id(),
+                session_id=session_id,
+                sequence=self._next_sequence,
+                source_type=RoomEventSource(source_type),
+                source_id=source_id,
+                created_at_ms=now,
+                text=text,
+                payload={} if payload is None else payload,
+            )
+            await persist(event)
             self._events.append(event)
             self._next_sequence += 1
             return event
@@ -126,6 +162,32 @@ class RoomService:
             if max_count is None:
                 return tuple(self._events)
             return tuple(self._events)[-max_count:]
+
+    async def restore_events(
+        self,
+        session_id: str,
+        events: tuple[RoomEvent, ...],
+    ) -> None:
+        """Restore a validated, bounded public-event chain after backend recovery."""
+
+        async with self._lock:
+            self._require_active(session_id)
+            previous_sequence = 0
+            for event in events:
+                if event.session_id != session_id:
+                    raise ValueError("restored room event belongs to another Session")
+                if event.sequence <= previous_sequence:
+                    raise ValueError("restored room event sequence is not strictly increasing")
+                previous_sequence = event.sequence
+
+            now = self._clock.now_ms()
+            retained = [
+                event
+                for event in events
+                if now - event.created_at_ms < self._event_ttl_ms
+            ][-self._event_capacity :]
+            self._events = deque(retained, maxlen=self._event_capacity)
+            self._next_sequence = previous_sequence + 1 if previous_sequence else 1
 
     def _reset(self, session_id: str) -> None:
         self._events.clear()

@@ -572,6 +572,23 @@ class SQLiteSessionRecordRepository:
         )
         await self._session.flush()
 
+    async def list_audiences(self, session_id: str) -> list[SessionAudience]:
+        rows = await self._session.scalars(
+            select(SessionAudienceRow)
+            .where(SessionAudienceRow.session_id == session_id)
+            .order_by(SessionAudienceRow.audience_id)
+        )
+        return [
+            SessionAudience(
+                session_id=row.session_id,
+                audience_id=row.audience_id,
+                profile_revision=row.profile_revision,
+                joined_at_ms=row.joined_at_ms,
+                left_at_ms=row.left_at_ms,
+            )
+            for row in rows
+        ]
+
     async def finish(
         self,
         session_id: str,
@@ -585,7 +602,11 @@ class SQLiteSessionRecordRepository:
                 SessionRecordRow.session_id == session_id,
                 SessionRecordRow.ended_at_ms.is_(None),
             )
-            .values(ended_at_ms=ended_at_ms, outcome=outcome.value)
+            .values(
+                state="stopped",
+                ended_at_ms=ended_at_ms,
+                outcome=outcome.value,
+            )
         )
         if result.rowcount != 1:
             existing = await self.get(session_id)
@@ -602,6 +623,7 @@ class SQLiteSessionRecordRepository:
             update(SessionRecordRow)
             .where(SessionRecordRow.ended_at_ms.is_(None))
             .values(
+                state="stopped",
                 ended_at_ms=case(
                     (
                         SessionRecordRow.started_at_ms > ended_at_ms,

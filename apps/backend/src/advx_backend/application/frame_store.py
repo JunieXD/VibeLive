@@ -52,6 +52,7 @@ class InMemoryFrameStore:
         self._frames: OrderedDict[str, _StoredFrame] = OrderedDict()
         self._input_ids: set[str] = set()
         self._total_bytes = 0
+        self._last_ingested_body: bytes | None = None
         self._lock = asyncio.Lock()
 
     @property
@@ -97,7 +98,17 @@ class InMemoryFrameStore:
                 captured_at_ms=frame.captured_at_ms,
                 mime_type=frame.mime_type,
                 body=frame.body,
+                change_score=(
+                    frame.change_score
+                    if frame.change_score is not None
+                    else (
+                        0.0
+                        if self._last_ingested_body is None
+                        else _byte_change_score(self._last_ingested_body, frame.body)
+                    )
+                ),
             )
+            self._last_ingested_body = frame.body
             self._frames[data_ref] = _StoredFrame(data_ref=data_ref, resolved=resolved)
             self._input_ids.add(frame.input_id)
             self._total_bytes += body_size
@@ -148,3 +159,15 @@ class InMemoryFrameStore:
         self._frames.clear()
         self._input_ids.clear()
         self._total_bytes = 0
+        self._last_ingested_body = None
+
+
+def _byte_change_score(previous: bytes, current: bytes) -> float:
+    """Return a deterministic encoded-frame delta without decoding pixels."""
+
+    total = max(len(previous), len(current))
+    if total == 0:
+        return 0.0
+    different = abs(len(previous) - len(current))
+    different += sum(left != right for left, right in zip(previous, current, strict=False))
+    return different / total

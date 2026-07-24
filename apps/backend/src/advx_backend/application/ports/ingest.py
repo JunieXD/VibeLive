@@ -7,6 +7,7 @@ need pixels resolve them through ``FrameResolver``.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
@@ -46,12 +47,20 @@ class TextInput:
     input_id: str
     created_at_ms: int
     text: str = field(repr=False)
+    target_viewer_id: str | None = None
+    target_persona_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
         _require_non_empty_string(self.input_id, "input_id")
         _require_timestamp(self.created_at_ms, "created_at_ms")
         _require_non_empty_string(self.text, "text")
+        if self.target_viewer_id is not None:
+            _require_non_empty_string(self.target_viewer_id, "target_viewer_id")
+        if self.target_persona_id is not None:
+            _require_non_empty_string(self.target_persona_id, "target_persona_id")
+        if self.target_viewer_id is not None and self.target_persona_id is not None:
+            raise ValueError("text input can target either a Viewer or a Persona")
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +98,7 @@ class FrameInput:
     captured_at_ms: int
     mime_type: str
     body: bytes = field(repr=False)
+    change_score: float | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
@@ -96,6 +106,42 @@ class FrameInput:
         _require_timestamp(self.captured_at_ms, "captured_at_ms")
         _require_non_empty_string(self.mime_type, "mime_type")
         _require_media_body(self.body, "body")
+        mime_type, transported_score = _parse_frame_mime_type(self.mime_type)
+        if transported_score is not None and self.change_score is not None:
+            raise ValueError("change_score must use either metadata or the explicit field")
+        change_score = (
+            transported_score if transported_score is not None else self.change_score
+        )
+        if change_score is not None and (
+            isinstance(change_score, bool)
+            or not isinstance(change_score, (int, float))
+            or not math.isfinite(change_score)
+            or not 0 <= change_score <= 1
+        ):
+            raise ValueError("change_score must be a finite number between zero and one")
+        object.__setattr__(self, "mime_type", mime_type)
+        object.__setattr__(
+            self,
+            "change_score",
+            None if change_score is None else float(change_score),
+        )
+
+
+def _parse_frame_mime_type(value: str) -> tuple[str, float | None]:
+    mime_type, separator, metadata = value.partition(";")
+    normalized = mime_type.strip().casefold()
+    if not separator:
+        return normalized, None
+    if not metadata.startswith("advx-change-score=") or ";" in metadata:
+        raise ValueError("frame MIME metadata is invalid")
+    raw_score = metadata.removeprefix("advx-change-score=")
+    if not raw_score or raw_score.strip() != raw_score:
+        raise ValueError("frame change score metadata is invalid")
+    try:
+        score = float(raw_score)
+    except ValueError as error:
+        raise ValueError("frame change score metadata is invalid") from error
+    return normalized, score
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +187,7 @@ class ResolvedFrame:
     captured_at_ms: int
     mime_type: str
     body: bytes = field(repr=False)
+    change_score: float = 0.0
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
@@ -149,6 +196,8 @@ class ResolvedFrame:
         _require_timestamp(self.captured_at_ms, "captured_at_ms")
         _require_non_empty_string(self.mime_type, "mime_type")
         _require_media_body(self.body, "body")
+        if not 0 <= self.change_score <= 1:
+            raise ValueError("change_score must be between zero and one")
 
 
 class IngestPort(Protocol):

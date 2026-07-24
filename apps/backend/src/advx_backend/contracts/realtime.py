@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from advx_backend.contracts.protocol import PROTOCOL_VERSION
 from advx_backend.contracts.session import SessionSnapshot
+from advx_backend.contracts.viewer_runtime import ViewerBarrageEvent
 from advx_backend.domain.barrage import BarrageEvent
 
 
@@ -89,40 +90,46 @@ class ClientMessageEnvelope(RootModel[ClientMessage]):
 
 class BackendReady(RealtimeMessage):
     type: Literal["backend.ready"] = "backend.ready"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     session: SessionSnapshot
 
 
 class BackendPong(RealtimeMessage):
     type: Literal["backend.pong"] = "backend.pong"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     request_id: str
 
 
 class SessionStatusEvent(RealtimeMessage):
     type: Literal["session.status"] = "session.status"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     session: SessionSnapshot
 
 
-class BarrageSnapshot(BaseModel):
-    barrage_id: str
-    session_id: str
-    observation_id: str
-    request_id: str
-    audience_id: str
-    text: str
-    created_at_ms: int
-    expires_at_ms: int
+class BarrageSnapshot(ViewerBarrageEvent):
 
     @classmethod
     def from_domain(cls, event: BarrageEvent) -> "BarrageSnapshot":
         return cls(
             barrage_id=event.barrage_id,
+            room_id=event.room_id,
             session_id=event.session_id,
+            audience_epoch=event.audience_epoch,
             observation_id=event.observation_id,
-            request_id=event.request_id,
-            audience_id=event.audience_id,
+            generation_request_id=event.generation_request_id,
+            viewer_instance_id=event.viewer_instance_id,
+            persona_id=event.persona_id,
+            display_name=event.display_name,
+            viewer_sequence=event.viewer_sequence,
+            reaction_type=event.reaction_type,
+            evidence_refs=[
+                {
+                    "source": reference.source.value,
+                    "event_id": reference.event_id,
+                    "frame_index": reference.frame_index,
+                }
+                for reference in event.evidence_refs
+            ],
             text=event.text,
             created_at_ms=event.created_at_ms,
             expires_at_ms=event.expires_at_ms,
@@ -131,13 +138,13 @@ class BarrageSnapshot(BaseModel):
 
 class BarrageEventMessage(RealtimeMessage):
     type: Literal["barrage.event"] = "barrage.event"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     barrage: BarrageSnapshot
 
 
 class RealtimeProtocolError(RealtimeMessage):
     type: Literal["protocol.error"] = "protocol.error"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     code: RealtimeProtocolErrorCode
     message: str = Field(min_length=1, max_length=256)
     supported_version: int | None = None
@@ -145,7 +152,7 @@ class RealtimeProtocolError(RealtimeMessage):
 
 class IngestAck(RealtimeMessage):
     type: Literal["ingest.ack"] = "ingest.ack"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     input_kind: IngestInputKind
@@ -155,7 +162,7 @@ class IngestAck(RealtimeMessage):
 
 class IngestRejected(RealtimeMessage):
     type: Literal["ingest.rejected"] = "ingest.rejected"
-    protocol_version: Literal[1] = PROTOCOL_VERSION
+    protocol_version: Literal[2] = PROTOCOL_VERSION
     code: IngestRejectionCode
     message: str = Field(min_length=1, max_length=256)
     session_id: str | None = Field(

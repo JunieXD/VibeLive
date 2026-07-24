@@ -10,6 +10,7 @@ from advx_backend.application.reaction_scheduler import (
 )
 from advx_backend.application.reaction_service import ReactionResult
 from advx_backend.domain.observation import Observation
+from advx_backend.domain.room import RoomEvent, RoomEventSource
 
 T = TypeVar("T")
 
@@ -66,6 +67,7 @@ class ManagedSessionTasks:
 class GatedExecutor:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.observations: list[Observation] = []
         self.cancelled_observation_ids: list[str] = []
         self._started: dict[str, asyncio.Event] = {}
         self._released: dict[str, asyncio.Event] = {}
@@ -85,6 +87,7 @@ class GatedExecutor:
 
     async def react(self, observation: Observation) -> ReactionResult:
         observation_id = observation.observation_id
+        self.observations.append(observation)
         self.calls.append(observation_id)
         self.started_for(observation_id).set()
         try:
@@ -149,6 +152,163 @@ async def test_latest_submission_replaces_an_observation_that_has_not_started() 
 
     executor.release("latest")
     assert await asyncio.wait_for(latest, timeout=1) is executor.result_for("latest")
+
+
+@pytest.mark.asyncio
+async def test_configured_merge_window_coalesces_to_the_latest_observation() -> None:
+    executor = GatedExecutor()
+    instance = scheduler(
+        executor=executor,
+        sessions=ManagedSessionTasks({"session-1"}),
+        clock=FakeClock(100),
+        config=ReactionSchedulerConfig(observation_merge_window_ms=20),
+    )
+
+    first_observation = Observation(
+        session_id="session-1",
+        observation_id="first",
+        created_at_ms=100,
+        frames=(),
+        room_events=(
+            RoomEvent(
+                event_id="event-1",
+                session_id="session-1",
+                sequence=1,
+                source_type=RoomEventSource.USER_TEXT,
+                created_at_ms=100,
+                text="first",
+            ),
+        ),
+        trigger_event_ids=("event-1",),
+        user_context={"first": "1"},
+        target_viewer_id="viewer-1",
+    )
+    latest_observation = Observation(
+        session_id="session-1",
+        observation_id="latest",
+        created_at_ms=110,
+        room_events=(
+            RoomEvent(
+                event_id="event-2",
+                session_id="session-1",
+                sequence=2,
+                source_type=RoomEventSource.USER_VOICE,
+                created_at_ms=110,
+                text="second",
+            ),
+        ),
+        trigger_event_ids=("event-2",),
+        user_context={"latest": "2"},
+        target_persona_id="persona-1",
+    )
+    first = await instance.submit(first_observation)
+    await asyncio.sleep(0)
+    latest = await instance.submit(latest_observation)
+
+    await asyncio.wait_for(executor.started_for("latest").wait(), timeout=1)
+    assert executor.calls == ["latest"]
+    merged = executor.observations[0]
+    assert merged.created_at_ms == 100
+    assert [event.event_id for event in merged.room_events] == ["event-1", "event-2"]
+    assert merged.trigger_event_ids == ("event-1", "event-2")
+    assert dict(merged.user_context) == {"first": "1", "latest": "2"}
+    assert merged.target_viewer_id is None
+    assert merged.target_persona_id is None
+    executor.release("latest")
+    expected = executor.result_for("latest")
+    assert await asyncio.wait_for(first, timeout=1) is expected
+    assert await asyncio.wait_for(latest, timeout=1) is expected
+
+
+@pytest.mark.asyncio
+async def test_dynamic_merge_window_is_read_at_each_wave_boundary() -> None:
+    executor = GatedExecutor()
+    window = 20
+    samples: list[int] = []
+
+    async def merge_window(session_id: str) -> int:
+        assert session_id == "session-1"
+        samples.append(window)
+        return window
+
+    instance = LatestWinsReactionScheduler(
+        executor=executor,
+        session_tasks=ManagedSessionTasks({"session-1"}),
+        clock=FakeClock(100),
+        merge_window_provider=merge_window,
+    )
+    first = await instance.submit(
+        Observation(
+            session_id="session-1",
+            observation_id="first",
+            created_at_ms=100,
+            room_events=(
+                RoomEvent(
+                    event_id="event-1",
+                    session_id="session-1",
+                    sequence=1,
+                    source_type=RoomEventSource.USER_TEXT,
+                    created_at_ms=100,
+                    text="first",
+                ),
+            ),
+            trigger_event_ids=("event-1",),
+        )
+    )
+    latest = await instance.submit(
+        Observation(
+            session_id="session-1",
+            observation_id="latest",
+            created_at_ms=101,
+            room_events=(
+                RoomEvent(
+                    event_id="event-2",
+                    session_id="session-1",
+                    sequence=2,
+                    source_type=RoomEventSource.USER_VOICE,
+                    created_at_ms=101,
+                    text="latest",
+                ),
+            ),
+            trigger_event_ids=("event-2",),
+        )
+    )
+    await asyncio.wait_for(executor.started_for("latest").wait(), timeout=1)
+    executor.release("latest")
+    expected = executor.result_for("latest")
+    assert await first is expected
+    assert await latest is expected
+    assert executor.observations[0].trigger_event_ids == ("event-1", "event-2")
+
+    window = 0
+    immediate = await instance.submit(observation("session-1", "immediate"))
+    await asyncio.wait_for(executor.started_for("immediate").wait(), timeout=1)
+    executor.release("immediate")
+    await immediate
+
+    assert 20 in samples
+    assert samples[-1] == 0
+
+
+def test_merge_preserves_ambiguous_target_as_broadcast() -> None:
+    merged = LatestWinsReactionScheduler._merge_observations(
+        Observation(
+            session_id="session-1",
+            observation_id="first",
+            created_at_ms=1,
+            target_ambiguous=True,
+        ),
+        Observation(
+            session_id="session-1",
+            observation_id="latest",
+            created_at_ms=2,
+            target_viewer_id="viewer-1",
+        ),
+    )
+
+    assert merged.target_ambiguous is True
+    assert merged.target_viewer_id is None
+    assert merged.target_persona_id is None
 
 
 @pytest.mark.asyncio
@@ -253,6 +413,7 @@ async def test_scheduler_discards_expired_observation_before_execution() -> None
         (ReactionSchedulerConfig, "observation_ttl_ms"),
         (ReactionSchedulerConfig, "max_tracked_sessions"),
         (ReactionSchedulerConfig, "max_pending_observations_per_session"),
+        (ReactionSchedulerConfig, "observation_merge_window_ms"),
     ],
 )
 def test_scheduler_config_requires_bounded_positive_values(
@@ -266,6 +427,8 @@ def test_scheduler_config_requires_bounded_positive_values(
     }
     if message == "max_pending_observations_per_session":
         values[message] = 2
+    elif message == "observation_merge_window_ms":
+        values[message] = -1
     else:
         values[message] = 0
 

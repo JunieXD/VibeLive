@@ -184,6 +184,123 @@ async def test_health_returns_false_for_an_upstream_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_capability_probe_discovers_models_and_checks_roles_image_and_concurrency() -> None:
+    requested_models: list[str] = []
+    image_requests = 0
+    concurrent_viewers = 0
+    max_concurrent_viewers = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal image_requests, concurrent_viewers, max_concurrent_viewers
+        if request.method == "GET":
+            assert request.url.path == "/v1/models"
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"id": "shared-model"},
+                        {"id": "viewer-model"},
+                        {"id": "shared-model"},
+                        {"id": 123},
+                    ]
+                },
+            )
+
+        payload = json.loads(request.content)
+        model_id = payload["model"]
+        requested_models.append(model_id)
+        content = payload["messages"][0]["content"]
+        if isinstance(content, list):
+            image_requests += 1
+            assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+        if model_id == "viewer-model":
+            concurrent_viewers += 1
+            max_concurrent_viewers = max(max_concurrent_viewers, concurrent_viewers)
+            await asyncio.sleep(0.01)
+            concurrent_viewers -= 1
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"ok":true}'}}]},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleProvider(
+        OpenAICompatibleConfig(
+            base_url="https://model.example/v1",
+            model="shared-model",
+            api_key="secret",
+        ),
+        client=client,
+    )
+
+    result = await provider.probe_capabilities(
+        role_models={
+            "director": "director-model",
+            "viewer": "viewer-model",
+            "memory": "memory-model",
+            "visual_summary": "vision-model",
+        }
+    )
+
+    assert result.status.value == "passed"
+    assert result.discovered_model_ids == ("shared-model", "viewer-model")
+    assert [check.capability for check in result.checks] == [
+        "model_discovery",
+        "director_structured_output",
+        "viewer_structured_output",
+        "memory_structured_output",
+        "image_input",
+        "viewer_minimal_concurrency",
+    ]
+    assert image_requests == 1
+    assert max_concurrent_viewers == 2
+    assert set(requested_models) == {
+        "director-model",
+        "viewer-model",
+        "memory-model",
+        "vision-model",
+    }
+
+    await provider.aclose()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_capability_probe_redacts_blocking_upstream_failures() -> None:
+    secret = "secret-token"
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(403, json={"error": f"do not expose {secret}"})
+        )
+    )
+    provider = OpenAICompatibleProvider(
+        OpenAICompatibleConfig(
+            base_url="https://model.example/v1",
+            model="test-model",
+            api_key=secret,
+        ),
+        client=client,
+    )
+
+    result = await provider.probe_capabilities(
+        role_models={
+            "director": "test-model",
+            "viewer": "test-model",
+            "memory": "test-model",
+            "visual_summary": "test-model",
+        }
+    )
+
+    assert result.status.value == "blocked"
+    assert {check.error_code for check in result.checks} == {"upstream_http_error"}
+    assert {check.http_status for check in result.checks} == {403}
+    assert secret not in repr(result)
+
+    await provider.aclose()
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_http_errors_are_normalized_without_response_or_credential_details() -> None:
     secret = "secret-token"
 

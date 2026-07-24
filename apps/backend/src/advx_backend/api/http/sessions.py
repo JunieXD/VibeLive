@@ -35,17 +35,15 @@ def create_session_router(
     async def current_session() -> SessionSnapshot:
         return SessionSnapshot.from_domain(await session_service.status())
 
-    @router.post(
-        "",
-        response_model=SessionSnapshot,
-        status_code=http_status.HTTP_201_CREATED,
-    )
-    async def start_session() -> SessionSnapshot:
-        try:
-            status = await session_service.start()
-        except SessionError as error:
-            _raise_http_error(error)
-        return SessionSnapshot.from_domain(status)
+    @router.post("")
+    async def start_session() -> None:
+        raise HTTPException(
+            status_code=http_status.HTTP_409_CONFLICT,
+            detail={
+                "code": "runtime_snapshot_required",
+                "message": "Start protocol v2 Sessions through /runtime/sessions.",
+            },
+        )
 
     @router.post("/{session_id}/pause", response_model=SessionSnapshot)
     async def pause_session(session_id: SessionId) -> SessionSnapshot:

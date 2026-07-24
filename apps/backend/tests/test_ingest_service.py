@@ -12,7 +12,12 @@ from advx_backend.application.ingest_service import (
     IngestService,
     IngestSessionNotActiveError,
 )
-from advx_backend.application.ports.asr import AudioChunk, TranscriptSegment
+from advx_backend.application.ports.asr import (
+    AudioChunk,
+    TranscriptSegment,
+    TranscriptTargetResolution,
+    TranscriptTargetResolver,
+)
 from advx_backend.application.ports.ingest import (
     AudioCommit,
     AudioInput,
@@ -103,6 +108,7 @@ class RecordingScheduler:
 async def create_harness(
     *,
     max_tracked_input_ids: int = 1_024,
+    voice_target_resolver: TranscriptTargetResolver | None = None,
 ) -> tuple[
     IngestService,
     RoomService,
@@ -141,6 +147,7 @@ async def create_harness(
         session_tasks=ActiveSessionScope(),
         clock=clock,
         max_tracked_input_ids=max_tracked_input_ids,
+        voice_target_resolver=voice_target_resolver,
     )
     await context.start_session("session-1")
     await service.start_session("session-1")
@@ -171,6 +178,28 @@ async def test_text_and_frame_inputs_build_observations_without_embedding_pixels
     assert b"pixels" not in repr(observation).encode()
     resolved = await frame_store.resolve(session_id="session-1", frame=observation.frames[0])
     assert resolved is not None and resolved.body == b"pixels"
+
+    await service.stop_session("session-1")
+    await room.stop_session("session-1")
+
+
+@pytest.mark.asyncio
+async def test_text_input_persists_only_one_structured_target_in_event_payload() -> None:
+    service, room, _, _, _ = await create_harness()
+
+    await service.submit_text(
+        TextInput(
+            session_id="session-1",
+            input_id="text-target",
+            created_at_ms=100,
+            text="@Viewer hello",
+            target_viewer_id="viewer-1",
+        )
+    )
+
+    events = await room.read_events("session-1")
+    assert events[-1].payload["target_viewer_id"] == "viewer-1"
+    assert "target_persona_id" not in events[-1].payload
 
     await service.stop_session("session-1")
     await room.stop_session("session-1")
@@ -221,6 +250,158 @@ async def test_audio_commit_only_publishes_final_transcript() -> None:
 
     await service.stop_session("session-1")
     await room.stop_session("session-1")
+
+
+@pytest.mark.asyncio
+async def test_asr_commits_only_newer_successful_revisions_and_keeps_partial_state() -> None:
+    service, room, _, asr, scheduler = await create_harness()
+    await asr.results_queue.put(
+        TranscriptSegment(
+            session_id="session-1",
+            text="draft",
+            started_at_ms=10,
+            ended_at_ms=20,
+            final=False,
+            utterance_id="utterance-1",
+            revision=1,
+        )
+    )
+    await asyncio.sleep(0)
+    assert service.partial_transcript_snapshot("session-1").text == "draft"
+    assert scheduler.observations == []
+
+    for revision, text in ((1, "wrong"), (1, "duplicate"), (2, "corrected")):
+        scheduler.submitted.clear()
+        await asr.results_queue.put(
+            TranscriptSegment(
+                session_id="session-1",
+                text=text,
+                started_at_ms=10,
+                ended_at_ms=20,
+                final=True,
+                utterance_id="utterance-1",
+                revision=revision,
+            )
+        )
+        if text != "duplicate":
+            await asyncio.wait_for(scheduler.submitted.wait(), timeout=1)
+        else:
+            await asyncio.sleep(0.01)
+
+    events = await room.read_events("session-1")
+    assert [(event.text, event.payload["revision"]) for event in events] == [
+        ("wrong", 1),
+        ("corrected", 2),
+    ]
+
+    await service.stop_session("session-1")
+    await room.stop_session("session-1")
+
+
+@pytest.mark.asyncio
+async def test_failed_asr_revision_can_be_retried() -> None:
+    service, room, _, _, scheduler = await create_harness()
+    original = room.append_event
+    calls = 0
+
+    async def fail_once(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("write failed")
+        return await original(*args, **kwargs)
+
+    room.append_event = fail_once  # type: ignore[method-assign]
+    segment = TranscriptSegment(
+        session_id="session-1",
+        text="retry me",
+        started_at_ms=10,
+        ended_at_ms=20,
+        final=True,
+        utterance_id="utterance-retry",
+        revision=1,
+    )
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await service._handle_transcript("session-1", segment)
+    await service._handle_transcript("session-1", segment)
+
+    events = await room.read_events("session-1")
+    assert [event.text for event in events] == ["retry me"]
+    assert len(scheduler.observations) == 1
+
+
+@pytest.mark.asyncio
+async def test_asr_consumer_retries_the_current_final_before_reading_next() -> None:
+    service, room, _, asr, scheduler = await create_harness()
+    original = room.append_event
+    calls = 0
+
+    async def fail_once(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient room write")
+        return await original(*args, **kwargs)
+
+    room.append_event = fail_once  # type: ignore[method-assign]
+    await asr.results_queue.put(
+        TranscriptSegment(
+            session_id="session-1",
+            text="consumer retry",
+            started_at_ms=10,
+            ended_at_ms=20,
+            final=True,
+            utterance_id="consumer-retry",
+            revision=1,
+        )
+    )
+
+    await asyncio.wait_for(scheduler.submitted.wait(), timeout=1)
+    events = await room.read_events("session-1")
+
+    assert calls == 2
+    assert [event.text for event in events] == ["consumer retry"]
+    assert len(scheduler.observations) == 1
+
+    await service.stop_session("session-1")
+    await room.stop_session("session-1")
+
+
+@pytest.mark.asyncio
+async def test_final_voice_target_resolution_is_structured_and_traceable() -> None:
+    class Resolver:
+        async def resolve(
+            self,
+            segment: TranscriptSegment,
+        ) -> TranscriptTargetResolution:
+            assert segment.text == "Viewer answer me"
+            return TranscriptTargetResolution(
+                resolver_id="voice-mention-v1",
+                target_viewer_id="viewer-1",
+            )
+
+    service, room, _, _, scheduler = await create_harness(
+        voice_target_resolver=Resolver()
+    )
+    segment = TranscriptSegment(
+        session_id="session-1",
+        text="Viewer answer me",
+        started_at_ms=10,
+        ended_at_ms=20,
+        final=True,
+        utterance_id="voice-target",
+        revision=1,
+    )
+
+    await service._handle_transcript("session-1", segment)
+
+    event = (await room.read_events("session-1"))[-1]
+    assert event.payload["target_viewer_id"] == "viewer-1"
+    assert event.payload["target_resolver_id"] == "voice-mention-v1"
+    observation = scheduler.observations[-1]
+    assert observation.target_viewer_id == "viewer-1"
+    assert observation.trigger_event_ids == (event.event_id,)
 
 
 @pytest.mark.asyncio

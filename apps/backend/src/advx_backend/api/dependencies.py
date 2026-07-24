@@ -58,3 +58,38 @@ class ProtocolVersionGuard:
                 },
                 headers={PROTOCOL_VERSION_HEADER: str(self._supported_version)},
             )
+
+
+class RuntimeProtocolVersionGuard:
+    """Reject legacy v1 separately from unknown runtime protocol versions."""
+
+    def __init__(self, supported_version: int) -> None:
+        self._supported_version = supported_version
+
+    async def __call__(
+        self,
+        version: Annotated[
+            str | None,
+            Header(alias=PROTOCOL_VERSION_HEADER),
+        ] = None,
+    ) -> None:
+        supported = str(self._supported_version)
+        if version == supported:
+            return
+        if version == "1":
+            status_code = http_status.HTTP_409_CONFLICT
+            code = "protocol_version_conflict"
+            message = "Protocol v1 cannot be used with the Viewer runtime."
+        else:
+            status_code = http_status.HTTP_422_UNPROCESSABLE_CONTENT
+            code = "unsupported_protocol_version"
+            message = "The requested runtime protocol version is not supported."
+        raise HTTPException(
+            status_code=status_code,
+            detail={
+                "code": code,
+                "message": message,
+                "supported_version": self._supported_version,
+            },
+            headers={PROTOCOL_VERSION_HEADER: supported},
+        )

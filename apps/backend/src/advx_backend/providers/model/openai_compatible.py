@@ -16,6 +16,11 @@ from advx_backend.contracts.generation import (
     GenerationResult,
 )
 from advx_backend.domain.observation import FrameRef as DomainFrameRef
+from advx_backend.providers.model.base import (
+    CapabilityProbeCheck,
+    CapabilityProbeResult,
+    CapabilityProbeStatus,
+)
 
 
 class OpenAICompatibleProviderError(RuntimeError):
@@ -108,6 +113,18 @@ _CANDIDATE_SCHEMA: Final[dict[str, object]] = {
         },
     },
 }
+_PROBE_SCHEMA: Final[dict[str, object]] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["ok"],
+    "properties": {"ok": {"type": "boolean", "const": True}},
+}
+_PROBE_IMAGE: Final = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB"
+    "AScY42YAAAAASUVORK5CYII="
+)
+_BLOCKING_HTTP_STATUSES: Final = frozenset({401, 402, 403, 408, 429})
 
 
 class OpenAICompatibleProvider:
@@ -141,6 +158,93 @@ class OpenAICompatibleProvider:
         except OpenAICompatibleProviderError:
             return False
         return True
+
+    async def discover_models(self) -> tuple[str, ...]:
+        """Return bounded model IDs from the authenticated OpenAI-compatible catalog."""
+
+        response = await self._send("GET", self._models_endpoint())
+        payload = self._json_object(response.content, "models response")
+        data = payload.get("data")
+        if not isinstance(data, list):
+            raise OpenAICompatibleProtocolError("models response must contain a data array")
+
+        model_ids: list[str] = []
+        for item in data[:1_000]:
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("id")
+            if isinstance(model_id, str) and 0 < len(model_id) <= 256:
+                model_ids.append(model_id)
+        return tuple(dict.fromkeys(model_ids))
+
+    async def probe_capabilities(
+        self,
+        *,
+        role_models: dict[str, str],
+    ) -> CapabilityProbeResult:
+        """Probe only minimal, non-streaming requests and return redacted outcomes."""
+
+        try:
+            discovered_model_ids = await self.discover_models()
+            discovery_check = CapabilityProbeCheck(
+                capability="model_discovery",
+                status=CapabilityProbeStatus.PASSED,
+            )
+        except asyncio.CancelledError:
+            raise
+        except OpenAICompatibleProviderError as error:
+            discovered_model_ids = ()
+            discovery_check = self.normalize_probe_error("model_discovery", None, error)
+
+        structured_roles = ("director", "viewer", "memory")
+        structured_checks = await asyncio.gather(
+            *(
+                self._probe_chat(
+                    capability=f"{role}_structured_output",
+                    model_id=role_models[role],
+                )
+                for role in structured_roles
+            )
+        )
+        image_check = await self._probe_chat(
+            capability="image_input",
+            model_id=role_models["visual_summary"],
+            include_image=True,
+        )
+        viewer_checks = await asyncio.gather(
+            *(
+                self._probe_chat(
+                    capability=f"viewer_concurrency_{index}",
+                    model_id=role_models["viewer"],
+                )
+                for index in (1, 2)
+            )
+        )
+        concurrency_status = self._overall_status(viewer_checks)
+        concurrency_check = CapabilityProbeCheck(
+            capability="viewer_minimal_concurrency",
+            status=concurrency_status,
+            model_id=role_models["viewer"],
+            error_code=next(
+                (check.error_code for check in viewer_checks if check.error_code is not None),
+                None,
+            ),
+            http_status=next(
+                (check.http_status for check in viewer_checks if check.http_status is not None),
+                None,
+            ),
+        )
+        checks = (
+            discovery_check,
+            *structured_checks,
+            image_check,
+            concurrency_check,
+        )
+        return CapabilityProbeResult(
+            status=self._overall_status(checks),
+            discovered_model_ids=discovered_model_ids,
+            checks=checks,
+        )
 
     async def generate(self, request: GenerationRequest) -> GenerationResult:
         task = await self._register_request(request.request_id)
@@ -314,6 +418,112 @@ class OpenAICompatibleProvider:
             raise OpenAICompatibleHttpError(response.status_code)
         return response
 
+    async def _probe_chat(
+        self,
+        *,
+        capability: str,
+        model_id: str,
+        include_image: bool = False,
+    ) -> CapabilityProbeCheck:
+        content: str | list[dict[str, object]] = 'Return {"ok":true}.'
+        if include_image:
+            content = [
+                {"type": "text", "text": 'Return {"ok":true}.'},
+                {"type": "image_url", "image_url": {"url": _PROBE_IMAGE}},
+            ]
+        payload = {
+            "model": model_id,
+            "messages": [{"role": "user", "content": content}],
+            "stream": False,
+            "n": 1,
+            # Reasoning-capable compatible models may spend part of this budget
+            # before emitting the tiny structured response.
+            "max_tokens": 512,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "capability_probe",
+                    "strict": True,
+                    "schema": _PROBE_SCHEMA,
+                },
+            },
+        }
+        try:
+            response = await self._send(
+                "POST",
+                self._chat_completions_endpoint(),
+                payload=payload,
+            )
+            self._parse_probe_response(response)
+        except asyncio.CancelledError:
+            raise
+        except OpenAICompatibleProviderError as error:
+            return self.normalize_probe_error(capability, model_id, error)
+        return CapabilityProbeCheck(
+            capability=capability,
+            status=CapabilityProbeStatus.PASSED,
+            model_id=model_id,
+        )
+
+    def _parse_probe_response(self, response: httpx.Response) -> None:
+        payload = self._json_object(response.content, "probe response")
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise OpenAICompatibleProtocolError("probe response must contain a choice")
+        message = choices[0].get("message")
+        if not isinstance(message, dict) or not isinstance(message.get("content"), str):
+            raise OpenAICompatibleProtocolError("probe response must contain JSON text")
+        output = self._json_object(cast(str, message["content"]), "probe structured output")
+        if output != {"ok": True}:
+            raise OpenAICompatibleProtocolError("probe structured output did not match schema")
+
+    @staticmethod
+    def normalize_probe_error(
+        capability: str,
+        model_id: str | None,
+        error: OpenAICompatibleProviderError,
+    ) -> CapabilityProbeCheck:
+        http_status = error.status_code if isinstance(error, OpenAICompatibleHttpError) else None
+        if isinstance(error, OpenAICompatibleHttpError):
+            error_code = "upstream_http_error"
+            status = (
+                CapabilityProbeStatus.BLOCKED
+                if error.status_code in _BLOCKING_HTTP_STATUSES
+                else CapabilityProbeStatus.FAILED
+            )
+        elif isinstance(error, OpenAICompatibleTimeoutError):
+            error_code = "upstream_timeout"
+            status = CapabilityProbeStatus.BLOCKED
+        elif isinstance(error, OpenAICompatibleTransportError):
+            error_code = "upstream_unreachable"
+            status = CapabilityProbeStatus.BLOCKED
+        elif isinstance(error, OpenAICompatibleClosedError):
+            error_code = "provider_closed"
+            status = CapabilityProbeStatus.FAILED
+        else:
+            error_code = "invalid_upstream_response"
+            status = CapabilityProbeStatus.FAILED
+        return CapabilityProbeCheck(
+            capability=capability,
+            status=status,
+            model_id=model_id,
+            error_code=error_code,
+            http_status=http_status,
+        )
+
+    @staticmethod
+    def _overall_status(
+        checks: tuple[CapabilityProbeCheck, ...] | list[CapabilityProbeCheck],
+    ) -> CapabilityProbeStatus:
+        statuses = {check.status for check in checks}
+        if CapabilityProbeStatus.BLOCKED in statuses:
+            return CapabilityProbeStatus.BLOCKED
+        if CapabilityProbeStatus.FAILED in statuses:
+            return CapabilityProbeStatus.FAILED
+        if statuses == {CapabilityProbeStatus.SKIPPED}:
+            return CapabilityProbeStatus.SKIPPED
+        return CapabilityProbeStatus.PASSED
+
     def _parse_candidates(self, response: httpx.Response) -> list[BarrageCandidate]:
         payload = self._json_object(response.content, "response")
         choices = payload.get("choices")
@@ -372,6 +582,9 @@ class OpenAICompatibleProvider:
 
     def _model_endpoint(self) -> str:
         return f"{self.config.base_url}/models/{quote(self.config.model, safe='')}"
+
+    def _models_endpoint(self) -> str:
+        return f"{self.config.base_url}/models"
 
     def _ensure_open(self) -> None:
         if self._closed:

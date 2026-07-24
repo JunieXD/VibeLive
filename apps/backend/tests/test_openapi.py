@@ -19,6 +19,21 @@ def test_openapi_includes_http_and_realtime_contracts() -> None:
     assert "ClientAudioCommit" in schemas
     assert "IngestAck" in schemas
     assert "IngestRejected" in schemas
+    assert "ViewerRequestTrace" in schemas
+    assert "ObservationWaveTrace" in schemas
+    assert schema["x-advx-contracts"]["debugTrace"] == {
+        "oneOf": [
+            {"$ref": "#/components/schemas/ViewerRequestTrace"},
+            {"$ref": "#/components/schemas/ObservationWaveTrace"},
+        ],
+        "discriminator": {
+            "propertyName": "trace_kind",
+            "mapping": {
+                "viewer_request": "#/components/schemas/ViewerRequestTrace",
+                "observation_wave": "#/components/schemas/ObservationWaveTrace",
+            },
+        },
+    }
     start_parameters = schema["paths"]["/sessions"]["post"]["parameters"]
     version_header = next(
         parameter
@@ -26,10 +41,10 @@ def test_openapi_includes_http_and_realtime_contracts() -> None:
         if parameter["name"] == "X-ADVX-Protocol-Version"
     )
     assert version_header["required"] is True
-    assert version_header["schema"]["const"] == "1"
+    assert version_header["schema"]["const"] == "2"
     assert schema["x-advx-realtime"] == {
         "path": "/ws",
-        "protocolVersion": 1,
+        "protocolVersion": 2,
         "clientMessage": {
             "$ref": "#/components/schemas/ClientMessageEnvelope",
         },

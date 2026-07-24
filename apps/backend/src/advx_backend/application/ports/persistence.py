@@ -133,6 +133,8 @@ class SessionRecordRepository(Protocol):
 
     async def add_audience(self, audience: SessionAudience) -> None: ...
 
+    async def list_audiences(self, session_id: str) -> list[SessionAudience]: ...
+
     async def finish(
         self,
         session_id: str,

@@ -27,7 +27,7 @@ LOCAL_TOKEN = "test-local-token"
 def hello() -> dict[str, object]:
     return {
         "type": "client.hello",
-        "protocol_version": 1,
+        "protocol_version": 2,
         "token": LOCAL_TOKEN,
     }
 
@@ -107,7 +107,7 @@ def test_realtime_dispatches_text_after_gateway_is_configured(tmp_path: Path) ->
             websocket.send_json(
                 {
                     "type": "client.text.submit",
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "session_id": "session-1",
                     "input_id": "text-1",
                     "created_at_ms": 100,
@@ -117,7 +117,7 @@ def test_realtime_dispatches_text_after_gateway_is_configured(tmp_path: Path) ->
 
             assert websocket.receive_json() == {
                 "type": "ingest.ack",
-                "protocol_version": 1,
+                "protocol_version": 2,
                 "session_id": "session-1",
                 "input_id": "text-1",
                 "input_kind": "text",
@@ -154,7 +154,7 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
             websocket.send_json(
                 {
                     "type": "client.audio.commit",
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "session_id": "session-1",
                     "input_id": "audio-1",
                     "committed_at_ms": 101,
@@ -166,7 +166,7 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
                 envelope(
                     media_type=BinaryMediaType.IMAGE,
                     input_id="frame-1",
-                    format_value="image/webp",
+                    format_value="image/webp;advx-change-score=0.375",
                     body=frame_body,
                 )
             )
@@ -177,6 +177,30 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
     assert isinstance(ingest.inputs[1], AudioCommit)
     assert isinstance(ingest.inputs[2], FrameInput)
     assert ingest.inputs[2].body == frame_body
+    assert ingest.inputs[2].mime_type == "image/webp"
+    assert ingest.inputs[2].change_score == 0.375
+
+
+def test_realtime_rejects_invalid_frame_change_score_metadata(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
+    runtime.ingest_gateway.configure(RecordingIngestPort())
+    app = create_app(runtime=runtime)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.send_json(hello())
+            websocket.receive_json()
+            websocket.send_bytes(
+                envelope(
+                    media_type=BinaryMediaType.IMAGE,
+                    input_id="frame-invalid",
+                    format_value="image/jpeg;advx-change-score=nan",
+                    body=b"encoded",
+                )
+            )
+            rejected = websocket.receive_json()
+
+    assert rejected["code"] == "invalid_input"
 
 
 def test_realtime_rejects_unavailable_and_inactive_ingest(tmp_path: Path) -> None:
@@ -184,7 +208,7 @@ def test_realtime_rejects_unavailable_and_inactive_ingest(tmp_path: Path) -> Non
     app = create_app(runtime=runtime)
     message = {
         "type": "client.text.submit",
-        "protocol_version": 1,
+        "protocol_version": 2,
         "session_id": "session-1",
         "input_id": "text-1",
         "created_at_ms": 100,
@@ -228,7 +252,7 @@ def test_realtime_rejects_malformed_binary_without_closing_connection(tmp_path: 
             websocket.send_json(
                 {
                     "type": "client.ping",
-                    "protocol_version": 1,
+                    "protocol_version": 2,
                     "request_id": "after-rejection",
                 }
             )

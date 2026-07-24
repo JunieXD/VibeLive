@@ -99,6 +99,10 @@ class ContextBuilder:
         session_id: str,
         *,
         user_context: Mapping[str, str] | None = None,
+        target_viewer_id: str | None = None,
+        target_persona_id: str | None = None,
+        trigger_event_ids: tuple[str, ...] = (),
+        trigger_frame_ids: tuple[str, ...] = (),
     ) -> Observation:
         room_events = await self._room_service.read_events(
             session_id,
@@ -116,7 +120,11 @@ class ContextBuilder:
                 created_at_ms=now,
                 frames=frames,
                 room_events=room_events,
+                trigger_event_ids=trigger_event_ids,
+                trigger_frame_ids=trigger_frame_ids,
                 user_context={} if user_context is None else user_context,
+                target_viewer_id=target_viewer_id,
+                target_persona_id=target_persona_id,
             )
 
         await self._room_service.require_active_session(session_id)

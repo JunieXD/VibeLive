@@ -120,6 +120,57 @@ def create_service() -> tuple[SessionService, RecordingPublisher]:
 
 
 @pytest.mark.asyncio
+async def test_runtime_session_activation_adopts_id_without_duplicate_record() -> None:
+    publisher = RecordingPublisher()
+    records = RecordingSessionStore()
+    resource = RecordingSessionResource()
+    service = SessionService(
+        clock=IncrementingClock(),
+        id_generator=SequenceIdGenerator(),
+        publisher=publisher,
+        session_records=records,
+        session_resources=resource,
+    )
+
+    running = await service.activate_runtime_session(
+        "runtime-session",
+        started_at_ms=900,
+    )
+    repeated = await service.activate_runtime_session(
+        "runtime-session",
+        started_at_ms=900,
+    )
+
+    assert running.session_id == "runtime-session"
+    assert running.state is SessionState.RUNNING
+    assert repeated == running
+    assert resource.started == ["runtime-session"]
+    assert records.started == []
+
+
+@pytest.mark.asyncio
+async def test_abandon_runtime_session_compensates_without_finishing_record() -> None:
+    publisher = RecordingPublisher()
+    records = RecordingSessionStore()
+    resource = RecordingSessionResource()
+    service = SessionService(
+        clock=IncrementingClock(),
+        id_generator=SequenceIdGenerator(),
+        publisher=publisher,
+        session_records=records,
+        session_resources=resource,
+    )
+    await service.activate_runtime_session("runtime-session", started_at_ms=900)
+
+    idle = await service.abandon_runtime_session("runtime-session")
+
+    assert idle.state is SessionState.IDLE
+    assert resource.stopped == ["runtime-session"]
+    assert records.started == []
+    assert records.finished == []
+
+
+@pytest.mark.asyncio
 async def test_session_lifecycle_is_ordered_and_single_active() -> None:
     service, publisher = create_service()
 

@@ -1,7 +1,11 @@
 import pytest
 
 from advx_backend.application.realtime_broker import RealtimeBroker
-from advx_backend.domain.barrage import BarrageEvent
+from advx_backend.domain.barrage import (
+    BarrageEvent,
+    BarrageEvidenceRef,
+    BarrageEvidenceSource,
+)
 from advx_backend.domain.session import SessionState, SessionStatus
 
 
@@ -18,10 +22,22 @@ def session_status(revision: int) -> SessionStatus:
 def barrage_event(index: int) -> BarrageEvent:
     return BarrageEvent(
         barrage_id=f"barrage-{index}",
+        room_id="room-1",
         session_id="session-1",
+        audience_epoch=1,
         observation_id="observation-1",
-        request_id="request-1",
-        audience_id="audience-1",
+        generation_request_id=f"request-{index}",
+        viewer_instance_id="viewer-1",
+        persona_id="persona-1",
+        display_name="Viewer One",
+        viewer_sequence=index,
+        reaction_type="reply",
+        evidence_refs=(
+            BarrageEvidenceRef(
+                source=BarrageEvidenceSource.EVENT,
+                event_id="event-1",
+            ),
+        ),
         text=f"message {index}",
         created_at_ms=index,
         expires_at_ms=index + 100,

@@ -6,8 +6,11 @@ from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
 
 from advx_backend.api.http.configuration import create_configuration_router
+from advx_backend.api.http.debug import create_debug_router
 from advx_backend.api.http.health import router as health_router
+from advx_backend.api.http.runtime import create_runtime_router
 from advx_backend.api.http.sessions import create_session_router
+from advx_backend.api.http.shared_brain import create_shared_brain_router
 from advx_backend.api.ws.realtime import create_realtime_router
 from advx_backend.bootstrap import (
     BACKEND_VERSION,
@@ -35,6 +38,10 @@ def create_app(*, runtime: BackendRuntime | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     application.state.runtime = active_runtime
+    application.state.debug_service = active_runtime.debug_service
+    application.state.replay_service = active_runtime.replay_service
+    application.state.shared_brain_service = active_runtime.shared_brain_service
+    application.state.runtime_session_service = active_runtime.runtime_session_service
     application.include_router(health_router)
     application.include_router(
         create_configuration_router(
@@ -47,6 +54,15 @@ def create_app(*, runtime: BackendRuntime | None = None) -> FastAPI:
             session_service=active_runtime.session_service,
             local_token=active_runtime.local_token,
         )
+    )
+    application.include_router(
+        create_debug_router(local_token=active_runtime.local_token)
+    )
+    application.include_router(
+        create_runtime_router(local_token=active_runtime.local_token)
+    )
+    application.include_router(
+        create_shared_brain_router(local_token=active_runtime.local_token)
     )
     application.include_router(
         create_realtime_router(

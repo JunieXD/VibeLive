@@ -1,3 +1,5 @@
+import importlib
+import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -7,7 +9,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from sqlalchemy import func, select, text
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from advx_backend.application.ports.persistence import RevisionConflictError
 from advx_backend.bootstrap import build_runtime
@@ -109,7 +111,7 @@ async def test_database_migrates_and_enables_required_pragmas(
     assert foreign_keys == 1
     assert journal_mode == "wal"
     assert busy_timeout == 5_000
-    assert migration == "0001_initial"
+    assert migration == "0005_detach_memory_evidence_events"
 
 
 @pytest.mark.asyncio
@@ -123,6 +125,134 @@ async def test_migration_matches_sqlalchemy_metadata(database: SQLiteDatabase) -
         differences = await connection.run_sync(compare_schema)
 
     assert differences == []
+
+
+@pytest.mark.asyncio
+async def test_startup_creates_bounded_consistent_migration_backup(
+    tmp_path: Path,
+) -> None:
+    first = SQLiteDatabase(DatabaseConfig(data_directory=tmp_path))
+    await first.start()
+    await first.close()
+
+    second = SQLiteDatabase(
+        DatabaseConfig(data_directory=tmp_path, migration_backup_limit=1)
+    )
+    await second.start()
+    await second.close()
+    third = SQLiteDatabase(
+        DatabaseConfig(data_directory=tmp_path, migration_backup_limit=1)
+    )
+    await third.start()
+    await third.close()
+
+    backups = list((tmp_path / "migration-backups").glob("*.bak"))
+    assert len(backups) == 1
+    with sqlite3.connect(backups[0]) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+
+@pytest.mark.asyncio
+async def test_migration_failure_is_fail_closed_and_keeps_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    healthy = SQLiteDatabase(DatabaseConfig(data_directory=tmp_path))
+    await healthy.start()
+    await healthy.close()
+    failing = SQLiteDatabase(DatabaseConfig(data_directory=tmp_path))
+
+    def fail_upgrade() -> None:
+        raise RuntimeError("synthetic migration failure")
+
+    monkeypatch.setattr(failing, "_upgrade_schema", fail_upgrade)
+    with pytest.raises(RuntimeError, match="synthetic migration failure"):
+        await failing.start()
+
+    assert failing.started is False
+    assert failing.startup_error is not None
+    assert failing.startup_error["code"] == "sqlite_migration_failed"
+    assert Path(failing.startup_error["backup_path"]).exists()
+    restored_from = await failing.restore_migration_backup()
+    assert restored_from == Path(failing.startup_error["backup_path"])
+    with sqlite3.connect(failing.path) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+
+@pytest.mark.asyncio
+async def test_corrupt_database_fails_validation_without_fake_backup(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "advx.sqlite3"
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    database_path.write_bytes(b"this is not sqlite")
+    database = SQLiteDatabase(DatabaseConfig(data_directory=tmp_path))
+
+    with pytest.raises(sqlite3.DatabaseError):
+        await database.start()
+
+    assert database.started is False
+    assert database.startup_error is not None
+    assert database.startup_error["code"] == "sqlite_validation_failed"
+    assert database.startup_error["backup_path"] == ""
+    assert not (tmp_path / "migration-backups").exists()
+
+
+@pytest.mark.asyncio
+async def test_backup_failure_is_not_advertised_as_recoverable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    healthy = SQLiteDatabase(DatabaseConfig(data_directory=tmp_path))
+    await healthy.start()
+    await healthy.close()
+    failing = SQLiteDatabase(DatabaseConfig(data_directory=tmp_path))
+
+    def fail_backup() -> Path:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(failing, "_create_migration_backup", fail_backup)
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        await failing.start()
+
+    assert failing.startup_error is not None
+    assert failing.startup_error["code"] == "sqlite_backup_failed"
+    assert failing.startup_error["backup_path"] == ""
+
+
+@pytest.mark.asyncio
+async def test_startup_requires_sqlite_write_readiness(tmp_path: Path) -> None:
+    healthy = SQLiteDatabase(DatabaseConfig(data_directory=tmp_path))
+    await healthy.start()
+    await healthy.close()
+    lock = sqlite3.connect(healthy.path)
+    lock.execute("BEGIN IMMEDIATE")
+    blocked = SQLiteDatabase(
+        DatabaseConfig(data_directory=tmp_path, busy_timeout_ms=25)
+    )
+    try:
+        with pytest.raises(OperationalError, match="locked"):
+            await blocked.start()
+    finally:
+        lock.rollback()
+        lock.close()
+
+    assert blocked.started is False
+    assert blocked.startup_error is not None
+    assert blocked.startup_error["code"] in {
+        "sqlite_backup_failed",
+        "sqlite_connection_failed",
+    }
+
+
+def test_evidence_detach_migration_is_explicitly_irreversible() -> None:
+    migration = importlib.import_module(
+        "advx_backend.infrastructure.persistence.sqlite.migrations.versions."
+        "0005_detach_memory_evidence_events"
+    )
+
+    with pytest.raises(RuntimeError, match="intentionally irreversible"):
+        migration.downgrade()
 
 
 @pytest.mark.asyncio

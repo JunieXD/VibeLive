@@ -6,14 +6,34 @@ from advx_backend.contracts.generation import (
     GenerationResult,
     Observation,
 )
+from advx_backend.contracts.viewer_runtime import (
+    CanonicalRuntimeSpec,
+    Room,
+    RuntimeApplyRequest,
+    RuntimeApplyResponse,
+    RuntimeQueryResponse,
+    RuntimeRollbackRequest,
+    ViewerBarrageEvent,
+    ViewerGenerationRequest,
+    ViewerGenerationResponse,
+)
 
 __all__ = [
     "AudienceMember",
     "AudienceMemory",
     "BarrageCandidate",
+    "CanonicalRuntimeSpec",
     "GenerationRequest",
     "GenerationResult",
     "Observation",
+    "Room",
     "RoomEvent",
     "RoomEventSource",
+    "RuntimeApplyRequest",
+    "RuntimeApplyResponse",
+    "RuntimeQueryResponse",
+    "RuntimeRollbackRequest",
+    "ViewerBarrageEvent",
+    "ViewerGenerationRequest",
+    "ViewerGenerationResponse",
 ]

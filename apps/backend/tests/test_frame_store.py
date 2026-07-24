@@ -18,13 +18,20 @@ class SequenceIdGenerator:
         return value
 
 
-def frame(input_id: str, body: bytes, *, captured_at_ms: int = 100) -> FrameInput:
+def frame(
+    input_id: str,
+    body: bytes,
+    *,
+    captured_at_ms: int = 100,
+    change_score: float | None = None,
+) -> FrameInput:
     return FrameInput(
         session_id="session-1",
         input_id=input_id,
         captured_at_ms=captured_at_ms,
         mime_type="image/jpeg",
         body=body,
+        change_score=change_score,
     )
 
 
@@ -64,3 +71,28 @@ async def test_frame_store_rejects_oversized_and_cross_session_access() -> None:
     await store.stop_session("session-1")
     with pytest.raises(FrameStoreSessionNotActiveError):
         await store.store(frame("input-3", b"1"))
+
+
+@pytest.mark.asyncio
+async def test_frame_store_prefers_validated_visual_score_and_falls_back_when_missing() -> None:
+    store = InMemoryFrameStore(
+        limits=FrameStoreLimits(max_frames=4, max_frame_bytes=8, max_total_bytes=32),
+        id_generator=SequenceIdGenerator(),
+    )
+    await store.start_session("session-1")
+
+    first = await store.store(frame("input-1", b"aaaa", change_score=0.0))
+    encoded_differently = await store.store(
+        frame("input-2", b"zzzz", captured_at_ms=200, change_score=0.02)
+    )
+    fallback = await store.store(frame("input-3", b"yyyy", captured_at_ms=300))
+
+    first_resolved = await store.resolve(session_id="session-1", frame=first)
+    visual_resolved = await store.resolve(
+        session_id="session-1",
+        frame=encoded_differently,
+    )
+    fallback_resolved = await store.resolve(session_id="session-1", frame=fallback)
+    assert first_resolved is not None and first_resolved.change_score == 0.0
+    assert visual_resolved is not None and visual_resolved.change_score == 0.02
+    assert fallback_resolved is not None and fallback_resolved.change_score > 0.0

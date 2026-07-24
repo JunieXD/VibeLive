@@ -65,13 +65,40 @@ class BarrageValidationScope:
                 raise ValueError(f"{field_name} must be a non-empty string")
 
 
+class BarrageEvidenceSource(StrEnum):
+    EVENT = "event"
+    FRAME = "frame"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BarrageEvidenceRef:
+    source: BarrageEvidenceSource
+    event_id: str | None = None
+    frame_index: int | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "source", BarrageEvidenceSource(self.source))
+        if self.source is BarrageEvidenceSource.EVENT:
+            if not self.event_id or self.frame_index is not None:
+                raise ValueError("event evidence requires only event_id")
+        elif self.frame_index is None or self.frame_index < 0 or self.event_id is not None:
+            raise ValueError("frame evidence requires only a non-negative frame_index")
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BarrageEvent:
     barrage_id: str
+    room_id: str
     session_id: str
+    audience_epoch: int
     observation_id: str
-    request_id: str
-    audience_id: str
+    generation_request_id: str
+    viewer_instance_id: str
+    persona_id: str
+    display_name: str
+    viewer_sequence: int
+    reaction_type: str
+    evidence_refs: tuple[BarrageEvidenceRef, ...]
     text: str
     created_at_ms: int
     expires_at_ms: int
@@ -79,19 +106,36 @@ class BarrageEvent:
     def __post_init__(self) -> None:
         for field_name in (
             "barrage_id",
+            "room_id",
             "session_id",
             "observation_id",
-            "request_id",
-            "audience_id",
+            "generation_request_id",
+            "viewer_instance_id",
+            "persona_id",
+            "display_name",
+            "reaction_type",
             "text",
         ):
             value = getattr(self, field_name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field_name} must be a non-empty string")
+        if self.audience_epoch < 1:
+            raise ValueError("audience_epoch must be at least one")
+        if self.viewer_sequence < 1:
+            raise ValueError("viewer_sequence must be at least one")
         if self.created_at_ms < 0:
             raise ValueError("created_at_ms must not be negative")
         if self.expires_at_ms <= self.created_at_ms:
             raise ValueError("expires_at_ms must be later than created_at_ms")
+        object.__setattr__(self, "evidence_refs", tuple(self.evidence_refs))
+
+    @property
+    def request_id(self) -> str:
+        return self.generation_request_id
+
+    @property
+    def audience_id(self) -> str:
+        return self.viewer_instance_id
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

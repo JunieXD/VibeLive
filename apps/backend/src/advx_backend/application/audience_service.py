@@ -119,15 +119,26 @@ class AudienceService:
                 key=lambda profile: profile.audience_id,
             )
             contexts = await self._build_contexts(unit_of_work, profiles, now_ms=now_ms)
-            for profile in profiles:
-                await unit_of_work.sessions.add_audience(
-                    SessionAudience(
-                        session_id=session_id,
-                        audience_id=profile.audience_id,
-                        profile_revision=profile.revision,
-                        joined_at_ms=now_ms,
+            existing = await unit_of_work.sessions.list_audiences(session_id)
+            expected = {
+                (profile.audience_id, profile.revision)
+                for profile in profiles
+            }
+            restored = {
+                (audience.audience_id, audience.profile_revision)
+                for audience in existing
+                if audience.left_at_ms is None
+            }
+            if restored != expected:
+                for profile in profiles:
+                    await unit_of_work.sessions.add_audience(
+                        SessionAudience(
+                            session_id=session_id,
+                            audience_id=profile.audience_id,
+                            profile_revision=profile.revision,
+                            joined_at_ms=now_ms,
+                        )
                     )
-                )
             await unit_of_work.commit()
         return contexts
 
