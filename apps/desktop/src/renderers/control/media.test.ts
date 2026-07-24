@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  bindMediaStreamToVideo,
   calculateMicrophoneLevel,
   describeMediaError,
   stopMediaStream
@@ -17,6 +18,36 @@ describe('desktop media helpers', () => {
 
     expect(firstStop).toHaveBeenCalledOnce()
     expect(secondStop).toHaveBeenCalledOnce()
+  })
+
+  it('binds an existing stream when a preview video is remounted', () => {
+    const stream = {} as MediaStream
+    const firstPlay = vi.fn(() => Promise.resolve())
+    const replacementPlay = vi.fn(() => Promise.resolve())
+    const replacementPause = vi.fn()
+    const firstVideo = {
+      srcObject: null,
+      play: firstPlay,
+      pause: vi.fn()
+    } as unknown as HTMLVideoElement
+    const replacementVideo = {
+      srcObject: null,
+      play: replacementPlay,
+      pause: replacementPause
+    } as unknown as HTMLVideoElement
+
+    bindMediaStreamToVideo(firstVideo, stream)
+    bindMediaStreamToVideo(replacementVideo, stream)
+    bindMediaStreamToVideo(replacementVideo, stream)
+
+    expect(firstVideo.srcObject).toBe(stream)
+    expect(replacementVideo.srcObject).toBe(stream)
+    expect(firstPlay).toHaveBeenCalledOnce()
+    expect(replacementPlay).toHaveBeenCalledOnce()
+
+    bindMediaStreamToVideo(replacementVideo, null)
+    expect(replacementVideo.srcObject).toBeNull()
+    expect(replacementPause).toHaveBeenCalledOnce()
   })
 
   it('maps time-domain samples to a bounded microphone level', () => {

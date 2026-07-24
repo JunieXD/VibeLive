@@ -13,6 +13,8 @@ import {
   Send,
   Trash2,
 } from 'lucide-react'
+import { useEffect } from 'react'
+import { bindMediaStreamToVideo } from '../../media'
 import {
   COMPRESSION_PROFILES,
   cameraPreviewTransform,
@@ -49,7 +51,6 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     pipPreviewStyle,
     videoRef,
     cameraVideoRef,
-    compositeCanvasRef,
     onOpenSourcePicker,
     onChangeVisualMode,
     onToggleGoLive,
@@ -60,6 +61,11 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     onSelectMessageTarget,
     onSendUserMessage
   } = props
+
+  useEffect(() => {
+    bindMediaStreamToVideo(videoRef.current, captureStream)
+    bindMediaStreamToVideo(cameraVideoRef.current, cameraStream)
+  }, [cameraStream, cameraVideoRef, captureStream, effectiveVisualMode, videoRef])
 
   return (
     <section className="stage-panel">
@@ -288,7 +294,6 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
               <span>选择屏幕或显式开启摄像头</span>
             </div>
           )}
-        <canvas ref={compositeCanvasRef} className="composite-canvas" aria-hidden="true" />
         <div
           className={`stage-badge ${session.status === 'running' ? 'rec' : ''} ${
             visualSettings.mode === 'pip' && visualSettings.pipPosition === 'top-left'

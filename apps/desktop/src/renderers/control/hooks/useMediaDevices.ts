@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import type { DesktopSource, MediaAccessStatus } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
 import { AUDIO_SEGMENT_SECONDS, encodePcm16Mono } from '../audio'
-import { calculateMicrophoneLevel, describeMediaError, stopMediaStream } from '../media'
+import {
+  bindMediaStreamToVideo,
+  calculateMicrophoneLevel,
+  describeMediaError,
+  stopMediaStream
+} from '../media'
 import {
   loadVisualSettings,
   requiredVisualSources,
@@ -45,6 +50,8 @@ export function useMediaDevices({
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const cameraVideoRef = useRef<HTMLVideoElement>(null)
+  const capturePipelineVideoRef = useRef<HTMLVideoElement>(null)
+  const cameraPipelineVideoRef = useRef<HTMLVideoElement>(null)
   const captureStreamRef = useRef<MediaStream | null>(null)
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
@@ -96,16 +103,14 @@ export function useMediaDevices({
   }, [visualSettings])
   useEffect(() => {
     captureStreamRef.current = captureStream
-    if (!videoRef.current) return
-    videoRef.current.srcObject = captureStream
-    if (captureStream) void videoRef.current.play().catch(() => undefined)
-  }, [cameraStream, captureStream, visualSettings.mode])
+    bindMediaStreamToVideo(videoRef.current, captureStream)
+    bindMediaStreamToVideo(capturePipelineVideoRef.current, captureStream)
+  }, [captureStream])
   useEffect(() => {
     cameraStreamRef.current = cameraStream
-    if (!cameraVideoRef.current) return
-    cameraVideoRef.current.srcObject = cameraStream
-    if (cameraStream) void cameraVideoRef.current.play().catch(() => undefined)
-  }, [cameraStream, captureStream, visualSettings.mode])
+    bindMediaStreamToVideo(cameraVideoRef.current, cameraStream)
+    bindMediaStreamToVideo(cameraPipelineVideoRef.current, cameraStream)
+  }, [cameraStream])
   useEffect(() => {
     void window.advx.getMediaAccessStatus().then((status) => {
       setMicrophonePermission(status.microphone)
@@ -119,8 +124,10 @@ export function useMediaDevices({
     captureStreamRef.current = null
     stopMediaStream(stream)
     if (videoRef.current?.srcObject === stream) {
-      videoRef.current.pause()
-      videoRef.current.srcObject = null
+      bindMediaStreamToVideo(videoRef.current, null)
+    }
+    if (capturePipelineVideoRef.current?.srcObject === stream) {
+      bindMediaStreamToVideo(capturePipelineVideoRef.current, null)
     }
     setCaptureStream(null)
   }, [])
@@ -130,8 +137,10 @@ export function useMediaDevices({
     cameraStreamRef.current = null
     stopMediaStream(stream)
     if (cameraVideoRef.current?.srcObject === stream) {
-      cameraVideoRef.current.pause()
-      cameraVideoRef.current.srcObject = null
+      bindMediaStreamToVideo(cameraVideoRef.current, null)
+    }
+    if (cameraPipelineVideoRef.current?.srcObject === stream) {
+      bindMediaStreamToVideo(cameraPipelineVideoRef.current, null)
     }
     setCameraStream(null)
   }, [])
@@ -601,7 +610,8 @@ export function useMediaDevices({
     selectedSource, setSelectedSource, captureStream, cameraStream, cameras, cameraEnabled,
     cameraPermission, visualSettings, setVisualSettings, microphones, selectedMicrophoneId,
     microphoneLevel, microphoneReady, microphonePermission, screenPermission, videoRef,
-    cameraVideoRef, captureStreamRef, cameraStreamRef, microphoneStreamRef, visualSettingsRef,
+    cameraVideoRef, capturePipelineVideoRef, cameraPipelineVideoRef, captureStreamRef,
+    cameraStreamRef, microphoneStreamRef, visualSettingsRef,
     operation: { begin, finish, assertCurrent, isCurrent, invalidate, transitioning },
     chooseSource, requestMicrophoneAccess, toggleCamera, changeCamera, changeVisualMode,
     changeMicrophone, startCapture, startCamera, startMicrophone, stopCapture, stopCamera,

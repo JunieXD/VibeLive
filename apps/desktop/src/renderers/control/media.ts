@@ -1,9 +1,21 @@
 export type MediaKind = 'display' | 'microphone' | 'camera'
 
 type StoppableMediaStream = Pick<MediaStream, 'getTracks'>
+type StreamVideoElement = Pick<HTMLVideoElement, 'pause' | 'play' | 'srcObject'>
 
 export function stopMediaStream(stream: StoppableMediaStream | null): void {
   stream?.getTracks().forEach((track) => track.stop())
+}
+
+export function bindMediaStreamToVideo(
+  video: StreamVideoElement | null,
+  stream: MediaStream | null
+): void {
+  if (!video) return
+  if (video.srcObject === stream) return
+  video.srcObject = stream
+  if (stream) void video.play().catch(() => undefined)
+  else video.pause()
 }
 
 export function calculateMicrophoneLevel(samples: Uint8Array): number {

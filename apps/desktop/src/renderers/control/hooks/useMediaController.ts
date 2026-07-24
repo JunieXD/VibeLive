@@ -146,6 +146,8 @@ export function useMediaController({
     pipPreviewStyle,
     videoRef: devices.videoRef,
     cameraVideoRef: devices.cameraVideoRef,
+    capturePipelineVideoRef: devices.capturePipelineVideoRef,
+    cameraPipelineVideoRef: devices.cameraPipelineVideoRef,
     captureStreamRef: devices.captureStreamRef,
     cameraStreamRef: devices.cameraStreamRef,
     microphoneStreamRef: devices.microphoneStreamRef,

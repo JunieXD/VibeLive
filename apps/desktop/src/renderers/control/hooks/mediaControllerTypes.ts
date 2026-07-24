@@ -53,6 +53,8 @@ export type MediaDevicesController = {
   screenPermission: MediaAccessStatus
   videoRef: MutableRefObject<HTMLVideoElement | null>
   cameraVideoRef: MutableRefObject<HTMLVideoElement | null>
+  capturePipelineVideoRef: MutableRefObject<HTMLVideoElement | null>
+  cameraPipelineVideoRef: MutableRefObject<HTMLVideoElement | null>
   captureStreamRef: MutableRefObject<MediaStream | null>
   cameraStreamRef: MutableRefObject<MediaStream | null>
   microphoneStreamRef: MutableRefObject<MediaStream | null>
@@ -101,6 +103,8 @@ export type MediaController = {
   pipPreviewStyle: { left: string; top: string; width: string; height: string }
   videoRef: MutableRefObject<HTMLVideoElement | null>
   cameraVideoRef: MutableRefObject<HTMLVideoElement | null>
+  capturePipelineVideoRef: MutableRefObject<HTMLVideoElement | null>
+  cameraPipelineVideoRef: MutableRefObject<HTMLVideoElement | null>
   captureStreamRef: MutableRefObject<MediaStream | null>
   cameraStreamRef: MutableRefObject<MediaStream | null>
   microphoneStreamRef: MutableRefObject<MediaStream | null>

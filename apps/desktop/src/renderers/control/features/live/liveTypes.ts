@@ -41,7 +41,6 @@ export type LiveStageProps = {
   pipPreviewStyle: CSSProperties
   videoRef: RefObject<HTMLVideoElement | null>
   cameraVideoRef: RefObject<HTMLVideoElement | null>
-  compositeCanvasRef: RefObject<HTMLCanvasElement | null>
   onOpenSourcePicker: () => void
   onChangeVisualMode: (mode: VisualMode) => void | Promise<void>
   onToggleGoLive: () => void

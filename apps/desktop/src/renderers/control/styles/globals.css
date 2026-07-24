@@ -107,6 +107,24 @@ body {
   color: var(--text);
 }
 
+.media-capture-sink {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0.01;
+  pointer-events: none;
+}
+
+.media-capture-sink video,
+.media-capture-sink canvas {
+  display: block;
+  width: 1px;
+  height: 1px;
+}
+
 button,
 input,
 select,

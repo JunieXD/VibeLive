@@ -112,8 +112,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     cameraStream: media.cameraStream,
     captureStreamRef: media.captureStreamRef,
     cameraStreamRef: media.cameraStreamRef,
-    videoRef: media.videoRef,
-    cameraVideoRef: media.cameraVideoRef
+    videoRef: media.capturePipelineVideoRef,
+    cameraVideoRef: media.cameraPipelineVideoRef
   })
   const elapsedSeconds = useElapsedTime(
     session.status,
@@ -243,7 +243,6 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               pipPreviewStyle: media.pipPreviewStyle,
               videoRef: media.videoRef,
               cameraVideoRef: media.cameraVideoRef,
-              compositeCanvasRef: visualPipeline.compositeCanvasRef,
               onOpenSourcePicker: () => media.setSourcePickerOpen(true),
               onChangeVisualMode: media.changeVisualMode,
               onToggleGoLive: media.toggleGoLive,
@@ -371,6 +370,13 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
           />
         )}
       </AppShell>
+
+      {/* Keep media inputs and the frame canvas mounted while navigation swaps visible views. */}
+      <div className="media-capture-sink" aria-hidden="true">
+        <video ref={media.capturePipelineVideoRef} autoPlay muted playsInline />
+        <video ref={media.cameraPipelineVideoRef} autoPlay muted playsInline />
+        <canvas ref={visualPipeline.compositeCanvasRef} />
+      </div>
 
       {media.sourcePickerOpen && (
         <SourcePickerDialog
