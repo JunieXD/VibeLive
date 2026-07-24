@@ -1,0 +1,122 @@
+{
+  "expected_config_hash": "fdcc56df738bd8e3b303d2bb775507a6c2e953fb47be17ad470b3d7783441260",
+  "spec": {
+    "protocol_version": 2,
+    "audience_contract_version": 1,
+    "config_revision": 7,
+    "room": {
+      "room_id": "numeric-parity-room",
+      "display_name": "Numeric parity room",
+      "revision": 1,
+      "created_at_ms": 0,
+      "updated_at_ms": 0
+    },
+    "active_mode_id": "numeric-parity-mode",
+    "personas": [
+      {
+        "persona_id": "zero-bias",
+        "document_version": 2,
+        "revision": 1,
+        "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "display_name": "Zero Bias",
+        "role": "commentator",
+        "traits": [],
+        "speech_style": {
+          "instruction": "Keep it short.",
+          "ordering_probe": {
+            "2": "two",
+            "10": "ten",
+            "\ue000": "bmp-private-use",
+            "\ud83d\ude00": "astral"
+          }
+        },
+        "behavior": {
+          "instruction": "React only to evidence."
+        },
+        "trigger_preferences": [],
+        "avoid_patterns": [],
+        "silence_bias": 0.0,
+        "burst_bias": 1.0,
+        "repetition_bias": 0.125,
+        "cooldown_ms": 0,
+        "content_flags": [],
+        "enabled": true
+      },
+      {
+        "persona_id": "one-bias",
+        "document_version": 2,
+        "revision": 1,
+        "content_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "display_name": "One Bias",
+        "role": "analyst",
+        "traits": [],
+        "speech_style": {
+          "instruction": "Prefer concrete calls."
+        },
+        "behavior": {
+          "instruction": "Track the current round."
+        },
+        "trigger_preferences": [],
+        "avoid_patterns": [],
+        "silence_bias": 1.0,
+        "burst_bias": 0.0,
+        "repetition_bias": 0.25,
+        "cooldown_ms": 1,
+        "content_flags": [],
+        "enabled": true
+      }
+    ],
+    "modes": [
+      {
+        "mode_id": "numeric-parity-mode",
+        "namespace_id": "numeric-parity-memes",
+        "revision": 1,
+        "viewer_count": 2,
+        "persona_ids": [
+          "zero-bias",
+          "one-bias"
+        ],
+        "persona_weights": {
+          "zero-bias": 0.0,
+          "one-bias": 1.0
+        },
+        "persona_overrides": {},
+        "normal_response_range": {
+          "minimum": 0,
+          "maximum": 1
+        },
+        "highlight_response_range": {
+          "minimum": 1,
+          "maximum": 2
+        },
+        "ambience": "natural"
+      }
+    ],
+    "provider": {
+      "provider_profile_id": "numeric-parity-provider",
+      "director_model": "model",
+      "viewer_model": "model",
+      "memory_model": "model",
+      "visual_summary_model": "model"
+    },
+    "settings": {
+      "frame_bundle": {
+        "frame_bundle_size": 3,
+        "frame_window_ms": 10000,
+        "frame_selection_strategy": "change_peaks",
+        "frame_max_dimension": 1280,
+        "frame_quality": 80
+      },
+      "viewer_visual_input_mode": "direct_frames",
+      "director_failure_mode": "strict",
+      "max_in_flight_viewer_requests": 2,
+      "viewer_request_ttl_ms": 15000,
+      "viewer_queue_capacity": 64,
+      "observation_merge_window_ms": 250,
+      "screen_change_threshold": 0.2,
+      "screen_change_cooldown_ms": 2000,
+      "ambient_tick_cooldown_ms": 5000,
+      "max_consecutive_ambient_waves": 2
+    }
+  }
+}

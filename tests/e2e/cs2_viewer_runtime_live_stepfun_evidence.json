@@ -1,0 +1,644 @@
+{
+  "artifact_version": 2,
+  "call_identity": {
+    "hot_epoch_unique_viewers": 0,
+    "items": [],
+    "provider_calls": [
+      {
+        "blocked_reason": "retryable_upstream_failure",
+        "epoch": 1,
+        "error_type": "ViewerRuntimeProviderError",
+        "frame_refs": [
+          "0fbd4a429d0965fd"
+        ],
+        "frame_sha256": [
+          "5f56bdf990f8a947a8bb34a611d3abe31b1f0248ee5aec87a0c6650625aaddc7"
+        ],
+        "observation": "16ea6b7cc046a607",
+        "request": null,
+        "retryable": true,
+        "role": "decide",
+        "sanitized_cause_chain": [
+          {
+            "error_type": "OpenAICompatibleTimeoutError",
+            "status_code": null
+          }
+        ],
+        "status": "failed",
+        "status_code": null,
+        "viewer": null
+      },
+      {
+        "blocked_reason": "retryable_upstream_failure",
+        "epoch": 1,
+        "error_type": "ViewerRuntimeProviderError",
+        "frame_refs": [
+          "d59838051a4bb1f5"
+        ],
+        "frame_sha256": [
+          "969d944819b97845d3fdc084234bfdc24f6288c608aa811f5c19d6c6cc67fbfb"
+        ],
+        "observation": "35ec62324d19cdc1",
+        "request": null,
+        "retryable": true,
+        "role": "decide",
+        "sanitized_cause_chain": [
+          {
+            "error_type": "OpenAICompatibleTimeoutError",
+            "status_code": null
+          }
+        ],
+        "status": "failed",
+        "status_code": null,
+        "viewer": null
+      },
+      {
+        "blocked_reason": "retryable_upstream_failure",
+        "epoch": 1,
+        "error_type": "ViewerRuntimeProviderError",
+        "frame_refs": [
+          "4d5eea941e02f1bf"
+        ],
+        "frame_sha256": [
+          "f54328f454efac8e19ce08840e50b59a3dc0069d6dd014024fb5d5542d4a8e55"
+        ],
+        "observation": "e2bfd15afe11ab8f",
+        "request": null,
+        "retryable": true,
+        "role": "decide",
+        "sanitized_cause_chain": [
+          {
+            "error_type": "OpenAICompatibleTimeoutError",
+            "status_code": null
+          }
+        ],
+        "status": "failed",
+        "status_code": null,
+        "viewer": null
+      },
+      {
+        "epoch": 1,
+        "observation": "9812c46d9c19ebd4",
+        "request": null,
+        "role": "decide",
+        "status": "passed",
+        "viewer": null
+      },
+      {
+        "epoch": 1,
+        "observation": "0866237873ff8150",
+        "request": null,
+        "role": "decide",
+        "status": "passed",
+        "viewer": null
+      },
+      {
+        "blocked_reason": "retryable_upstream_failure",
+        "epoch": 2,
+        "error_type": "ViewerRuntimeProviderError",
+        "observation": "cec47e0d22b3e109",
+        "request": null,
+        "retryable": true,
+        "role": "decide",
+        "sanitized_cause_chain": [
+          {
+            "error_type": "OpenAICompatibleTimeoutError",
+            "status_code": null
+          }
+        ],
+        "status": "failed",
+        "status_code": null,
+        "viewer": null
+      },
+      {
+        "blocked_reason": "retryable_upstream_failure",
+        "epoch": 2,
+        "error_type": "ViewerRuntimeProviderError",
+        "observation": "88ab31aa388afb78",
+        "request": null,
+        "retryable": true,
+        "role": "decide",
+        "sanitized_cause_chain": [
+          {
+            "error_type": "OpenAICompatibleTimeoutError",
+            "status_code": null
+          }
+        ],
+        "status": "failed",
+        "status_code": null,
+        "viewer": null
+      },
+      {
+        "blocked_reason": "retryable_upstream_failure",
+        "epoch": 2,
+        "error_type": "ViewerRuntimeProviderError",
+        "observation": "f3c969a14b3bbced",
+        "request": null,
+        "retryable": true,
+        "role": "decide",
+        "sanitized_cause_chain": [
+          {
+            "error_type": "OpenAICompatibleTimeoutError",
+            "status_code": null
+          }
+        ],
+        "status": "failed",
+        "status_code": null,
+        "viewer": null
+      },
+      {
+        "epoch": 2,
+        "observation": "55b16cc04ba9c1d8",
+        "request": null,
+        "role": "decide",
+        "status": "passed",
+        "viewer": null
+      },
+      {
+        "epoch": 2,
+        "observation": "b3477be4e48407f8",
+        "request": null,
+        "role": "decide",
+        "status": "passed",
+        "viewer": null
+      },
+      {
+        "epoch": 2,
+        "observation": "60501e5d61d327b6",
+        "request": null,
+        "role": "decide",
+        "status": "passed",
+        "viewer": null
+      },
+      {
+        "blocked_reason": "retryable_upstream_failure",
+        "epoch": 2,
+        "error_type": "ViewerRuntimeProviderError",
+        "observation": "24534fda9e536429",
+        "request": null,
+        "retryable": true,
+        "role": "decide",
+        "sanitized_cause_chain": [
+          {
+            "error_type": "OpenAICompatibleTimeoutError",
+            "status_code": null
+          }
+        ],
+        "status": "failed",
+        "status_code": null,
+        "viewer": null
+      }
+    ],
+    "trace_count": 0
+  },
+  "capability_checks": [
+    {
+      "capability": "model_discovery",
+      "error_code": null,
+      "http_status": null,
+      "model_id": null,
+      "status": "passed"
+    },
+    {
+      "capability": "director_structured_output",
+      "error_code": null,
+      "http_status": null,
+      "model_id": "step-3.7-flash",
+      "status": "passed"
+    },
+    {
+      "capability": "viewer_structured_output",
+      "error_code": null,
+      "http_status": null,
+      "model_id": "step-3.7-flash",
+      "status": "passed"
+    },
+    {
+      "capability": "memory_structured_output",
+      "error_code": null,
+      "http_status": null,
+      "model_id": "step-3.7-flash",
+      "status": "passed"
+    },
+    {
+      "capability": "image_input",
+      "error_code": null,
+      "http_status": null,
+      "model_id": "step-3.7-flash",
+      "status": "passed"
+    },
+    {
+      "capability": "viewer_minimal_concurrency",
+      "error_code": null,
+      "http_status": null,
+      "model_id": "step-3.7-flash",
+      "status": "passed"
+    },
+    {
+      "capability": "asr_final_audio",
+      "error_code": null,
+      "http_status": null,
+      "model_id": "stepaudio-2.5-asr",
+      "status": "passed"
+    }
+  ],
+  "claims": {
+    "capabilities_passed": true,
+    "credentialed_provider_proof": true,
+    "external_real_game_smoke_passed": false,
+    "frame_text_final_asr_observed": true,
+    "independent_live_viewer_responses_succeeded": false,
+    "live_director_response_succeeded": true,
+    "mode_meme_persistence_observed": false,
+    "production_graph": true,
+    "room_events_recovered": true,
+    "room_memory_shared_cross_session_mode": true,
+    "same_logical_session_new_epoch": true,
+    "viewer_trace_identity_proved": false,
+    "weight_6657_changed_pool": true
+  },
+  "hot_update": {
+    "added_count": 3,
+    "initial_counts": {
+      "abstract_radio": 3,
+      "cheat_suspector": 1,
+      "clip_alarm": 1,
+      "fun_seeker": 3,
+      "grudge_keeper": 2,
+      "hardmouth_antifan": 3,
+      "instigator": 3,
+      "jinx_machine": 2,
+      "meme_archivist": 3,
+      "parrot_unit": 2,
+      "praise_then_bite": 1,
+      "reaction_qmark": 3,
+      "room_historian": 1
+    },
+    "initial_epoch": 1,
+    "removed_count": 3,
+    "retained_count": 25,
+    "updated_counts": {
+      "abstract_radio": 2,
+      "cheat_suspector": 1,
+      "clip_alarm": 1,
+      "fun_seeker": 2,
+      "grudge_keeper": 2,
+      "hardmouth_antifan": 3,
+      "instigator": 6,
+      "jinx_machine": 2,
+      "meme_archivist": 2,
+      "parrot_unit": 2,
+      "praise_then_bite": 1,
+      "reaction_qmark": 3,
+      "room_historian": 1
+    },
+    "updated_epoch": 2
+  },
+  "independent_live_wave": null,
+  "ingest": {
+    "event_sources": [
+      "user_text",
+      "user_voice"
+    ],
+    "final_asr_event_count": 1,
+    "frame": {
+      "bytes": 867667,
+      "height": 1600,
+      "mime_type": "image/jpeg",
+      "provenance": {
+        "content_kind": "real_game_capture",
+        "frame_sha256": "5f56bdf990f8a947a8bb34a611d3abe31b1f0248ee5aec87a0c6650625aaddc7",
+        "height": 1600,
+        "reviewer_attestation": true,
+        "scenario_category": "normal_silence_no_fabrication",
+        "source": {
+          "app_id": 730,
+          "artifact_kind": "user_screenshot",
+          "platform": "steam"
+        },
+        "status": "verified",
+        "width": 2560
+      },
+      "provenance_status": "verified",
+      "sha256": "5f56bdf990f8a947a8bb34a611d3abe31b1f0248ee5aec87a0c6650625aaddc7",
+      "source_kind": "external_candidate",
+      "width": 2560
+    }
+  },
+  "not_proven": [
+    "independent_live_viewer_responses",
+    "live_director_mode_meme_candidate",
+    "external_real_game_provider_binding",
+    "scenario:highlight_multi_kill",
+    "scenario:obvious_mistake",
+    "scenario:final_voice_structured_mention",
+    "scenario:user_text_response",
+    "scenario:6657_persona_allocation_call_ratio",
+    "scenario:cross_session_mode_memory_injection",
+    "scenario:meme_candidate_lifecycle"
+  ],
+  "production_graph": {
+    "fastapi_title": "ADVX Live Backend",
+    "restart_fastapi_title": "ADVX Live Backend",
+    "sqlite_filename": "advx.sqlite3"
+  },
+  "provider": {
+    "asr_model": "stepaudio-2.5-asr",
+    "base_url": "https://api.stepfun.com/step_plan/v1",
+    "model": "step-3.7-flash",
+    "profile": "stepfun-live"
+  },
+  "real_game_smoke": {
+    "capability": "image_input",
+    "frame": {
+      "bytes": 867667,
+      "height": 1600,
+      "mime_type": "image/jpeg",
+      "provenance": null,
+      "provenance_status": "verified",
+      "sha256": "5f56bdf990f8a947a8bb34a611d3abe31b1f0248ee5aec87a0c6650625aaddc7",
+      "source_kind": "external_candidate",
+      "width": 2560
+    },
+    "model_id": "step-3.7-flash",
+    "production_provider_calls": [],
+    "provenance": {
+      "content_kind": "real_game_capture",
+      "frame_sha256": "5f56bdf990f8a947a8bb34a611d3abe31b1f0248ee5aec87a0c6650625aaddc7",
+      "height": 1600,
+      "reviewer_attestation": true,
+      "scenario_category": "normal_silence_no_fabrication",
+      "source": {
+        "app_id": 730,
+        "artifact_kind": "user_screenshot",
+        "platform": "steam"
+      },
+      "status": "verified",
+      "width": 2560
+    },
+    "status": "blocked"
+  },
+  "recovery": {
+    "epoch_after": 3,
+    "epoch_before": 2,
+    "event_count_after": 5,
+    "event_count_before": 4,
+    "logical_session": "6b891ecf2f667656",
+    "matched_event_count": 4,
+    "recovered": true,
+    "recovered_event_sources": [
+      "user_text"
+    ],
+    "second_mode": "lively-game-room",
+    "second_session": "8c6e24b87a7b4f59"
+  },
+  "redacted": true,
+  "scenarios": [
+    {
+      "director": {
+        "evidence_event_refs": [],
+        "selected_viewers": [],
+        "status": "silence"
+      },
+      "input": {
+        "event_refs": [],
+        "frame_refs": [
+          "5f56bdf990f8a947a8bb34a611d3abe31b1f0248ee5aec87a0c6650625aaddc7"
+        ],
+        "kind": "reviewed_real_game_frame",
+        "sha256": "5f56bdf990f8a947a8bb34a611d3abe31b1f0248ee5aec87a0c6650625aaddc7"
+      },
+      "oracle": {
+        "checks": {
+          "frame_wave_observed": true,
+          "no_fabricated_kill": true,
+          "reviewed_frame_provenance": true,
+          "silence_allowed": true
+        },
+        "passed": true
+      },
+      "responses": [],
+      "scenario_id": "normal_silence_no_fabrication",
+      "status": "passed",
+      "viewer_personas": []
+    },
+    {
+      "director": {
+        "evidence_event_refs": [],
+        "selected_viewers": [],
+        "status": "silence"
+      },
+      "input": {
+        "event_refs": [],
+        "frame_refs": [
+          "969d944819b97845d3fdc084234bfdc24f6288c608aa811f5c19d6c6cc67fbfb"
+        ],
+        "kind": "reviewed_real_game_frame",
+        "sha256": "969d944819b97845d3fdc084234bfdc24f6288c608aa811f5c19d6c6cc67fbfb"
+      },
+      "oracle": {
+        "checks": {
+          "frame_wave_observed": true,
+          "responses_reference_current_wave": false,
+          "reviewed_frame_provenance": true,
+          "semantic_highlight_observed": false
+        },
+        "passed": false
+      },
+      "responses": [],
+      "scenario_id": "highlight_multi_kill",
+      "status": "blocked",
+      "viewer_personas": []
+    },
+    {
+      "director": {
+        "evidence_event_refs": [],
+        "selected_viewers": [],
+        "status": "silence"
+      },
+      "input": {
+        "event_refs": [],
+        "frame_refs": [
+          "f54328f454efac8e19ce08840e50b59a3dc0069d6dd014024fb5d5542d4a8e55"
+        ],
+        "kind": "reviewed_real_game_frame",
+        "sha256": "f54328f454efac8e19ce08840e50b59a3dc0069d6dd014024fb5d5542d4a8e55"
+      },
+      "oracle": {
+        "checks": {
+          "frame_wave_observed": true,
+          "responses_reference_current_wave": false,
+          "reviewed_frame_provenance": true,
+          "semantic_mistake_observed": false
+        },
+        "passed": false
+      },
+      "responses": [],
+      "scenario_id": "obvious_mistake",
+      "status": "blocked",
+      "viewer_personas": []
+    },
+    {
+      "director": {
+        "evidence_event_refs": [],
+        "selected_viewers": [],
+        "status": "silence"
+      },
+      "input": {
+        "event_refs": [
+          "a1e334fad80a5ec7"
+        ],
+        "frame_refs": [],
+        "kind": "final_voice",
+        "sha256": "f66a71ea54794be1637e3902e6ddb35ecd2465640c4df251783c6bd46ffc0d0b"
+      },
+      "mentioned_viewer": "f46e763e914475bc",
+      "oracle": {
+        "checks": {
+          "final_voice_event_observed": true,
+          "structured_mention_selected": false,
+          "transcript_mentions_viewer": false
+        },
+        "passed": false
+      },
+      "responses": [],
+      "scenario_id": "final_voice_structured_mention",
+      "status": "blocked",
+      "viewer_personas": []
+    },
+    {
+      "director": {
+        "evidence_event_refs": [],
+        "selected_viewers": [],
+        "status": "silence"
+      },
+      "input": {
+        "event_refs": [
+          "4534e14e947837de"
+        ],
+        "frame_refs": [],
+        "kind": "user_text",
+        "sha256": "0e9233c839d06943f68c12d11aa4a78b5c26a1f5b87e45ed9bf36ac082b5f455"
+      },
+      "oracle": {
+        "checks": {
+          "user_text_response_observed": false
+        },
+        "passed": false
+      },
+      "responses": [],
+      "scenario_id": "user_text_response",
+      "status": "blocked",
+      "viewer_personas": []
+    },
+    {
+      "director": {
+        "evidence_event_refs": [],
+        "selected_viewers": [],
+        "status": "silence"
+      },
+      "input": {
+        "event_refs": [
+          "20811ed4746b763a",
+          "bf93e67fe65cd9ac",
+          "f5e54eb30d67d325"
+        ],
+        "frame_refs": [],
+        "kind": "hot_update_and_user_text",
+        "sha256": "57d3a4b80157a7cdf5f4288393912352f58db57e10ce837b0cf6769bd6e8b5a6"
+      },
+      "metrics": {
+        "high_weight_allocated": 6,
+        "high_weight_calls": 0,
+        "high_weight_persona": "instigator",
+        "low_weight_allocated": 1,
+        "low_weight_calls": 0,
+        "low_weight_persona": "cheat_suspector"
+      },
+      "oracle": {
+        "checks": {
+          "actual_call_ratio_proved": false,
+          "allocation_ratio_proved": true
+        },
+        "passed": false
+      },
+      "responses": [],
+      "scenario_id": "6657_persona_allocation_call_ratio",
+      "status": "blocked",
+      "viewer_personas": []
+    },
+    {
+      "director": {
+        "evidence_event_refs": [],
+        "selected_viewers": [],
+        "status": "silence"
+      },
+      "input": {
+        "event_refs": [
+          "484176cfa2b58474"
+        ],
+        "frame_refs": [],
+        "kind": "cross_session_targeted_user_text",
+        "sha256": "69fdcc12803f4b24e0f6a5ebb94862afca3ebddbc8fc39a3aaadec419918b010"
+      },
+      "memory": {
+        "cross_mode": true,
+        "cross_session": true,
+        "injected_into_real_viewer_request": false,
+        "memory_id": "27ae172571d002fd"
+      },
+      "oracle": {
+        "checks": {
+          "memory_prompt_injection_proved": false
+        },
+        "passed": false
+      },
+      "responses": [],
+      "scenario_id": "cross_session_mode_memory_injection",
+      "status": "blocked",
+      "viewer_personas": []
+    },
+    {
+      "director": {
+        "evidence_event_refs": [],
+        "selected_viewers": [],
+        "status": "blocked"
+      },
+      "input": {
+        "event_refs": [],
+        "frame_refs": [],
+        "kind": "meme_candidate_evidence",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "meme_lifecycle": {
+        "absent_after_restart": false,
+        "auto_ingested": false,
+        "candidate_id": "",
+        "overlay_event_count": 0,
+        "relisted_state": null,
+        "undo_accepted": false
+      },
+      "oracle": {
+        "checks": {
+          "candidate_never_overlayed": true,
+          "undo_survived_restart": false
+        },
+        "passed": false
+      },
+      "responses": [],
+      "scenario_id": "meme_candidate_lifecycle",
+      "status": "blocked",
+      "viewer_personas": []
+    }
+  ],
+  "shared_brain": {
+    "memory_count_after_recovery": 1,
+    "memory_count_before_crash": 1,
+    "memory_count_cross_session_mode": 1,
+    "memory_seeded_for_persistence_proof": true,
+    "mode_meme_count": 0,
+    "mode_meme_observation": "blocked",
+    "mode_meme_seeded_for_persistence_proof": false
+  },
+  "status": "blocked"
+}

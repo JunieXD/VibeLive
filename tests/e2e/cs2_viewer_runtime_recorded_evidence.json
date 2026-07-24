@@ -1,0 +1,542 @@
+{
+  "artifact_version": 2,
+  "call_identity": {
+    "director_calls": 1,
+    "generation_request_ids": [
+      "fake-viewer-call-1",
+      "fake-viewer-call-2"
+    ],
+    "published": 1,
+    "request_identity": [
+      {
+        "display_name": "串子哥·01",
+        "generation_request_id": "fake-viewer-call-1",
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-d3fe893fee2c24f162659ce3"
+      },
+      {
+        "display_name": "串子哥·02",
+        "generation_request_id": "fake-viewer-call-2",
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-4b31907ab49160fbc4c8a17a"
+      }
+    ],
+    "request_viewer_ids": [
+      "viewer-d3fe893fee2c24f162659ce3",
+      "viewer-4b31907ab49160fbc4c8a17a"
+    ],
+    "selected_identity": [
+      {
+        "display_name": "串子哥·01",
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-d3fe893fee2c24f162659ce3"
+      },
+      {
+        "display_name": "串子哥·02",
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-4b31907ab49160fbc4c8a17a"
+      }
+    ],
+    "selected_viewer_ids": [
+      "viewer-d3fe893fee2c24f162659ce3",
+      "viewer-4b31907ab49160fbc4c8a17a"
+    ],
+    "silenced": 1,
+    "unique_generation_request_ids": 2
+  },
+  "canonical_hash": {
+    "backend": "7553099c9332d6cc1174e784bc349d5808bed423981b225f2cad88424cfbbd73",
+    "fixture": "7553099c9332d6cc1174e784bc349d5808bed423981b225f2cad88424cfbbd73",
+    "matches": true
+  },
+  "claims": {
+    "canonical_hash_matches_backend": true,
+    "desktop_room_6657_primary_personas_are_real_preset": true,
+    "hot_update_instigator_calls_visible": true,
+    "hot_update_reconciliation_is_exact": true,
+    "initial_hamilton_allocation_is_exact": true,
+    "one_director_call": true,
+    "one_independent_call_per_selected_viewer": true,
+    "recorded_replay_used_no_external_provider": true,
+    "selected_and_request_identity_match": true,
+    "updated_hamilton_allocation_is_exact": true
+  },
+  "desktop_source": {
+    "active_mode_id": "room-6657",
+    "compiler": "apps/desktop/src/shared/backend-client.ts#compileCanonicalRuntimeSpec",
+    "initial_persona_weights": {
+      "abstract_radio": 3,
+      "cheat_suspector": 1,
+      "clip_alarm": 1,
+      "fun_seeker": 3,
+      "grudge_keeper": 3,
+      "hardmouth_antifan": 3,
+      "instigator": 3,
+      "jinx_machine": 3,
+      "meme_archivist": 3,
+      "parrot_unit": 3,
+      "praise_then_bite": 1,
+      "reaction_qmark": 3,
+      "room_historian": 1
+    },
+    "initial_viewer_count": 28,
+    "persona_alias_bases": {
+      "abstract_radio": "抽象电台",
+      "cheat_suspector": "科技鉴定员",
+      "clip_alarm": "切片预警",
+      "fun_seeker": "乐子人",
+      "grudge_keeper": "记仇哥",
+      "hardmouth_antifan": "嘴硬黑粉",
+      "instigator": "串子哥",
+      "jinx_machine": "乌鸦嘴",
+      "meme_archivist": "梗考古",
+      "parrot_unit": "复读机",
+      "praise_then_bite": "先夸后损",
+      "reaction_qmark": "问号哥",
+      "room_historian": "直播间史官"
+    },
+    "preset_definition": "apps/desktop/src/shared/audience/presets.ts#BUILT_IN_MODES[room-6657]",
+    "primary_persona_ids": [
+      "reaction_qmark",
+      "hardmouth_antifan",
+      "instigator",
+      "fun_seeker",
+      "meme_archivist",
+      "abstract_radio",
+      "parrot_unit",
+      "jinx_machine",
+      "grudge_keeper"
+    ],
+    "secondary_persona_ids": [
+      "cheat_suspector",
+      "praise_then_bite",
+      "clip_alarm",
+      "room_historian"
+    ],
+    "workspace_factory": "apps/desktop/src/shared/audience/workspace.ts#createInitialAudienceWorkspace"
+  },
+  "fixture_bundle_id": "cs2-6657-desktop-preset-recorded-v2",
+  "hot_update": {
+    "added_viewer_ids": [
+      "viewer-352bb1ac2006d4e1f3a1ec96",
+      "viewer-5c672219aac65f51064b04aa",
+      "viewer-259458033d46d9509a5fb0f9"
+    ],
+    "initial_counts": {
+      "abstract_radio": 3,
+      "cheat_suspector": 1,
+      "clip_alarm": 1,
+      "fun_seeker": 3,
+      "grudge_keeper": 2,
+      "hardmouth_antifan": 3,
+      "instigator": 3,
+      "jinx_machine": 2,
+      "meme_archivist": 3,
+      "parrot_unit": 2,
+      "praise_then_bite": 1,
+      "reaction_qmark": 3,
+      "room_historian": 1
+    },
+    "initial_pool": [
+      {
+        "display_name": "问号哥·01",
+        "ordinal": 1,
+        "persona_id": "reaction_qmark",
+        "viewer_instance_id": "viewer-0a74c8f78e0dc05b5f68616b"
+      },
+      {
+        "display_name": "问号哥·02",
+        "ordinal": 2,
+        "persona_id": "reaction_qmark",
+        "viewer_instance_id": "viewer-8ece670cced180b960b043b8"
+      },
+      {
+        "display_name": "问号哥·03",
+        "ordinal": 3,
+        "persona_id": "reaction_qmark",
+        "viewer_instance_id": "viewer-98e9546ca8ca520354121e08"
+      },
+      {
+        "display_name": "嘴硬黑粉·01",
+        "ordinal": 1,
+        "persona_id": "hardmouth_antifan",
+        "viewer_instance_id": "viewer-c6784e6ae3c3f205578d646a"
+      },
+      {
+        "display_name": "嘴硬黑粉·02",
+        "ordinal": 2,
+        "persona_id": "hardmouth_antifan",
+        "viewer_instance_id": "viewer-a956bbf31b036f2192f1a15f"
+      },
+      {
+        "display_name": "嘴硬黑粉·03",
+        "ordinal": 3,
+        "persona_id": "hardmouth_antifan",
+        "viewer_instance_id": "viewer-3a1a6dedaa119116b6436db6"
+      },
+      {
+        "display_name": "串子哥·01",
+        "ordinal": 1,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-d3fe893fee2c24f162659ce3"
+      },
+      {
+        "display_name": "串子哥·02",
+        "ordinal": 2,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-4b31907ab49160fbc4c8a17a"
+      },
+      {
+        "display_name": "串子哥·03",
+        "ordinal": 3,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-e4c3b2f698a006b12a666d6f"
+      },
+      {
+        "display_name": "乐子人·01",
+        "ordinal": 1,
+        "persona_id": "fun_seeker",
+        "viewer_instance_id": "viewer-ccebc23fedf91dba069104d7"
+      },
+      {
+        "display_name": "乐子人·02",
+        "ordinal": 2,
+        "persona_id": "fun_seeker",
+        "viewer_instance_id": "viewer-314b13ecdacc5aaef532f383"
+      },
+      {
+        "display_name": "乐子人·03",
+        "ordinal": 3,
+        "persona_id": "fun_seeker",
+        "viewer_instance_id": "viewer-df156ebc3fc3bba377bcfe21"
+      },
+      {
+        "display_name": "梗考古·01",
+        "ordinal": 1,
+        "persona_id": "meme_archivist",
+        "viewer_instance_id": "viewer-7d7457ac297c53d6166c28a6"
+      },
+      {
+        "display_name": "梗考古·02",
+        "ordinal": 2,
+        "persona_id": "meme_archivist",
+        "viewer_instance_id": "viewer-a4bbf0193c53f00008209175"
+      },
+      {
+        "display_name": "梗考古·03",
+        "ordinal": 3,
+        "persona_id": "meme_archivist",
+        "viewer_instance_id": "viewer-9092ad57229604c1d6f38421"
+      },
+      {
+        "display_name": "抽象电台·01",
+        "ordinal": 1,
+        "persona_id": "abstract_radio",
+        "viewer_instance_id": "viewer-7b8b25007c09def587d1fc2a"
+      },
+      {
+        "display_name": "抽象电台·02",
+        "ordinal": 2,
+        "persona_id": "abstract_radio",
+        "viewer_instance_id": "viewer-199e442d4965ebf240429db5"
+      },
+      {
+        "display_name": "抽象电台·03",
+        "ordinal": 3,
+        "persona_id": "abstract_radio",
+        "viewer_instance_id": "viewer-f590c24940659873f53adeef"
+      },
+      {
+        "display_name": "复读机·01",
+        "ordinal": 1,
+        "persona_id": "parrot_unit",
+        "viewer_instance_id": "viewer-4826de8b6932c4b45580a35b"
+      },
+      {
+        "display_name": "复读机·02",
+        "ordinal": 2,
+        "persona_id": "parrot_unit",
+        "viewer_instance_id": "viewer-13eb18f1b82454b501279069"
+      },
+      {
+        "display_name": "乌鸦嘴·01",
+        "ordinal": 1,
+        "persona_id": "jinx_machine",
+        "viewer_instance_id": "viewer-e199001880be4f11b24e01e7"
+      },
+      {
+        "display_name": "乌鸦嘴·02",
+        "ordinal": 2,
+        "persona_id": "jinx_machine",
+        "viewer_instance_id": "viewer-b707bd676791a7d6a0619904"
+      },
+      {
+        "display_name": "记仇哥·01",
+        "ordinal": 1,
+        "persona_id": "grudge_keeper",
+        "viewer_instance_id": "viewer-b44e0c66ba870343907a5b44"
+      },
+      {
+        "display_name": "记仇哥·02",
+        "ordinal": 2,
+        "persona_id": "grudge_keeper",
+        "viewer_instance_id": "viewer-5f869fd94607d6a84c2c1b0c"
+      },
+      {
+        "display_name": "科技鉴定员",
+        "ordinal": 1,
+        "persona_id": "cheat_suspector",
+        "viewer_instance_id": "viewer-5ff14b5a7bdc80e5c9c125f8"
+      },
+      {
+        "display_name": "先夸后损",
+        "ordinal": 1,
+        "persona_id": "praise_then_bite",
+        "viewer_instance_id": "viewer-c7794ba685bb079abc838485"
+      },
+      {
+        "display_name": "切片预警",
+        "ordinal": 1,
+        "persona_id": "clip_alarm",
+        "viewer_instance_id": "viewer-78376ae5d35b248b6ffccde3"
+      },
+      {
+        "display_name": "直播间史官",
+        "ordinal": 1,
+        "persona_id": "room_historian",
+        "viewer_instance_id": "viewer-7c6e9a0991e5d398e7fe15b4"
+      }
+    ],
+    "removed_viewer_ids": [
+      "viewer-df156ebc3fc3bba377bcfe21",
+      "viewer-9092ad57229604c1d6f38421",
+      "viewer-f590c24940659873f53adeef"
+    ],
+    "reset_viewer_ids": [],
+    "retained_viewer_ids": [
+      "viewer-0a74c8f78e0dc05b5f68616b",
+      "viewer-8ece670cced180b960b043b8",
+      "viewer-98e9546ca8ca520354121e08",
+      "viewer-c6784e6ae3c3f205578d646a",
+      "viewer-a956bbf31b036f2192f1a15f",
+      "viewer-3a1a6dedaa119116b6436db6",
+      "viewer-d3fe893fee2c24f162659ce3",
+      "viewer-4b31907ab49160fbc4c8a17a",
+      "viewer-e4c3b2f698a006b12a666d6f",
+      "viewer-ccebc23fedf91dba069104d7",
+      "viewer-314b13ecdacc5aaef532f383",
+      "viewer-7d7457ac297c53d6166c28a6",
+      "viewer-a4bbf0193c53f00008209175",
+      "viewer-7b8b25007c09def587d1fc2a",
+      "viewer-199e442d4965ebf240429db5",
+      "viewer-4826de8b6932c4b45580a35b",
+      "viewer-13eb18f1b82454b501279069",
+      "viewer-e199001880be4f11b24e01e7",
+      "viewer-b707bd676791a7d6a0619904",
+      "viewer-b44e0c66ba870343907a5b44",
+      "viewer-5f869fd94607d6a84c2c1b0c",
+      "viewer-5ff14b5a7bdc80e5c9c125f8",
+      "viewer-c7794ba685bb079abc838485",
+      "viewer-78376ae5d35b248b6ffccde3",
+      "viewer-7c6e9a0991e5d398e7fe15b4"
+    ],
+    "updated_counts": {
+      "abstract_radio": 2,
+      "cheat_suspector": 1,
+      "clip_alarm": 1,
+      "fun_seeker": 2,
+      "grudge_keeper": 2,
+      "hardmouth_antifan": 3,
+      "instigator": 6,
+      "jinx_machine": 2,
+      "meme_archivist": 2,
+      "parrot_unit": 2,
+      "praise_then_bite": 1,
+      "reaction_qmark": 3,
+      "room_historian": 1
+    },
+    "updated_pool": [
+      {
+        "display_name": "问号哥·01",
+        "ordinal": 1,
+        "persona_id": "reaction_qmark",
+        "viewer_instance_id": "viewer-0a74c8f78e0dc05b5f68616b"
+      },
+      {
+        "display_name": "问号哥·02",
+        "ordinal": 2,
+        "persona_id": "reaction_qmark",
+        "viewer_instance_id": "viewer-8ece670cced180b960b043b8"
+      },
+      {
+        "display_name": "问号哥·03",
+        "ordinal": 3,
+        "persona_id": "reaction_qmark",
+        "viewer_instance_id": "viewer-98e9546ca8ca520354121e08"
+      },
+      {
+        "display_name": "嘴硬黑粉·01",
+        "ordinal": 1,
+        "persona_id": "hardmouth_antifan",
+        "viewer_instance_id": "viewer-c6784e6ae3c3f205578d646a"
+      },
+      {
+        "display_name": "嘴硬黑粉·02",
+        "ordinal": 2,
+        "persona_id": "hardmouth_antifan",
+        "viewer_instance_id": "viewer-a956bbf31b036f2192f1a15f"
+      },
+      {
+        "display_name": "嘴硬黑粉·03",
+        "ordinal": 3,
+        "persona_id": "hardmouth_antifan",
+        "viewer_instance_id": "viewer-3a1a6dedaa119116b6436db6"
+      },
+      {
+        "display_name": "串子哥·01",
+        "ordinal": 1,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-d3fe893fee2c24f162659ce3"
+      },
+      {
+        "display_name": "串子哥·02",
+        "ordinal": 2,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-4b31907ab49160fbc4c8a17a"
+      },
+      {
+        "display_name": "串子哥·03",
+        "ordinal": 3,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-e4c3b2f698a006b12a666d6f"
+      },
+      {
+        "display_name": "串子哥·04",
+        "ordinal": 4,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-352bb1ac2006d4e1f3a1ec96"
+      },
+      {
+        "display_name": "串子哥·05",
+        "ordinal": 5,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-5c672219aac65f51064b04aa"
+      },
+      {
+        "display_name": "串子哥·06",
+        "ordinal": 6,
+        "persona_id": "instigator",
+        "viewer_instance_id": "viewer-259458033d46d9509a5fb0f9"
+      },
+      {
+        "display_name": "乐子人·01",
+        "ordinal": 1,
+        "persona_id": "fun_seeker",
+        "viewer_instance_id": "viewer-ccebc23fedf91dba069104d7"
+      },
+      {
+        "display_name": "乐子人·02",
+        "ordinal": 2,
+        "persona_id": "fun_seeker",
+        "viewer_instance_id": "viewer-314b13ecdacc5aaef532f383"
+      },
+      {
+        "display_name": "梗考古·01",
+        "ordinal": 1,
+        "persona_id": "meme_archivist",
+        "viewer_instance_id": "viewer-7d7457ac297c53d6166c28a6"
+      },
+      {
+        "display_name": "梗考古·02",
+        "ordinal": 2,
+        "persona_id": "meme_archivist",
+        "viewer_instance_id": "viewer-a4bbf0193c53f00008209175"
+      },
+      {
+        "display_name": "抽象电台·01",
+        "ordinal": 1,
+        "persona_id": "abstract_radio",
+        "viewer_instance_id": "viewer-7b8b25007c09def587d1fc2a"
+      },
+      {
+        "display_name": "抽象电台·02",
+        "ordinal": 2,
+        "persona_id": "abstract_radio",
+        "viewer_instance_id": "viewer-199e442d4965ebf240429db5"
+      },
+      {
+        "display_name": "复读机·01",
+        "ordinal": 1,
+        "persona_id": "parrot_unit",
+        "viewer_instance_id": "viewer-4826de8b6932c4b45580a35b"
+      },
+      {
+        "display_name": "复读机·02",
+        "ordinal": 2,
+        "persona_id": "parrot_unit",
+        "viewer_instance_id": "viewer-13eb18f1b82454b501279069"
+      },
+      {
+        "display_name": "乌鸦嘴·01",
+        "ordinal": 1,
+        "persona_id": "jinx_machine",
+        "viewer_instance_id": "viewer-e199001880be4f11b24e01e7"
+      },
+      {
+        "display_name": "乌鸦嘴·02",
+        "ordinal": 2,
+        "persona_id": "jinx_machine",
+        "viewer_instance_id": "viewer-b707bd676791a7d6a0619904"
+      },
+      {
+        "display_name": "记仇哥·01",
+        "ordinal": 1,
+        "persona_id": "grudge_keeper",
+        "viewer_instance_id": "viewer-b44e0c66ba870343907a5b44"
+      },
+      {
+        "display_name": "记仇哥·02",
+        "ordinal": 2,
+        "persona_id": "grudge_keeper",
+        "viewer_instance_id": "viewer-5f869fd94607d6a84c2c1b0c"
+      },
+      {
+        "display_name": "科技鉴定员",
+        "ordinal": 1,
+        "persona_id": "cheat_suspector",
+        "viewer_instance_id": "viewer-5ff14b5a7bdc80e5c9c125f8"
+      },
+      {
+        "display_name": "先夸后损",
+        "ordinal": 1,
+        "persona_id": "praise_then_bite",
+        "viewer_instance_id": "viewer-c7794ba685bb079abc838485"
+      },
+      {
+        "display_name": "切片预警",
+        "ordinal": 1,
+        "persona_id": "clip_alarm",
+        "viewer_instance_id": "viewer-78376ae5d35b248b6ffccde3"
+      },
+      {
+        "display_name": "直播间史官",
+        "ordinal": 1,
+        "persona_id": "room_historian",
+        "viewer_instance_id": "viewer-7c6e9a0991e5d398e7fe15b4"
+      }
+    ]
+  },
+  "not_proven": [
+    "electron_ui",
+    "credentialed_live_provider"
+  ],
+  "proof_scope": "deterministic_recorded_no_external_provider",
+  "replay": {
+    "credentialed_provider_proof": false,
+    "deterministic_proof": true,
+    "event_count": 7,
+    "exit_code": 0,
+    "external_transport_call_count": 0,
+    "live_provider_calls": 0
+  }
+}

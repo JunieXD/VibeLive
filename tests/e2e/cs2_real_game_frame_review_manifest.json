@@ -1,0 +1,40 @@
+{
+  "manifest_version": 1,
+  "content_kind": "real_game_capture",
+  "classification": "human_reviewed",
+  "reviewer_attestation": true,
+  "source": {
+    "platform": "steam",
+    "app_id": 730,
+    "artifact_kind": "user_screenshot"
+  },
+  "frames": [
+    {
+      "scenario_category": "normal_silence_no_fabrication",
+      "human_review_summary": "round spawn and buy phase with no kill event visible",
+      "frame_sha256": "5f56bdf990f8a947a8bb34a611d3abe31b1f0248ee5aec87a0c6650625aaddc7",
+      "bytes": 867667,
+      "width": 2560,
+      "height": 1600,
+      "mime_type": "image/jpeg"
+    },
+    {
+      "scenario_category": "highlight_multi_kill",
+      "human_review_summary": "post-match scoreboard shows 27-17-7, team-high kills, and a four-kill accolade",
+      "frame_sha256": "969d944819b97845d3fdc084234bfdc24f6288c608aa811f5c19d6c6cc67fbfb",
+      "bytes": 786129,
+      "width": 2560,
+      "height": 1600,
+      "mime_type": "image/jpeg"
+    },
+    {
+      "scenario_category": "obvious_mistake",
+      "human_review_summary": "chat and system text show the player attacked a teammate and was mocked",
+      "frame_sha256": "f54328f454efac8e19ce08840e50b59a3dc0069d6dd014024fb5d5542d4a8e55",
+      "bytes": 844032,
+      "width": 2560,
+      "height": 1600,
+      "mime_type": "image/jpeg"
+    }
+  ]
+}

@@ -10,6 +10,10 @@
     "build": "pnpm --filter @advx/desktop build",
     "typecheck": "pnpm --filter @advx/contracts typecheck && pnpm --filter @advx/desktop typecheck",
     "test": "pnpm --filter @advx/desktop test && uv run --project apps/backend pytest apps/backend/tests",
+    "test:e2e:viewer-runtime": "uv run --project apps/backend pytest tests/e2e/test_viewer_runtime_recorded.py -q",
+    "evidence:viewer-runtime": "uv run --project apps/backend python scripts/verify_viewer_runtime_evidence.py",
+    "debug:headless": "uv run --project apps/backend python apps/backend/scripts/viewer_runtime_headless.py",
+    "smoke:desktop-runtime": "pnpm --filter @advx/desktop smoke:runtime",
     "contracts": "uv run --project apps/backend python apps/backend/scripts/export_openapi.py && pnpm exec openapi-typescript apps/backend/openapi.json -o packages/contracts/src/generated/openapi.ts"
   },
   "devDependencies": {
