@@ -87,9 +87,8 @@ export type SaveModelConfigResult = {
   ok: boolean
   providerProfileId: string
   securelyStored: boolean
-  backendConfigured: boolean
-  restartRequired: boolean
   runtimeApplyRequired: boolean
+  nextSessionRequired: boolean
 }
 
 export type BackendConnectionState =

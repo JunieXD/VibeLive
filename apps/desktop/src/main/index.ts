@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 import type { BackendRuntimeStatus } from "../shared/contracts";
 import {
   broadcastOverlaySettings,
-  configureSavedModelConfig,
   configureMediaAccess,
   registerDesktopIpc
 } from "./ipc/register-desktop-ipc";
@@ -37,7 +36,6 @@ let controlWindowCloseFallback: NodeJS.Timeout | null = null;
 let quitRequested = false;
 let overlaySettingsReady = false;
 let displaySyncPending = false;
-let savedProviderConfigChecked = false;
 let backendProcess: BackendProcessController | null = null;
 let backendInitialization: Promise<BackendRuntimeStatus> | null = null;
 let backendRestartTimer: NodeJS.Timeout | null = null;
@@ -266,18 +264,6 @@ async function initializeApplication(): Promise<void> {
     backendClient,
     () => initializeBackend(true)
   );
-  backendClient.onStatus((status) => {
-    if (status.connection === "disconnected") {
-      savedProviderConfigChecked = false;
-      return;
-    }
-    if (status.connection !== "connected" || savedProviderConfigChecked) return;
-    savedProviderConfigChecked = true;
-    if (recoverableRuntimeSessionId) return;
-    void configureSavedModelConfig(backendClient).catch((error: unknown) =>
-      console.error("Failed to restore saved provider configuration", error)
-    );
-  });
   controlWindow = openControlWindow();
   const trayIcon = await app.getFileIcon(process.execPath, { size: "small" });
   if (trayIcon.isEmpty()) throw new Error("Windows system tray icon is empty.");

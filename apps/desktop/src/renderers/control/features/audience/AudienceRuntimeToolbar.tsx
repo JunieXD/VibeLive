@@ -17,6 +17,7 @@ export type AudienceRuntimeToolbarProps = {
   recoverableSessionId: string | null
   canRecover: boolean
   probing: boolean
+  canProbe: boolean
   loadingTraces: boolean
   probe: ProviderProbeResult | null
   probeError: string | null
@@ -41,6 +42,7 @@ export function AudienceRuntimeToolbar({
   recoverableSessionId,
   canRecover,
   probing,
+  canProbe,
   loadingTraces,
   probe,
   probeError,
@@ -97,7 +99,12 @@ export function AudienceRuntimeToolbar({
           <RotateCcw size={14} />
           回滚
         </button>
-        <button type="button" disabled={probing} onClick={onProbe}>
+        <button
+          type="button"
+          disabled={probing || !canProbe}
+          title={canProbe ? '检测当前会话的 Provider 能力' : '开始或恢复直播后可检测 Provider'}
+          onClick={onProbe}
+        >
           <TestTube2 size={14} />
           {probing ? 'Probe 检测中' : probe ? `Probe ${probe.status}` : probeError ? 'Probe 失败' : 'Probe'}
         </button>

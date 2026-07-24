@@ -19,7 +19,10 @@ export type LiveActivityItem = {
 
 export type ProviderProbeDisplayState = {
   backendConnected: boolean
-  providerConfigured: boolean
+  profileLoading: boolean
+  profileSaved: boolean
+  profileId: string | null
+  runtimeProviderReady: boolean
   probing: boolean
   probe: ProviderProbeResult | null
   error: string | null

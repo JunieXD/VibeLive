@@ -456,10 +456,17 @@ export function getProviderProbeDisplay(state: LiveStageProps['providerProbeStat
       detail: '后端连接完成后才会检测 Provider。'
     }
   }
-  if (!state.providerConfigured) {
+  if (state.profileLoading) {
+    return {
+      label: '读取配置中',
+      heading: '正在读取已保存的 Provider Profile',
+      detail: 'Provider 凭据存放在本机安全存储中。'
+    }
+  }
+  if (!state.profileSaved) {
     return {
       label: '未配置',
-      heading: 'Provider 尚未配置',
+      heading: '尚未保存 Provider Profile',
       detail: '请在设置中保存模型和语音识别配置。'
     }
   }
@@ -491,9 +498,16 @@ export function getProviderProbeDisplay(state: LiveStageProps['providerProbeStat
       detail: `Provider 返回 ${state.probe.status}。请展开查看各项能力结果。`
     }
   }
+  if (state.runtimeProviderReady) {
+    return {
+      label: '运行中',
+      heading: state.profileId ?? '当前 Provider Profile',
+      detail: '此直播的 Provider 已装载到后端运行时。'
+    }
+  }
   return {
-    label: '等待检测',
-    heading: '等待 Provider 能力检测',
-    detail: 'Provider 配置恢复后将自动开始检测。'
+    label: '已保存',
+    heading: state.profileId ?? '当前 Provider Profile',
+    detail: 'Provider Profile 已安全保存；开始或恢复直播时将按会话选择装载。'
   }
 }

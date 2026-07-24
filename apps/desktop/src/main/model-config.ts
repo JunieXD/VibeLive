@@ -85,7 +85,11 @@ export function modelProviderChanged(
   );
 }
 
-export function isProvidersAlreadyConfiguredError(error: unknown): boolean {
+export type ProviderSessionConfigurator = {
+  configureProviders(config: ModelConfig): Promise<void>;
+};
+
+export function isProviderPipelineAlreadyConfigured(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
@@ -94,21 +98,17 @@ export function isProvidersAlreadyConfiguredError(error: unknown): boolean {
   );
 }
 
-export async function configureIdleModelProvider(
-  sessionActive: boolean,
-  configure: () => Promise<void>
-): Promise<{ backendConfigured: boolean; restartRequired: boolean }> {
-  if (sessionActive) {
-    return { backendConfigured: false, restartRequired: false };
-  }
+export async function configureProviderForSession(
+  config: ModelConfig,
+  backendClient: ProviderSessionConfigurator,
+  restartBackend: () => Promise<unknown>
+): Promise<void> {
   try {
-    await configure();
-    return { backendConfigured: true, restartRequired: false };
+    await backendClient.configureProviders(config);
   } catch (error) {
-    if (isProvidersAlreadyConfiguredError(error)) {
-      return { backendConfigured: false, restartRequired: true };
-    }
-    throw error;
+    if (!isProviderPipelineAlreadyConfigured(error)) throw error;
+    await restartBackend();
+    await backendClient.configureProviders(config);
   }
 }
 

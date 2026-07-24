@@ -14,14 +14,17 @@ describe('recovered runtime fingerprint', () => {
 describe('provider probe status display', () => {
   const baseState = {
     backendConnected: true,
-    providerConfigured: true,
+    profileLoading: false,
+    profileSaved: true,
+    profileId: 'default',
+    runtimeProviderReady: false,
     probing: false,
     probe: null,
     error: null
   }
 
   it('distinguishes setup, progress, success, and failure states', () => {
-    expect(getProviderProbeDisplay({ ...baseState, providerConfigured: false }).label).toBe('未配置')
+    expect(getProviderProbeDisplay({ ...baseState, profileSaved: false }).label).toBe('未配置')
     expect(getProviderProbeDisplay({ ...baseState, probing: true }).label).toBe('检测中')
     expect(getProviderProbeDisplay({
       ...baseState,
@@ -35,5 +38,10 @@ describe('provider probe status display', () => {
     const failed = getProviderProbeDisplay({ ...baseState, error: 'Provider 能力探测超时。' })
     expect(failed.label).toBe('检测失败')
     expect(failed.detail).toBe('Provider 能力探测超时。')
+  })
+
+  it('keeps a saved profile distinct from a runtime provider', () => {
+    expect(getProviderProbeDisplay(baseState).label).toBe('已保存')
+    expect(getProviderProbeDisplay({ ...baseState, runtimeProviderReady: true }).label).toBe('运行中')
   })
 })

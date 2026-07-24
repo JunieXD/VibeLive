@@ -12,18 +12,18 @@ type UseModelConfigOptions = {
 }
 
 export function getModelConfigNotice(result: SaveModelConfigResult): string {
-  if (result.runtimeApplyRequired && result.restartRequired) {
-    return '模型配置已安全保存，显式应用运行时配置后切换；ASR 配置需重启后加载'
+  if (result.runtimeApplyRequired && result.nextSessionRequired) {
+    return '模型配置已安全保存，显式应用运行时配置后切换；ASR 配置将在下一场直播加载'
   }
   if (result.runtimeApplyRequired) {
     return '模型配置已安全保存；当前 Session 保持不变，显式应用运行时配置后切换'
   }
-  if (result.restartRequired) {
-    return '配置已安全保存；当前后端需重启后加载保存的配置'
+  if (result.nextSessionRequired) {
+    return '语音识别配置已安全保存；将在下一场直播加载'
   }
   return result.securelyStored
-    ? '模型与语音识别配置已安全保存并接入后端'
-    : '配置已接入本次运行；当前系统无法加密密钥，因此密钥不会落盘'
+    ? '模型与语音识别配置已安全保存；开始或恢复直播时将加载 Provider'
+    : '当前系统无法加密密钥；密钥不会落盘，也无法在重启后恢复 Provider'
 }
 
 export function canSaveModelConfig(input: {

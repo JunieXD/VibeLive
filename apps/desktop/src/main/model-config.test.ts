@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ModelConfig } from "../shared/contracts";
 import {
   createRuntimeProviderCandidate,
-  configureIdleModelProvider,
-  isProvidersAlreadyConfiguredError,
+  configureProviderForSession,
+  isProviderPipelineAlreadyConfigured,
   mergeProviderProfileSnapshots,
   modelProviderChanged,
   reviseProviderProfileForActiveSession,
@@ -214,13 +214,32 @@ describe("model configuration", () => {
     ).toBe("profile-b");
   });
 
-  it("recognizes the idle providers-already-configured restart condition", async () => {
-    expect(isProvidersAlreadyConfiguredError({ code: "providers_already_configured" })).toBe(true);
-    expect(isProvidersAlreadyConfiguredError({ code: "other" })).toBe(false);
-    await expect(
-      configureIdleModelProvider(false, async () => {
-        throw { code: "providers_already_configured" };
-      })
-    ).resolves.toEqual({ backendConfigured: false, restartRequired: true });
+  it("restarts only to replace a different provider for the next session", async () => {
+    const configureProviders = vi
+      .fn<(_: ModelConfig) => Promise<void>>()
+      .mockRejectedValueOnce({ code: "providers_already_configured" })
+      .mockResolvedValueOnce(undefined);
+    const restartBackend = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+    await configureProviderForSession(storedConfig, { configureProviders }, restartBackend);
+
+    expect(restartBackend).toHaveBeenCalledOnce();
+    expect(configureProviders).toHaveBeenCalledTimes(2);
+    expect(configureProviders).toHaveBeenLastCalledWith(storedConfig);
   });
+
+  it("does not restart for a provider error unrelated to an installed pipeline", async () => {
+    expect(isProviderPipelineAlreadyConfigured({ code: "providers_already_configured" })).toBe(true);
+    expect(isProviderPipelineAlreadyConfigured({ code: "provider_timeout" })).toBe(false);
+    const configureProviders = vi
+      .fn<(_: ModelConfig) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("provider timeout"));
+    const restartBackend = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+    await expect(
+      configureProviderForSession(storedConfig, { configureProviders }, restartBackend)
+    ).rejects.toThrow("provider timeout");
+    expect(restartBackend).not.toHaveBeenCalled();
+  });
+
 });

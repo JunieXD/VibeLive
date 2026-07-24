@@ -15,7 +15,6 @@ type UseAudienceRuntimeControlOptions = {
   sessionId: string | null | undefined
   recoverableSessionId: string | null | undefined
   backendConnected: boolean
-  providerConfigured: boolean
   sessionStatus: SessionStatus
   onSystemActivity: (text: string) => void
   savedFingerprint: string | null
@@ -27,7 +26,6 @@ export function useAudienceRuntimeControl({
   sessionId,
   recoverableSessionId,
   backendConnected,
-  providerConfigured,
   sessionStatus,
   onSystemActivity,
   savedFingerprint
@@ -48,7 +46,6 @@ export function useAudienceRuntimeControl({
   const workspaceFingerprint = useMemo(() => JSON.stringify(workspace), [workspace])
   const [appliedFingerprint, setAppliedFingerprint] = useState<string | null>(null)
   const operationRef = useRef(false)
-  const automaticProbeKeyRef = useRef<string | null>(null)
 
   const matchesWorkspace = useCallback(async (
     snapshot: RuntimeQuerySnapshot
@@ -221,17 +218,10 @@ export function useAudienceRuntimeControl({
   }, [onSystemActivity, probing])
 
   useEffect(() => {
-    if (!backendConnected || !providerConfigured) {
-      automaticProbeKeyRef.current = null
-      setProbe(null)
-      setProbeError(null)
-      return
-    }
-    const key = sessionId ? `session:${sessionId}` : 'backend-ready'
-    if (automaticProbeKeyRef.current === key) return
-    automaticProbeKeyRef.current = key
-    void runProbe()
-  }, [backendConnected, providerConfigured, runProbe, sessionId])
+    if (sessionStatus !== 'idle') return
+    setProbe(null)
+    setProbeError(null)
+  }, [sessionStatus])
 
   const loadTraces = useCallback(async (): Promise<void> => {
     if (!sessionId || loadingTraces) return

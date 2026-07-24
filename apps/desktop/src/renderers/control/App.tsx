@@ -55,7 +55,6 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     sessionId: backend.status?.session.sessionId,
     recoverableSessionId: backend.status?.recoverableRuntimeSessionId,
     backendConnected: backend.connection === 'connected',
-    providerConfigured: backend.status?.providersConfigured ?? false,
     sessionStatus: session.status,
     onSystemActivity: activityFeed.appendSystemActivity
   })
@@ -245,7 +244,12 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               messageSending: barrage.messageSending,
               providerProbeState: {
                 backendConnected: backend.connection === 'connected',
-                providerConfigured: backend.status?.providersConfigured ?? false,
+                profileLoading: modelConfig.loading,
+                profileSaved:
+                  modelConfig.status?.modelApiKeyStored === true &&
+                  modelConfig.status?.asrApiKeyStored === true,
+                profileId: modelConfig.status?.providerProfileId ?? null,
+                runtimeProviderReady: backend.status?.providersConfigured ?? false,
                 probing: audienceRuntime.probing,
                 probe: audienceRuntime.probe,
                 error: audienceRuntime.probeError
@@ -329,6 +333,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
                 backend.connection === 'connected' &&
                 Boolean(backend.status?.recoverableRuntimeSessionId),
               probing: audienceRuntime.probing,
+              canProbe: backend.status?.providersConfigured ?? false,
               loadingTraces: audienceRuntime.loadingTraces,
               probe: audienceRuntime.probe,
               probeError: audienceRuntime.probeError,

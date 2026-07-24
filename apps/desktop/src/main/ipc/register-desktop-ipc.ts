@@ -44,7 +44,7 @@ import {
   saveRuntimeSessionId
 } from "../backend/runtime-session-state";
 import {
-  configureIdleModelProvider,
+  configureProviderForSession,
   createRuntimeProviderCandidate,
   mergeProviderProfileSnapshots,
   modelProviderChanged,
@@ -124,7 +124,7 @@ async function saveModelConfig(
     randomUUID()
   );
   const runtimeApplyRequired = sessionActive && modelProviderChanged(normalized, stored);
-  let restartRequired =
+  const nextSessionRequired =
     sessionActive && (stored === null || normalized.asrApiKey !== stored.asrApiKey);
 
   const configDirectory = app.getPath("userData");
@@ -155,18 +155,12 @@ async function saveModelConfig(
     "utf8"
   );
 
-  const providerConfiguration = await configureIdleModelProvider(
-    sessionActive,
-    () => backendClient.configureProviders(normalized)
-  );
-  restartRequired ||= providerConfiguration.restartRequired;
   return {
     ok: true,
     providerProfileId: normalized.providerProfileId,
     securelyStored,
-    backendConfigured: providerConfiguration.backendConfigured,
-    restartRequired,
-    runtimeApplyRequired
+    runtimeApplyRequired,
+    nextSessionRequired
   };
 }
 
@@ -312,10 +306,13 @@ async function getStoredModelConfigStatus(): Promise<ModelConfigStatus> {
   };
 }
 
-export async function configureSavedModelConfig(backendClient: BackendClient): Promise<boolean> {
+export async function configureCurrentProviderForSession(
+  backendClient: BackendClient,
+  restartBackend: () => Promise<BackendRuntimeStatus>
+): Promise<boolean> {
   const config = await loadStoredModelConfig();
   if (!config) return false;
-  await backendClient.configureProviders(config);
+  await configureProviderForSession(config, backendClient, restartBackend);
   return true;
 }
 
@@ -814,7 +811,7 @@ export function registerDesktopIpc(
       }
       const parsed = parseAudienceWorkspaceState(workspace);
       if (!parsed.ok) throw new Error(parsed.issues.join("; "));
-      if (!(await configureSavedModelConfig(backendClient))) {
+      if (!(await configureCurrentProviderForSession(backendClient, restartBackend))) {
         throw new Error("请先保存模型配置，再启动观众运行时。");
       }
       const compiled = await compileAudienceRuntime(parsed.workspace, 1);
@@ -992,7 +989,7 @@ export function registerDesktopIpc(
     const providerConfig = await loadRuntimeProviderConfig(
       persisted.canonical_runtime_spec.provider
     );
-    await backendClient.configureProviders(providerConfig);
+    await configureProviderForSession(providerConfig, backendClient, restartBackend);
     const recovered = await backendClient.recoverRuntime(sessionId);
     await saveRuntimeSessionId(app.getPath("userData"), recovered.session_id);
     return recovered;
