@@ -19,7 +19,6 @@ export type UseMediaControllerOptions = {
   onSessionStarted: () => void
   backendConnected?: boolean
   providersConfigured?: boolean
-  backendSessionId?: string | null
   onBackendSessionSnapshot?: (snapshot: BackendSessionSnapshot) => void
   audienceWorkspace: AudienceWorkspaceState
 }
@@ -93,6 +92,7 @@ export type MediaController = {
   screenPermission: MediaAccessStatus
   mediaTransitioning: boolean
   overlayVisible: boolean
+  audienceSessionActive: boolean
   isSessionActive: boolean
   canStart: boolean
   goLiveBusy: boolean

@@ -66,7 +66,6 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     onSessionStarted: () => undefined,
     backendConnected: backend.connection === 'connected',
     providersConfigured: backend.status?.providersConfigured ?? false,
-    backendSessionId: backend.status?.session.sessionId,
     onBackendSessionSnapshot: backend.applySessionSnapshot,
     audienceWorkspace: audience.workspace
   })
@@ -74,6 +73,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     workspace: audience.workspace,
     runtimeViewers: audienceRuntime.runtime?.viewers ?? [],
     sessionStatus: session.status,
+    audienceSessionActive: media.audienceSessionActive,
     overlayVisible: media.overlayVisible,
     showOverlay: media.showOverlay,
     message: activityFeed.message,
@@ -113,7 +113,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
     captureStreamRef: media.captureStreamRef,
     cameraStreamRef: media.cameraStreamRef,
     videoRef: media.capturePipelineVideoRef,
-    cameraVideoRef: media.cameraPipelineVideoRef
+    cameraVideoRef: media.cameraPipelineVideoRef,
+    deliveryEnabled: media.audienceSessionActive
   })
   const elapsedSeconds = useElapsedTime(
     session.status,
@@ -128,12 +129,13 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
   useEffect(() => {
     const status = backend.status
     if (status?.connection !== 'connected') return
+    if (!media.audienceSessionActive && session.status !== 'idle') return
     dispatchSession({
       type: 'sync',
       status: status.session.state,
       error: status.session.state === 'error' ? '后端 Session 进入错误状态。' : null
     })
-  }, [backend.status, dispatchSession])
+  }, [backend.status, dispatchSession, media.audienceSessionActive, session.status])
 
   const backendReady =
     backend.connection === 'connected' && (backend.status?.providersConfigured ?? false)
@@ -172,11 +174,13 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
       label:
         visualPipeline.status === 'ready'
           ? '图像 · 已就绪'
+          : visualPipeline.status === 'local-preview'
+            ? '图像 · 本地预览'
           : visualPipeline.status === 'compression-failed'
             ? '图像 · 压缩失败'
             : '图像 · 等待后端接入',
       tone:
-        visualPipeline.status === 'ready'
+        visualPipeline.status === 'ready' || visualPipeline.status === 'local-preview'
           ? 'online'
           : visualPipeline.status === 'compression-failed'
             ? 'warning'
@@ -233,6 +237,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               isSessionActive: media.isSessionActive,
               canStart: media.canStart,
               goLiveBusy: media.goLiveBusy,
+              audienceSessionActive: media.audienceSessionActive,
               overlayVisible: media.overlayVisible,
               barrageTotal: barrage.barrageTotal,
               microphoneLevel: media.microphoneLevel,

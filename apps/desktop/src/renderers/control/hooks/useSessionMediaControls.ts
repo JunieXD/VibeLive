@@ -24,9 +24,10 @@ type UseSessionMediaControlsOptions = {
   fatalMediaRef: MutableRefObject<(kind: FatalMediaKind, error: string) => void>
   onSystemActivity: (text: string) => void
   onSessionStarted: () => void
-  backendSessionId?: string | null
   onBackendSessionSnapshot?: (snapshot: BackendSessionSnapshot) => void
   audienceWorkspace: AudienceWorkspaceState
+  audienceAvailable: boolean
+  onAudienceSessionActiveChange: (active: boolean) => void
 }
 
 function describeBackendError(error: unknown, fallback: string): string {
@@ -41,30 +42,41 @@ export function useSessionMediaControls({
   fatalMediaRef,
   onSystemActivity,
   onSessionStarted,
-  backendSessionId,
   onBackendSessionSnapshot,
-  audienceWorkspace
+  audienceWorkspace,
+  audienceAvailable,
+  onAudienceSessionActiveChange
 }: UseSessionMediaControlsOptions) {
   const [overlayVisible, setOverlayVisible] = useState(true)
   const devicesRef = useRef(devices)
   const onSystemActivityRef = useRef(onSystemActivity)
   const onSessionStartedRef = useRef(onSessionStarted)
-  const backendSessionIdRef = useRef(backendSessionId)
   const onBackendSessionSnapshotRef = useRef(onBackendSessionSnapshot)
   const audienceWorkspaceRef = useRef(audienceWorkspace)
+  const audienceAvailableRef = useRef(audienceAvailable)
+  const onAudienceSessionActiveChangeRef = useRef(onAudienceSessionActiveChange)
+  const backendSessionActiveRef = useRef(false)
+  const restoreMicrophoneOnResumeRef = useRef(false)
   const startClientRequestIdRef = useRef<string | null>(null)
   devicesRef.current = devices
   onSystemActivityRef.current = onSystemActivity
   onSessionStartedRef.current = onSessionStarted
-  backendSessionIdRef.current = backendSessionId
   onBackendSessionSnapshotRef.current = onBackendSessionSnapshot
   audienceWorkspaceRef.current = audienceWorkspace
+  audienceAvailableRef.current = audienceAvailable
+  onAudienceSessionActiveChangeRef.current = onAudienceSessionActiveChange
+
+  const setAudienceSessionActive = useCallback((active: boolean): void => {
+    backendSessionActiveRef.current = active
+    onAudienceSessionActiveChangeRef.current(active)
+  }, [])
 
   const syncBackendSession = useCallback((snapshot: BackendSessionSnapshot): void => {
+    if (snapshot.state === 'idle' || snapshot.state === 'error') setAudienceSessionActive(false)
     sessionStatusRef.current = snapshot.state
     dispatchSession({ type: 'sync', status: snapshot.state })
     onBackendSessionSnapshotRef.current?.(snapshot)
-  }, [dispatchSession, sessionStatusRef])
+  }, [dispatchSession, sessionStatusRef, setAudienceSessionActive])
 
   const releaseOverlay = useCallback(async (): Promise<string | null> => {
     const [clearResult, hideResult] = await Promise.allSettled([
@@ -91,6 +103,8 @@ export function useSessionMediaControls({
     let cameraStream: MediaStream | null = devices.cameraStreamRef.current
     let microphoneStream: MediaStream | null = devices.microphoneStreamRef.current
     let backendSessionStarted = false
+    let backendSession: BackendSessionSnapshot | null = null
+    setAudienceSessionActive(false)
     sessionStatusRef.current = 'starting'
     dispatchSession({ type: 'start' })
     try {
@@ -118,24 +132,46 @@ export function useSessionMediaControls({
       }
       if (!devices.operation.isCurrent(operationId)) return
 
-      if (!microphoneStream) {
+      if (!microphoneStream && audienceAvailableRef.current && devices.selectedMicrophoneId) {
         try {
           microphoneStream = await devices.startMicrophone(
             operationId,
-            devices.selectedMicrophoneId || undefined
+            devices.selectedMicrophoneId
           )
         } catch (error) {
-          throw new Error(describeMediaError(error, 'microphone'))
+          onSystemActivityRef.current(
+            `麦克风未能启用：${describeMediaError(error, 'microphone')} 继续进行仅画面直播。`
+          )
         }
       }
       if (!devices.operation.isCurrent(operationId)) return
 
-      startClientRequestIdRef.current ??= `desktop-${crypto.randomUUID()}`
-      const backendSession = await window.advx.startBackendSession(
-        audienceWorkspaceRef.current,
-        startClientRequestIdRef.current
-      )
-      backendSessionStarted = backendSession.sessionId !== null
+      if (audienceAvailableRef.current) {
+        startClientRequestIdRef.current ??= `desktop-${crypto.randomUUID()}`
+        try {
+          backendSession = await window.advx.startBackendSession(
+            audienceWorkspaceRef.current,
+            startClientRequestIdRef.current
+          )
+          backendSessionStarted =
+            backendSession.sessionId !== null && backendSession.state === 'running'
+          if (!backendSessionStarted) {
+            if (backendSession.sessionId !== null) {
+              await window.advx.stopBackendSession().catch(() => undefined)
+            }
+            startClientRequestIdRef.current = null
+            onSystemActivityRef.current('AI 观众未能接入，继续进行仅画面直播。')
+          }
+        } catch (error) {
+          if (!devices.operation.isCurrent(operationId)) return
+          startClientRequestIdRef.current = null
+          onSystemActivityRef.current(
+            `AI 观众未能接入：${describeBackendError(error, '连接异常。')} 继续进行仅画面直播。`
+          )
+        }
+      } else {
+        onSystemActivityRef.current('Provider 未配置或后端未连接，继续进行仅画面直播。')
+      }
       if (!devices.operation.isCurrent(operationId)) {
         if (backendSessionStarted) {
           await window.advx.stopBackendSession().catch(() => undefined)
@@ -143,20 +179,36 @@ export function useSessionMediaControls({
         }
         return
       }
-      await window.advx.showOverlay()
+
+      if (backendSessionStarted) setAudienceSessionActive(true)
+      try {
+        await window.advx.showOverlay()
+        setOverlayVisible(true)
+      } catch (error) {
+        setOverlayVisible(false)
+        onSystemActivityRef.current(
+          `悬浮层未能显示：${describeBackendError(error, '连接异常。')} 直播将继续。`
+        )
+      }
       if (!devices.operation.isCurrent(operationId)) {
         await window.advx.hideOverlay()
         if (backendSessionStarted) {
           await window.advx.stopBackendSession().catch(() => undefined)
           startClientRequestIdRef.current = null
         }
+        setAudienceSessionActive(false)
         return
       }
-      setOverlayVisible(true)
-      syncBackendSession(backendSession)
-      if (backendSession.state === 'running') onSessionStartedRef.current()
+      if (backendSessionStarted && backendSession) {
+        syncBackendSession(backendSession)
+      } else {
+        sessionStatusRef.current = 'running'
+        dispatchSession({ type: 'started' })
+      }
+      onSessionStartedRef.current()
     } catch (error) {
       if (!devices.operation.isCurrent(operationId)) return
+      setAudienceSessionActive(false)
       if (devices.captureStreamRef.current === displayStream) devices.stopCapture()
       if (devices.cameraStreamRef.current === cameraStream) devices.stopCamera()
       if (devices.microphoneStreamRef.current === microphoneStream) {
@@ -171,7 +223,7 @@ export function useSessionMediaControls({
       sessionStatusRef.current = 'error'
       dispatchSession({
         type: 'fail',
-        error: `${error instanceof Error ? error.message : '启动失败，请检查视觉来源和麦克风权限。'}${
+        error: `${error instanceof Error ? error.message : '启动失败，请检查视觉来源。'}${
           overlayError ? ` ${overlayError}` : ''
         }`
       })
@@ -185,20 +237,33 @@ export function useSessionMediaControls({
       }
       devices.operation.finish(operationId)
     }
-  }, [dispatchSession, releaseOverlay, sessionStatusRef, syncBackendSession])
+  }, [
+    dispatchSession,
+    releaseOverlay,
+    sessionStatusRef,
+    setAudienceSessionActive,
+    syncBackendSession
+  ])
 
   const stopSession = useCallback(async (): Promise<void> => {
     const devices = devicesRef.current
     const operationId = devices.operation.begin(true)
     if (operationId === null) return
+    const backendSessionActive = backendSessionActiveRef.current
     sessionStatusRef.current = 'stopping'
     dispatchSession({ type: 'stop' })
     devices.stopCapture()
     devices.stopCamera()
-    await devices.stopMicrophone()
+    try {
+      await devices.stopMicrophone()
+    } catch (error) {
+      onSystemActivityRef.current(
+        `麦克风未能完全停止：${describeMediaError(error, 'microphone')}`
+      )
+    }
     let stopError: string | null = null
     try {
-      if (backendSessionIdRef.current !== null) {
+      if (backendSessionActive) {
         const backendSession = await window.advx.stopBackendSession()
         syncBackendSession(backendSession)
       }
@@ -211,6 +276,7 @@ export function useSessionMediaControls({
       const notice = [stopError, overlayError].filter(Boolean).join(' ')
       if (notice) onSystemActivityRef.current(notice)
     } finally {
+      setAudienceSessionActive(false)
       if (devices.operation.isCurrent(operationId)) {
         sessionStatusRef.current = stopError ? 'error' : 'idle'
         if (stopError) dispatchSession({ type: 'fail', error: stopError })
@@ -221,7 +287,13 @@ export function useSessionMediaControls({
       }
       devices.operation.finish(operationId)
     }
-  }, [dispatchSession, releaseOverlay, sessionStatusRef, syncBackendSession])
+  }, [
+    dispatchSession,
+    releaseOverlay,
+    sessionStatusRef,
+    setAudienceSessionActive,
+    syncBackendSession
+  ])
 
   useEffect(() => window.advx.onEmergencyStop(() => void stopSession()), [stopSession])
 
@@ -240,23 +312,38 @@ export function useSessionMediaControls({
     let microphoneStream: MediaStream | null = null
     let failureKind: FatalMediaKind = 'display'
     if (sessionStatus === 'running') {
+      restoreMicrophoneOnResumeRef.current = devices.microphoneStreamRef.current !== null
       sessionStatusRef.current = 'paused'
       dispatchSession({ type: 'pause' })
       devices.stopCapture()
       devices.stopCamera()
       try {
         await devices.stopMicrophone()
-        const backendSession = await window.advx.pauseBackendSession()
-        syncBackendSession(backendSession)
       } catch (error) {
-        sessionStatusRef.current = 'error'
-        dispatchSession({
-          type: 'fail',
-          error: `暂停后端 Session 失败：${describeBackendError(error, '连接异常。')}`
-        })
-      } finally {
-        devices.operation.finish(operationId)
+        onSystemActivityRef.current(
+          `麦克风未能完全暂停：${describeMediaError(error, 'microphone')}`
+        )
       }
+      if (backendSessionActiveRef.current) {
+        try {
+          const backendSession = await window.advx.pauseBackendSession()
+          if (!devices.operation.isCurrent(operationId)) {
+            devices.operation.finish(operationId)
+            return
+          }
+          if (backendSession.state !== 'paused') {
+            throw new Error('后端没有进入暂停状态。')
+          }
+          syncBackendSession(backendSession)
+        } catch (error) {
+          setAudienceSessionActive(false)
+          await window.advx.stopBackendSession().catch(() => undefined)
+          onSystemActivityRef.current(
+            `AI 观众已暂停：${describeBackendError(error, '连接异常。')} 画面直播仍可恢复。`
+          )
+        }
+      }
+      devices.operation.finish(operationId)
       return
     }
 
@@ -279,15 +366,42 @@ export function useSessionMediaControls({
           )
           if (!devices.operation.isCurrent(operationId)) return
         }
-        failureKind = 'microphone'
-        microphoneStream = await devices.startMicrophone(
-          operationId,
-          devices.selectedMicrophoneId || undefined
-        )
-        if (!devices.operation.isCurrent(operationId)) return
-        const backendSession = await window.advx.resumeBackendSession()
-        if (!devices.operation.isCurrent(operationId)) return
-        syncBackendSession(backendSession)
+        if (restoreMicrophoneOnResumeRef.current) {
+          failureKind = 'microphone'
+          try {
+            microphoneStream = await devices.startMicrophone(
+              operationId,
+              devices.selectedMicrophoneId || undefined
+            )
+          } catch (error) {
+            microphoneStream = null
+            onSystemActivityRef.current(
+              `麦克风未能恢复：${describeMediaError(error, 'microphone')} 继续进行仅画面直播。`
+            )
+          }
+          if (!devices.operation.isCurrent(operationId)) return
+        }
+        if (backendSessionActiveRef.current) {
+          try {
+            const backendSession = await window.advx.resumeBackendSession()
+            if (!devices.operation.isCurrent(operationId)) return
+            if (backendSession.state !== 'running') {
+              throw new Error('后端没有恢复运行状态。')
+            }
+            syncBackendSession(backendSession)
+          } catch (error) {
+            setAudienceSessionActive(false)
+            await window.advx.stopBackendSession().catch(() => undefined)
+            onSystemActivityRef.current(
+              `AI 观众未能恢复：${describeBackendError(error, '连接异常。')} 继续进行仅画面直播。`
+            )
+            sessionStatusRef.current = 'running'
+            dispatchSession({ type: 'resume' })
+          }
+        } else {
+          sessionStatusRef.current = 'running'
+          dispatchSession({ type: 'resume' })
+        }
       } catch (error) {
         if (!devices.operation.isCurrent(operationId)) return
         if (devices.captureStreamRef.current === displayStream) devices.stopCapture()
@@ -321,7 +435,14 @@ export function useSessionMediaControls({
       return
     }
     devices.operation.finish(operationId)
-  }, [dispatchSession, releaseOverlay, sessionStatus, sessionStatusRef, syncBackendSession])
+  }, [
+    dispatchSession,
+    releaseOverlay,
+    sessionStatus,
+    sessionStatusRef,
+    setAudienceSessionActive,
+    syncBackendSession
+  ])
 
   const showOverlay = useCallback(async (): Promise<void> => {
     await window.advx.showOverlay()

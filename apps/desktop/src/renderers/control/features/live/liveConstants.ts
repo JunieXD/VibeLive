@@ -26,6 +26,7 @@ export const pipSizeLabels: Record<PipSize, string> = {
 
 export const visualPipelineLabels: Record<VisualPipelineStatus, string> = {
   'waiting-backend': '等待后端接入',
+  'local-preview': '本地预览',
   ready: '已就绪',
   'compression-failed': '压缩失败'
 }

@@ -2,7 +2,11 @@ export type VisualMode = 'screen' | 'camera' | 'pip'
 export type PipPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 export type PipSize = 'small' | 'medium' | 'large'
 export type CompressionPreset = 'economy' | 'balanced' | 'clear'
-export type VisualPipelineStatus = 'waiting-backend' | 'ready' | 'compression-failed'
+export type VisualPipelineStatus =
+  | 'waiting-backend'
+  | 'local-preview'
+  | 'ready'
+  | 'compression-failed'
 
 export type VisualSettings = {
   mode: VisualMode

@@ -31,6 +31,7 @@ export type LiveStageProps = {
   isSessionActive: boolean
   canStart: boolean
   goLiveBusy: boolean
+  audienceSessionActive: boolean
   overlayVisible: boolean
   barrageTotal: number
   microphoneLevel: number

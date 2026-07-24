@@ -80,7 +80,7 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
         </span>
         <strong
           className={
-            visualPipelineStatus === 'ready'
+            visualPipelineStatus === 'ready' || visualPipelineStatus === 'local-preview'
               ? 'ok'
               : visualPipelineStatus === 'compression-failed'
                 ? 'warning'

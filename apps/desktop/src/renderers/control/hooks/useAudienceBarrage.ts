@@ -37,6 +37,7 @@ type UseAudienceBarrageOptions = {
   workspace: AudienceWorkspaceState
   runtimeViewers: readonly RuntimeViewer[]
   sessionStatus: SessionStatus
+  audienceSessionActive: boolean
   overlayVisible: boolean
   showOverlay: () => Promise<void>
   message: string
@@ -51,6 +52,7 @@ export function useAudienceBarrage({
   workspace,
   runtimeViewers,
   sessionStatus,
+  audienceSessionActive,
   overlayVisible,
   showOverlay,
   message,
@@ -86,6 +88,7 @@ export function useAudienceBarrage({
   }, [sessionStatus])
 
   useEffect(() => window.advx.onBackendBarrage((backendEvent: BackendBarrageEvent) => {
+    if (!audienceSessionActive) return
     if (!shouldAcceptBackendBarrage(
       sessionStatus,
       backendEvent.createdAt,
@@ -106,7 +109,13 @@ export function useAudienceBarrage({
       color: event.color
     })
     if (overlayVisible) void window.advx.pushBarrage(event)
-  }), [appendAudienceActivity, overlayVisible, sessionStatus, workspace.personas])
+  }), [
+    appendAudienceActivity,
+    audienceSessionActive,
+    overlayVisible,
+    sessionStatus,
+    workspace.personas
+  ])
 
   const previewBarrage = useCallback(async (mode: BarrageMode): Promise<void> => {
     await showOverlay()
@@ -128,7 +137,9 @@ export function useAudienceBarrage({
 
   const sendUserMessage = useCallback(async (): Promise<void> => {
     const targeted = parseTargetedMessage(message, selectedMessageTarget)
-    if (!targeted.text || messageSending || sessionStatus !== 'running') return
+    if (!targeted.text || messageSending || sessionStatus !== 'running' || !audienceSessionActive) {
+      return
+    }
     setMessageSending(true)
     setMessageError(null)
     appendUserActivity(message.trim())
@@ -152,6 +163,7 @@ export function useAudienceBarrage({
   }, [
     appendSystemActivity,
     appendUserActivity,
+    audienceSessionActive,
     message,
     messageSending,
     selectedMessageTarget,

@@ -20,6 +20,7 @@ import type { FatalMediaKind, MediaDevicesController } from './mediaControllerTy
 type UseMediaDevicesOptions = {
   sessionStatusRef: MutableRefObject<SessionStatus>
   fatalMediaRef: MutableRefObject<(kind: FatalMediaKind, error: string) => void>
+  mediaIngestEnabledRef: MutableRefObject<boolean>
   onSystemActivity: (text: string) => void
   onRequestSourcePicker: () => void
 }
@@ -27,6 +28,7 @@ type UseMediaDevicesOptions = {
 export function useMediaDevices({
   sessionStatusRef,
   fatalMediaRef,
+  mediaIngestEnabledRef,
   onSystemActivity,
   onRequestSourcePicker
 }: UseMediaDevicesOptions): MediaDevicesController {
@@ -146,6 +148,12 @@ export function useMediaDevices({
   }, [])
 
   const flushAudioSegment = useCallback((includePartial = false): Promise<void> => {
+    if (!mediaIngestEnabledRef.current) {
+      audioChunksRef.current = []
+      audioSampleCountRef.current = 0
+      audioSegmentStartedAtRef.current = null
+      return audioSendQueueRef.current
+    }
     const sampleRate = audioSampleRateRef.current
     const sampleCount = audioSampleCountRef.current
     const minimumSamples = includePartial
@@ -370,7 +378,7 @@ export function useMediaDevices({
       processor.connect(silentOutput)
       silentOutput.connect(context.destination)
       processor.onaudioprocess = (event): void => {
-        if (sessionStatusRef.current !== 'running') return
+        if (sessionStatusRef.current !== 'running' || !mediaIngestEnabledRef.current) return
         const samples = event.inputBuffer.getChannelData(0)
         if (samples.length === 0) return
         if (audioSegmentStartedAtRef.current === null) {
@@ -420,8 +428,7 @@ export function useMediaDevices({
         setMicrophoneLevel(0)
         setMicrophoneReady(false)
         if (sessionStatusRef.current === 'running' || sessionStatusRef.current === 'starting') {
-          stopCapture()
-          fatalMediaRef.current('microphone', '麦克风连接已中断，请检查设备。')
+          onSystemActivityRef.current('麦克风连接已中断，继续进行仅画面直播。')
         }
       }, { once: true })
       const samples = new Uint8Array(analyser.fftSize)

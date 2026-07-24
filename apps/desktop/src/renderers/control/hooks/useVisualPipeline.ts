@@ -27,6 +27,7 @@ type UseVisualPipelineOptions = {
   cameraStreamRef: MutableRefObject<MediaStream | null>
   videoRef: RefObject<HTMLVideoElement | null>
   cameraVideoRef: RefObject<HTMLVideoElement | null>
+  deliveryEnabled: boolean
   batchSink?: VisualBatchSink
 }
 
@@ -48,6 +49,7 @@ export function useVisualPipeline({
   cameraStreamRef,
   videoRef,
   cameraVideoRef,
+  deliveryEnabled,
   batchSink
 }: UseVisualPipelineOptions): VisualPipeline {
   const compositeCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -99,6 +101,11 @@ export function useVisualPipeline({
 
     if (sessionStatus !== 'running') {
       setStatus('waiting-backend')
+      return
+    }
+
+    if (!deliveryEnabled) {
+      setStatus('local-preview')
       return
     }
 
@@ -238,6 +245,7 @@ export function useVisualPipeline({
     cameraVideoRef,
     captureStream,
     captureStreamRef,
+    deliveryEnabled,
     sessionStatus,
     videoRef,
     visualSettings.compressionPreset,

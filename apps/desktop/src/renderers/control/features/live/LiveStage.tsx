@@ -41,6 +41,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     isSessionActive,
     canStart,
     goLiveBusy,
+    audienceSessionActive,
     overlayVisible,
     barrageTotal,
     microphoneLevel,
@@ -66,6 +67,8 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     bindMediaStreamToVideo(videoRef.current, captureStream)
     bindMediaStreamToVideo(cameraVideoRef.current, cameraStream)
   }, [cameraStream, cameraVideoRef, captureStream, effectiveVisualMode, videoRef])
+
+  const canMessage = session.status === 'running' && audienceSessionActive
 
   return (
     <section className="stage-panel">
@@ -396,20 +399,24 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
             if (event.key === 'Enter') onSendUserMessage()
           }}
           placeholder={
-            session.status === 'running' ? '说点什么，AI 观众会回应你' : '开始直播后可发送'
+            !audienceSessionActive
+              ? '配置 Provider 后可与 AI 观众互动'
+              : session.status === 'running'
+                ? '说点什么，AI 观众会回应你'
+                : '开始直播后可发送'
           }
-          disabled={session.status !== 'running' || messageSending}
+          disabled={!canMessage || messageSending}
         />
         <button
           className="icon-button accent"
           type="button"
           title="发送"
-          disabled={session.status !== 'running' || messageSending || message.trim() === ''}
+          disabled={!canMessage || messageSending || message.trim() === ''}
           onClick={onSendUserMessage}
         >
           <Send size={16} />
         </button>
-        {targetSuggestions.length > 0 && (
+        {canMessage && targetSuggestions.length > 0 && (
           <div className="mention-menu" role="listbox" aria-label="选择消息目标">
             {targetSuggestions.map((target) => (
               <button
@@ -426,7 +433,9 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
         )}
       </div>
       <p className="provider-disclosure">
-        屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型 Provider；原始音频仅发送给 StepFun ASR，生成模型仅接收最终转写。原始音频和连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。
+        {audienceSessionActive
+          ? '屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型 Provider；原始音频仅发送给 StepFun ASR，生成模型仅接收最终转写。原始音频和连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。'
+          : '当前为本地画面直播；配置并接入 Provider 后才会发送画面、文字和转写。'}
       </p>
     </section>
   )

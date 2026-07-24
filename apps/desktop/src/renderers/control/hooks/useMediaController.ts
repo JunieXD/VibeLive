@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionStatus } from '../../../shared/session'
-import { getPipRectangle, requiredVisualSources, resolveVisualMode } from '../visual'
+import {
+  getPipRectangle,
+  requiredVisualSources,
+  resolveVisualMode,
+  type VisualMode
+} from '../visual'
 import type {
   FatalMediaKind,
   MediaController,
@@ -11,6 +16,27 @@ import { useSessionMediaControls } from './useSessionMediaControls'
 
 export type { MediaController, UseMediaControllerOptions } from './mediaControllerTypes'
 
+export type LiveStartEligibility = {
+  sessionStatus: SessionStatus
+  visualMode: VisualMode
+  hasScreen: boolean
+  hasCamera: boolean
+}
+
+export function canStartLive({
+  sessionStatus,
+  visualMode,
+  hasScreen,
+  hasCamera
+}: LiveStartEligibility): boolean {
+  const requirements = requiredVisualSources(visualMode)
+  return (
+    sessionStatus === 'idle' &&
+    (!requirements.screen || hasScreen) &&
+    (!requirements.camera || hasCamera)
+  )
+}
+
 export function useMediaController({
   sessionStatus,
   dispatchSession,
@@ -18,13 +44,19 @@ export function useMediaController({
   onSessionStarted,
   backendConnected = true,
   providersConfigured = true,
-  backendSessionId,
   onBackendSessionSnapshot,
   audienceWorkspace
 }: UseMediaControllerOptions): MediaController {
   const [sourcePickerOpen, setSourcePickerOpen] = useState(false)
+  const [audienceSessionActive, setAudienceSessionActiveState] = useState(false)
   const sessionStatusRef = useRef<SessionStatus>(sessionStatus)
+  const audienceSessionActiveRef = useRef(false)
   const fatalMediaRef = useRef<(kind: FatalMediaKind, error: string) => void>(() => undefined)
+
+  const setAudienceSessionActive = useCallback((active: boolean): void => {
+    audienceSessionActiveRef.current = active
+    setAudienceSessionActiveState(active)
+  }, [])
 
   useEffect(() => {
     sessionStatusRef.current = sessionStatus
@@ -33,6 +65,7 @@ export function useMediaController({
   const devices = useMediaDevices({
     sessionStatusRef,
     fatalMediaRef,
+    mediaIngestEnabledRef: audienceSessionActiveRef,
     onSystemActivity,
     onRequestSourcePicker: () => setSourcePickerOpen(true)
   })
@@ -44,20 +77,19 @@ export function useMediaController({
     fatalMediaRef,
     onSystemActivity,
     onSessionStarted,
-    backendSessionId,
     onBackendSessionSnapshot,
-    audienceWorkspace
+    audienceWorkspace,
+    audienceAvailable: backendConnected && providersConfigured,
+    onAudienceSessionActiveChange: setAudienceSessionActive
   })
 
   const isSessionActive = ['starting', 'running', 'paused', 'stopping'].includes(sessionStatus)
-  const requirements = requiredVisualSources(devices.visualSettings.mode)
-  const canStart =
-    sessionStatus === 'idle' &&
-    backendConnected &&
-    providersConfigured &&
-    devices.selectedMicrophoneId !== '' &&
-    (!requirements.screen || devices.selectedSource !== null) &&
-    (!requirements.camera || devices.cameraEnabled)
+  const canStart = canStartLive({
+    sessionStatus,
+    visualMode: devices.visualSettings.mode,
+    hasScreen: devices.selectedSource !== null,
+    hasCamera: devices.cameraEnabled
+  })
   const goLiveBusy =
     sessionStatus === 'starting' ||
     sessionStatus === 'stopping' ||
@@ -136,6 +168,7 @@ export function useMediaController({
     screenPermission: devices.screenPermission,
     mediaTransitioning: devices.operation.transitioning,
     overlayVisible: session.overlayVisible,
+    audienceSessionActive,
     isSessionActive,
     canStart,
     goLiveBusy,
