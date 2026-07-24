@@ -35,11 +35,12 @@ class DuplicateFrameInputError(FrameStoreError):
 
 
 class _StoredFrame:
-    __slots__ = ("data_ref", "resolved")
+    __slots__ = ("data_ref", "resolved", "retention_count")
 
     def __init__(self, *, data_ref: str, resolved: ResolvedFrame) -> None:
         self.data_ref = data_ref
         self.resolved = resolved
+        self.retention_count = 0
 
 
 class InMemoryFrameStore:
@@ -142,14 +143,68 @@ class InMemoryFrameStore:
             self._frames.move_to_end(frame.data_ref)
             return resolved
 
+    async def retain(
+        self,
+        *,
+        session_id: str,
+        frames: tuple[FrameRef, ...],
+    ) -> bool:
+        """Keep a wave's frames available until its model work is complete."""
+        async with self._lock:
+            self._require_active(session_id)
+            stored_frames: list[_StoredFrame] = []
+            for frame in frames:
+                stored = self._frames.get(frame.data_ref)
+                if stored is None or not self._matches(stored.resolved, session_id, frame):
+                    return False
+                stored_frames.append(stored)
+            for frame, stored in zip(frames, stored_frames, strict=True):
+                stored.retention_count += 1
+                self._frames.move_to_end(frame.data_ref)
+            return True
+
+    async def release(
+        self,
+        *,
+        session_id: str,
+        frames: tuple[FrameRef, ...],
+    ) -> None:
+        async with self._lock:
+            if self._active_session_id != session_id:
+                return
+            for frame in frames:
+                stored = self._frames.get(frame.data_ref)
+                if stored is not None and self._matches(stored.resolved, session_id, frame):
+                    stored.retention_count = max(0, stored.retention_count - 1)
+            self._evict_to_limits()
+
     def _evict_to_limits(self) -> None:
         while (
             len(self._frames) > self._limits.max_frames
             or self._total_bytes > self._limits.max_total_bytes
         ):
-            _, stored = self._frames.popitem(last=False)
+            data_ref = next(
+                (
+                    candidate_ref
+                    for candidate_ref, candidate in self._frames.items()
+                    if candidate.retention_count == 0
+                ),
+                None,
+            )
+            if data_ref is None:
+                return
+            stored = self._frames.pop(data_ref)
             self._input_ids.discard(stored.resolved.input_id)
             self._total_bytes -= len(stored.resolved.body)
+
+    @staticmethod
+    def _matches(resolved: ResolvedFrame, session_id: str, frame: FrameRef) -> bool:
+        return (
+            resolved.session_id == session_id
+            and resolved.frame_id == frame.frame_id
+            and resolved.mime_type == frame.mime_type
+            and resolved.captured_at_ms == frame.created_at_ms
+        )
 
     def _require_active(self, session_id: str) -> None:
         if self._active_session_id != session_id:

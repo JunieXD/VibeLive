@@ -24,6 +24,7 @@ from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation_wave import ObservationWave, ViewerVisualInputMode
 from advx_backend.domain.viewer import ViewerInstance, ViewerLifecycleState
+from advx_backend.providers.model.viewer_runtime import ViewerRuntimeProviderBlockedError
 
 logger = logging.getLogger(__name__)
 
@@ -546,6 +547,21 @@ class ViewerRuntime:
                 validation_codes=("expired",),
             )
             return "expired"
+        except ViewerRuntimeProviderBlockedError as error:
+            logger.warning(
+                "Viewer request %s was blocked: %s",
+                request.generation_request_id,
+                error,
+            )
+            item.completed_at_ms = self._clock.now_ms()
+            self._record_trace(
+                item,
+                status=TraceResponseStatus.FAILED,
+                accepted=False,
+                reason="provider_blocked",
+                validation_codes=("provider_blocked",),
+            )
+            return "failed"
         except Exception:
             logger.exception(
                 "Viewer provider failed for request %s",

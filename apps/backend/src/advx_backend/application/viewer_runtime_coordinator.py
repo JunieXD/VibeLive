@@ -272,6 +272,33 @@ class ViewerRuntimeCoordinator:
                 failure_reason="visual_preparation_failed",
             )
             return ViewerCoordinatorResult(wave=core_wave, visual_failed=True)
+        retained_frames = await self._retain_wave_frames(wave)
+        if retained_frames is None:
+            self._record_observation_trace(
+                wave=wave,
+                runtime=runtime,
+                status=ObservationWaveStatus.FAILED,
+                failure_reason="direct_frames_unavailable",
+            )
+            return ViewerCoordinatorResult(wave=wave, visual_failed=True)
+        try:
+            return await self._react_with_prepared_wave(
+                wave=wave,
+                runtime=runtime,
+                committed=committed,
+                proposed_policy=proposed_policy,
+            )
+        finally:
+            await self._release_wave_frames(wave, retained_frames)
+
+    async def _react_with_prepared_wave(
+        self,
+        *,
+        wave: ObservationWave,
+        runtime: object,
+        committed: CommittedRuntime,
+        proposed_policy: _WavePolicyState | None,
+    ) -> ViewerCoordinatorResult:
         try:
             outcome = await self._director.decide(
                 wave=wave,
@@ -352,6 +379,56 @@ class ViewerRuntimeCoordinator:
             dispatch=dispatch,
             meme_failed=meme_failed,
         )
+
+    async def _retain_wave_frames(
+        self,
+        wave: ObservationWave,
+    ) -> tuple[FrameRef, ...] | None:
+        if wave.visual_input_mode is not ViewerVisualInputMode.DIRECT_FRAMES:
+            return ()
+        if wave.frame_bundle is None:
+            return None
+        retain = getattr(self._frame_metadata, "retain", None)
+        if not callable(retain):
+            return None
+        frames = tuple(
+            FrameRef(
+                frame_id=item.frame_id,
+                created_at_ms=item.captured_at_ms,
+                mime_type=item.encoding,
+                data_ref=item.data_ref,
+            )
+            for item in wave.frame_bundle.frames
+        )
+        try:
+            retained = await retain(session_id=wave.session_id, frames=frames)
+        except Exception as error:
+            logger.warning(
+                "Could not retain direct frames for observation %s: %s",
+                wave.observation_id,
+                error,
+            )
+            return None
+        return frames if retained else None
+
+    async def _release_wave_frames(
+        self,
+        wave: ObservationWave,
+        frames: tuple[FrameRef, ...],
+    ) -> None:
+        if not frames:
+            return
+        release = getattr(self._frame_metadata, "release", None)
+        if not callable(release):
+            return
+        try:
+            await release(session_id=wave.session_id, frames=frames)
+        except Exception as error:
+            logger.warning(
+                "Could not release direct frames for observation %s: %s",
+                wave.observation_id,
+                error,
+            )
 
     def _record_observation_trace(
         self,

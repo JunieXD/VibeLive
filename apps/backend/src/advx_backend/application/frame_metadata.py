@@ -37,6 +37,22 @@ class StoredFrameMetadataResolver:
             change_score=resolved.change_score,
         )
 
+    async def retain(
+        self,
+        *,
+        session_id: str,
+        frames: tuple[FrameRef, ...],
+    ) -> bool:
+        return await self._frame_store.retain(session_id=session_id, frames=frames)
+
+    async def release(
+        self,
+        *,
+        session_id: str,
+        frames: tuple[FrameRef, ...],
+    ) -> None:
+        await self._frame_store.release(session_id=session_id, frames=frames)
+
 
 def _image_metadata(body: bytes) -> tuple[int, int, str] | None:
     if len(body) >= 24 and body.startswith(b"\x89PNG\r\n\x1a\n"):
