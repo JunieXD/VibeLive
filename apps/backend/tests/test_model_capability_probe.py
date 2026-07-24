@@ -3,13 +3,19 @@ import json
 import httpx
 import pytest
 
-from advx_backend.contracts.viewer_runtime import ProviderRuntimeSpec
+from advx_backend.contracts.viewer_runtime import (
+    ProviderRuntimeSpec,
+    ViewerAction,
+    ViewerGenerationResponse,
+)
 from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleConfig,
     OpenAICompatibleProvider,
     default_reasoning_options,
 )
 from advx_backend.providers.model.viewer_runtime import (
+    _VIEWER_BARRAGE_JSON_EXAMPLE,
+    _VIEWER_SILENCE_JSON_EXAMPLE,
     OpenAICompatibleViewerRuntimeConfig,
     OpenAICompatibleViewerRuntimeProvider,
 )
@@ -69,6 +75,18 @@ def test_stepfun_flash_defaults_to_low_reasoning_effort() -> None:
         "https://api.stepfun.com/step_plan/v1",
         "step-router-v1",
     ) == {}
+
+
+def test_viewer_json_examples_satisfy_the_runtime_contract() -> None:
+    barrage = ViewerGenerationResponse.model_validate(json.loads(_VIEWER_BARRAGE_JSON_EXAMPLE))
+    silence = ViewerGenerationResponse.model_validate(json.loads(_VIEWER_SILENCE_JSON_EXAMPLE))
+
+    assert barrage.action is ViewerAction.BARRAGE
+    assert barrage.target is None
+    assert barrage.text == "这波漂亮"
+    assert silence.action is ViewerAction.SILENCE
+    assert silence.target is None
+    assert silence.text is None
     assert default_reasoning_options(
         "https://models.example/v1",
         "step-3.7-flash",
