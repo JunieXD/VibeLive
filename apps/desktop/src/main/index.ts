@@ -54,6 +54,14 @@ const backendClient = new BackendClient({
   localToken
 });
 
+function requestApplicationQuitFromSignal(signal: NodeJS.Signals): void {
+  logger.info("app.shutdown.signal-requested", { signal });
+  app.quit();
+}
+
+process.once("SIGINT", () => requestApplicationQuitFromSignal("SIGINT"));
+process.once("SIGTERM", () => requestApplicationQuitFromSignal("SIGTERM"));
+
 type TraySmokeHandle = ApplicationTray & {
   quitMenuItemId: typeof TRAY_MENU_ITEM_IDS.quit;
 };

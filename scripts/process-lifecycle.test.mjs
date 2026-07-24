@@ -7,6 +7,8 @@ import { resolve } from "node:path";
 
 const lifecycleModuleUrl = pathToFileURL(resolve("scripts/process-lifecycle.mjs")).href;
 
+const { terminateWithFallback } = await import(lifecycleModuleUrl);
+
 test("clears a fallback timer after completion", async () => {
   const child = spawn(
     process.execPath,
@@ -24,4 +26,42 @@ test("clears a fallback timer after completion", async () => {
   assert.equal(code, 0);
   assert.equal(signal, null);
   assert.ok(elapsedMs < 1_000, `fallback timer kept the process alive for ${elapsedMs}ms`);
+});
+
+test("uses SIGTERM without forcing a process that exits during its grace period", async () => {
+  let running = true;
+  const signals = [];
+  const forced = await terminateWithFallback({
+    isRunning: () => running,
+    requestTermination: (signal) => {
+      signals.push(signal);
+      if (signal === "SIGTERM") running = false;
+    },
+    waitForExit: async () => {},
+    gracefulTimeoutMs: 1,
+    forceTimeoutMs: 1,
+    onForce: () => assert.fail("a graceful exit must not be forced")
+  });
+
+  assert.equal(forced, false);
+  assert.deepEqual(signals, ["SIGTERM"]);
+});
+
+test("forces a process only after its grace period expires", async () => {
+  const signals = [];
+  let forceNotified = false;
+  const forced = await terminateWithFallback({
+    isRunning: () => true,
+    requestTermination: (signal) => signals.push(signal),
+    waitForExit: async () => {},
+    gracefulTimeoutMs: 1,
+    forceTimeoutMs: 1,
+    onForce: () => {
+      forceNotified = true;
+    }
+  });
+
+  assert.equal(forced, true);
+  assert.equal(forceNotified, true);
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
 });

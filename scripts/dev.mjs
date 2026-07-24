@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
-import { waitForCompletionOrTimeout } from "./process-lifecycle.mjs";
+import { terminateWithFallback } from "./process-lifecycle.mjs";
 
 const useProcessGroups = process.platform !== "win32";
 const backendProtocolVersion = 3;
@@ -22,7 +22,8 @@ const childEnvironment = {
   ADVX_DATA_DIR: resolve(".advx-data"),
   ADVX_LOCAL_TOKEN: localToken
 };
-const children = [];
+let backendChild = null;
+let desktopChild = null;
 let shuttingDown = false;
 let backendExited = false;
 let shutdownPromise = null;
@@ -50,7 +51,7 @@ if (!configuredBackendUrl) {
       env: childEnvironment
     }
   );
-  children.push(backend);
+  backendChild = backend;
   backend.on("exit", () => {
     backendExited = true;
   });
@@ -73,7 +74,7 @@ try {
     detached: useProcessGroups,
     env: childEnvironment
   });
-  children.push(desktop);
+  desktopChild = desktop;
   observeChild(desktop, "Desktop");
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
@@ -107,27 +108,29 @@ function resolvePnpmCommand(arguments_) {
   };
 }
 
-function shutdown(exitCode = 0, signal = "SIGTERM") {
+function shutdown(exitCode = 0) {
   if (shutdownPromise) return shutdownPromise;
   shuttingDown = true;
   shutdownPromise = (async () => {
-    const runningChildren = children.filter(isChildTreeRunning);
-    for (const child of runningChildren) terminateChildTree(child, signal);
-
-    await waitForCompletionOrTimeout(
-      Promise.all(runningChildren.map(waitForChildTreeExit)),
-      shutdownGraceMs
-    );
-
-    const remainingChildren = runningChildren.filter(isChildTreeRunning);
-    for (const child of remainingChildren) terminateChildTree(child, "SIGKILL");
-    await waitForCompletionOrTimeout(
-      Promise.all(remainingChildren.map(waitForChildTreeExit)),
-      1_000
-    );
+    await stopChildTree(desktopChild, "Desktop");
+    await stopChildTree(backendChild, "Backend");
     process.exitCode = exitCode;
   })();
   return shutdownPromise;
+}
+
+async function stopChildTree(child, label) {
+  if (!child || !isChildTreeRunning(child)) return;
+  console.log(`Requesting graceful ${label} shutdown...`);
+  await terminateWithFallback({
+    isRunning: () => isChildTreeRunning(child),
+    requestTermination: (signal) => terminateChildTree(child, signal),
+    waitForExit: () => waitForChildTreeExit(child),
+    gracefulTimeoutMs: shutdownGraceMs,
+    forceTimeoutMs: 1_000,
+    onForce: () =>
+      console.error(`${label} did not exit within ${shutdownGraceMs}ms; forcing termination.`)
+  });
 }
 
 function isRunning(child) {
