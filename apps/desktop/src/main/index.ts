@@ -17,6 +17,11 @@ import {
   type BackendProcessExit
 } from "./backend/backend-process";
 import {
+  createApplicationTray,
+  TRAY_MENU_ITEM_IDS,
+  type ApplicationTray
+} from "./application-tray";
+import {
   getOverlaySettings,
   initializeOverlaySettings,
   reconcileOverlayTarget
@@ -25,6 +30,7 @@ import { createControlWindow } from "./windows/control";
 import { hideOverlay } from "./windows/overlay";
 
 let controlWindow: BrowserWindow | null = null;
+let applicationTray: ApplicationTray | null = null;
 let allowControlWindowClose = false;
 let controlWindowCloseRequested = false;
 let controlWindowCloseFallback: NodeJS.Timeout | null = null;
@@ -44,6 +50,19 @@ const backendClient = new BackendClient({
   baseUrl: backendBaseUrl,
   localToken
 });
+
+type TraySmokeHandle = ApplicationTray & {
+  quitMenuItemId: typeof TRAY_MENU_ITEM_IDS.quit;
+};
+
+function setTraySmokeHandle(handle: TraySmokeHandle | null): void {
+  if (process.env.ADVX_TRAY_SMOKE !== "1") return;
+  const testGlobal = globalThis as typeof globalThis & {
+    __advxTraySmoke?: TraySmokeHandle;
+  };
+  if (handle) testGlobal.__advxTraySmoke = handle;
+  else delete testGlobal.__advxTraySmoke;
+}
 
 function createBackendProcessController(): BackendProcessController {
   const externalOverride = process.env.ADVX_BACKEND_EXTERNAL;
@@ -172,6 +191,15 @@ function openControlWindow(): BrowserWindow {
   return window;
 }
 
+function showControlWindow(): void {
+  if (quitRequested || appShutdownPromise) return;
+  const window = controlWindow;
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
 function confirmControlWindowClose(): void {
   const window = controlWindow;
   if (!window || window.isDestroyed()) return;
@@ -214,7 +242,7 @@ function syncOverlayToDisplays(): void {
     .catch((error: unknown) => console.error("Failed to sync overlay display settings", error));
 }
 
-app.whenReady().then(async () => {
+async function initializeApplication(): Promise<void> {
   screen.on("display-added", syncOverlayToDisplays);
   screen.on("display-removed", syncOverlayToDisplays);
   screen.on("display-metrics-changed", syncOverlayToDisplays);
@@ -251,6 +279,17 @@ app.whenReady().then(async () => {
     );
   });
   controlWindow = openControlWindow();
+  const trayIcon = await app.getFileIcon(process.execPath, { size: "small" });
+  if (trayIcon.isEmpty()) throw new Error("Windows system tray icon is empty.");
+  applicationTray = createApplicationTray({
+    icon: trayIcon,
+    showControlWindow,
+    quitApplication: () => app.quit()
+  });
+  setTraySmokeHandle({
+    ...applicationTray,
+    quitMenuItemId: TRAY_MENU_ITEM_IDS.quit
+  });
   broadcastOverlaySettings(() => controlWindow, getOverlaySettings());
   void initializeBackend().catch((error: unknown) =>
     console.error("Failed to initialize backend", error)
@@ -277,8 +316,24 @@ app.whenReady().then(async () => {
       controlWindow = openControlWindow();
       broadcastOverlaySettings(() => controlWindow, getOverlaySettings());
     }
+    showControlWindow();
   });
-});
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  quitRequested = true;
+  app.quit();
+} else {
+  app.on("second-instance", showControlWindow);
+  void app
+    .whenReady()
+    .then(initializeApplication)
+    .catch((error: unknown) => {
+      console.error("Failed to initialize ADVX Live", error);
+      app.quit();
+    });
+}
 
 app.on("window-all-closed", () => {
   app.quit();
@@ -299,6 +354,9 @@ app.on("before-quit", (event) => {
     appShutdownComplete = true;
     allowControlWindowClose = true;
     if (controlWindow && !controlWindow.isDestroyed()) controlWindow.destroy();
+    applicationTray?.tray.destroy();
+    applicationTray = null;
+    setTraySmokeHandle(null);
     app.quit();
   });
 });
