@@ -121,8 +121,10 @@ _PROBE_SCHEMA: Final[dict[str, object]] = {
 }
 _PROBE_IMAGE: Final = (
     "data:image/png;base64,"
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB"
-    "AScY42YAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAaklEQVR4nO3PAQ2AMADAsMtB"
+    "xOUgDGGIQcXZnzSZgHVc93N0Iz8AqA8A6gOA+gCgPgCoDwDqA4D64G/AO+fSAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAD2A+wWQB1AHUAdQB1AHUAdQN3xgA90/GEe0tjTVAAAAABJ"
+    "RU5ErkJggg=="
 )
 _BLOCKING_HTTP_STATUSES: Final = frozenset({401, 402, 403, 408, 429})
 
@@ -234,6 +236,26 @@ class OpenAICompatibleProvider:
                 None,
             ),
         )
+        required_text_checks = (
+            discovery_check,
+            *structured_checks,
+            concurrency_check,
+        )
+        if (
+            image_check.status is CapabilityProbeStatus.FAILED
+            and image_check.http_status == 400
+            and all(
+                check.status is CapabilityProbeStatus.PASSED
+                for check in required_text_checks
+            )
+        ):
+            image_check = CapabilityProbeCheck(
+                capability=image_check.capability,
+                status=CapabilityProbeStatus.SKIPPED,
+                model_id=image_check.model_id,
+                error_code="image_input_unsupported",
+                http_status=image_check.http_status,
+            )
         checks = (
             discovery_check,
             *structured_checks,

@@ -265,7 +265,13 @@ class ProductionRuntimeCapabilityProbe:
                 )
             )
         failures = tuple(
-            check for check in checks if check.status is not CapabilityProbeStatus.PASSED
+            check
+            for check in checks
+            if check.status
+            in {
+                CapabilityProbeStatus.FAILED,
+                CapabilityProbeStatus.BLOCKED,
+            }
         )
         if failures:
             self._raise(*failures)
