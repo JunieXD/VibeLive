@@ -44,7 +44,7 @@ export type SettingsViewProps = {
 }
 
 const surfaceClassName =
-  'min-w-0 border border-[var(--border)] bg-[var(--panel)] p-5 text-[var(--text)]'
+  'min-w-0 rounded-[10px] border border-[var(--border)] bg-[var(--panel)] p-5 text-[var(--text)]'
 const labelClassName = 'grid gap-2 text-xs font-semibold text-[var(--text-dim)]'
 const controlClassName =
   'min-h-9 w-full border border-[var(--border-strong)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50'

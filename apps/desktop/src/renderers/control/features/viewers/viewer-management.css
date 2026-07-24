@@ -3,7 +3,9 @@
   height: 100%;
   min-height: 0;
   grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
   border: 1px solid var(--border);
+  border-radius: 10px;
   background: var(--panel);
 }
 

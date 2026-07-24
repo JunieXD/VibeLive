@@ -258,7 +258,7 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
   const log = useAiCallLog({ enabled: active, query })
 
   return (
-    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border border-[var(--border)] bg-[var(--panel)]">
+    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[10px] border border-[var(--border)] bg-[var(--panel)]">
       <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-3 py-2.5">
         <div className="flex h-8 items-center border border-[var(--border)] bg-[var(--bg)] p-0.5">
           <button
