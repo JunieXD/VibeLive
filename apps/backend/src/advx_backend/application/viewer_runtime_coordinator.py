@@ -901,7 +901,17 @@ class ViewerRuntimeCoordinator:
     ) -> ObservationWave | None:
         mode = runtime.settings.viewer_visual_input_mode
         if mode is ViewerVisualInputMode.DIRECT_FRAMES:
-            return wave
+            # Text and final ASR input must remain speakable while capture is
+            # still warming up or a frame cannot be decoded.
+            if wave.frame_bundle is not None:
+                return wave
+            return wave.model_copy(
+                update={
+                    "visual_input_mode": ViewerVisualInputMode.TEXT_ONLY,
+                    "frame_bundle": None,
+                    "shared_visual_summary": None,
+                }
+            )
         if mode is ViewerVisualInputMode.TEXT_ONLY:
             return wave.model_copy(
                 update={

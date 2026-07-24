@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 from advx_backend.contracts.audience import ViewerPresenceEvent
 from advx_backend.contracts.protocol import PROTOCOL_VERSION
@@ -70,6 +70,22 @@ class ClientTextSubmit(RealtimeMessage):
     input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     created_at_ms: int = Field(ge=0)
     text: str = Field(min_length=1, max_length=MAX_TEXT_INPUT_LENGTH, repr=False)
+    target_viewer_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_INGEST_IDENTIFIER_LENGTH,
+    )
+    target_persona_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_INGEST_IDENTIFIER_LENGTH,
+    )
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "ClientTextSubmit":
+        if self.target_viewer_id is not None and self.target_persona_id is not None:
+            raise ValueError("text input can target either a Viewer or a Persona")
+        return self
 
 
 class ClientAudioCommit(RealtimeMessage):

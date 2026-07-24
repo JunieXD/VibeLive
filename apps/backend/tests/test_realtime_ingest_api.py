@@ -142,6 +142,35 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
     assert ingest.inputs[2].body == frame_body
     assert ingest.inputs[2].mime_type == "image/webp"
     assert ingest.inputs[2].change_score == 0.375
+
+
+def test_realtime_forwards_text_target(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
+    ingest = RecordingIngestPort()
+    runtime.ingest_gateway.configure(ingest)
+    app = create_app(runtime=runtime)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.send_json(hello())
+            websocket.receive_json()
+            websocket.send_json(
+                {
+                    "type": "client.text.submit",
+                    "protocol_version": 3,
+                    "session_id": "session-1",
+                    "input_id": "text-1",
+                    "created_at_ms": 100,
+                    "text": "hello",
+                    "target_viewer_id": "viewer-1",
+                }
+            )
+            assert websocket.receive_json()["input_kind"] == "text"
+
+    assert len(ingest.inputs) == 1
+    assert isinstance(ingest.inputs[0], TextInput)
+    assert ingest.inputs[0].target_viewer_id == "viewer-1"
+    assert ingest.inputs[0].target_persona_id is None
 def test_realtime_rejects_unavailable_and_inactive_ingest(tmp_path: Path) -> None:
     runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
     app = create_app(runtime=runtime)

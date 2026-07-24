@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,7 @@ from advx_backend.application.reaction_scheduler import (
 )
 from advx_backend.application.reaction_service import ReactionResult
 from advx_backend.application.viewer_barrage_pipeline import ViewerBarragePipeline
+from advx_backend.application.viewer_runtime_coordinator import ViewerRuntimeCoordinator
 from advx_backend.contracts.viewer_runtime import (
     EvidenceRef,
     EvidenceSource,
@@ -24,6 +26,8 @@ from advx_backend.domain.observation_wave import (
     FrameBundle,
     FrameBundleItem,
     FrameBundleSettings,
+    ObservationTrigger,
+    ObservationWave,
     ViewerVisualInputMode,
 )
 from advx_backend.domain.persona import PersonaTemplate
@@ -252,6 +256,31 @@ def test_smart_frame_timeline_keeps_anchors_and_caps_at_sixty() -> None:
     assert selected == tuple(sorted(selected, key=lambda frame: frame.captured_at_ms))
     assert {0, 5_000, 10_000, 15_000}.issubset(selected_times)
     assert {15_000, 45_000, 75_000, 105_000}.issubset(selected_times)
+
+
+@pytest.mark.asyncio
+async def test_text_input_falls_back_to_text_only_when_no_frame_is_available() -> None:
+    coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
+    wave = ObservationWave(
+        room_id="room",
+        session_id="session",
+        audience_epoch=1,
+        observation_id="observation",
+        created_at_ms=1_000,
+        deadline_at_ms=10_000,
+        triggers=[ObservationTrigger.USER_TEXT],
+    )
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(
+            viewer_visual_input_mode=ViewerVisualInputMode.DIRECT_FRAMES,
+        )
+    )
+
+    prepared = await coordinator._prepare_visual_wave(wave, runtime)
+
+    assert prepared is not None
+    assert prepared.visual_input_mode is ViewerVisualInputMode.TEXT_ONLY
+    assert prepared.frame_bundle is None
 
 
 def _request() -> ViewerGenerationRequest:
