@@ -1,4 +1,4 @@
-import { FileText, RotateCcw, Save, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { FileText, RotateCcw, Save, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { AudienceMode, Persona } from '../../../../shared/audience'
 import { serializePersonaMarkdown } from '../../../../shared/audience'
@@ -19,11 +19,13 @@ type PersonaEditorProps = {
   setDraft: Dispatch<SetStateAction<Persona | null>>
   setEditorTab(tab: EditorTab): void
   setMarkdownDraft(value: string): void
+  onClose(): void
   onDelete(): void
   onReset(): void
   onApplyMarkdown(): void
   onSave(): void
   onParticipationChange(personaId: string, enabled: boolean): void
+  onWeightChange(personaId: string, weight: number): void
 }
 
 function splitList(value: string): string[] {
@@ -45,25 +47,28 @@ export function PersonaEditor({
   setDraft,
   setEditorTab,
   setMarkdownDraft,
+  onClose,
   onDelete,
   onReset,
   onApplyMarkdown,
   onSave,
-  onParticipationChange
+  onParticipationChange,
+  onWeightChange
 }: PersonaEditorProps): React.JSX.Element {
   if (!draft || !selectedBasePersona) {
     return (
-      <main className={cx('aw-editor')} data-audience-persona-editor>
+      <section className={cx('aw-editor')} data-audience-persona-editor>
         <div className={cx('aw-empty')}>选择一个人格开始编辑</div>
-      </main>
+      </section>
     )
   }
 
   const update = (change: Partial<Persona>): void => setDraft({ ...draft, ...change })
   const participating = activeMode.personaIds.includes(draft.id) && draft.enabled
+  const weight = activeMode.personaWeights[draft.id] ?? 1
 
   return (
-    <main
+    <section
       className={cx('aw-editor', Boolean(error) && 'has-validation')}
       data-audience-persona-editor
     >
@@ -118,6 +123,9 @@ export function PersonaEditor({
             <Save size={15} />
             保存覆盖
           </button>
+          <IconButton title="关闭人格编辑" onClick={onClose}>
+            <X size={16} />
+          </IconButton>
         </div>
       </div>
       {error && <div className={cx('aw-validation')}>{error}</div>}
@@ -214,56 +222,62 @@ export function PersonaEditor({
               />
             </label>
           </div>
-          <div className={cx('aw-bias-grid')}>
-            {(
-              [
-                ['silenceBias', '静默'],
-                ['burstBias', '爆发'],
-                ['repetitionBias', '复读']
-              ] as const
-            ).map(([field, label]) => (
-              <label key={field}>
-                <span>
-                  {label} <b>{draft[field]}</b>
-                </span>
+          <details className={cx('aw-form-advanced')}>
+            <summary>
+              <SlidersHorizontal size={15} />
+              高级参数
+            </summary>
+            <div className={cx('aw-bias-grid')}>
+              {(
+                [
+                  ['silenceBias', '静默'],
+                  ['burstBias', '爆发'],
+                  ['repetitionBias', '复读']
+                ] as const
+              ).map(([field, label]) => (
+                <label key={field}>
+                  <span>
+                    {label} <b>{draft[field]}</b>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={4}
+                    step={1}
+                    value={draft[field]}
+                    disabled={structureLocked}
+                    onChange={(event) =>
+                      update({ [field]: Number(event.target.value) as 0 | 1 | 2 | 3 | 4 })
+                    }
+                  />
+                </label>
+              ))}
+              <label>
+                <span>冷却（毫秒）</span>
                 <input
-                  type="range"
+                  type="number"
                   min={0}
-                  max={4}
-                  step={1}
-                  value={draft[field]}
+                  step={500}
+                  value={draft.cooldownMs}
                   disabled={structureLocked}
-                  onChange={(event) =>
-                    update({ [field]: Number(event.target.value) as 0 | 1 | 2 | 3 | 4 })
-                  }
+                  onChange={(event) => update({ cooldownMs: Number(event.target.value) })}
                 />
               </label>
-            ))}
-            <label>
-              <span>冷却（毫秒）</span>
-              <input
-                type="number"
-                min={0}
-                step={500}
-                value={draft.cooldownMs}
-                disabled={structureLocked}
-                onChange={(event) => update({ cooldownMs: Number(event.target.value) })}
-              />
-            </label>
-            <label>
-              <span>单次条数</span>
-              <select
-                value={draft.maxCommentsPerDecision}
-                disabled={structureLocked}
-                onChange={(event) =>
-                  update({ maxCommentsPerDecision: Number(event.target.value) as 1 | 2 })
-                }
-              >
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-              </select>
-            </label>
-          </div>
+              <label>
+                <span>单次条数</span>
+                <select
+                  value={draft.maxCommentsPerDecision}
+                  disabled={structureLocked}
+                  onChange={(event) =>
+                    update({ maxCommentsPerDecision: Number(event.target.value) as 1 | 2 })
+                  }
+                >
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                </select>
+              </label>
+            </div>
+          </details>
           <div className={cx('aw-form-grid', 'two')}>
             <label>
               <span>Content flags（逗号或换行）</span>
@@ -279,10 +293,28 @@ export function PersonaEditor({
                 <input
                   type="checkbox"
                   checked={participating}
+                  disabled={structureLocked}
+                  aria-label={`${participating ? '停用' : '启用'}${draft.name}`}
                   onChange={(event) => onParticipationChange(draft.id, event.target.checked)}
                 />
                 <span aria-hidden="true" />
                 <em>{participating ? '参与' : '停用'}</em>
+              </label>
+              <label className={cx('aw-editor-weight')}>
+                <span>
+                  权重 <b>{weight}</b>
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={5}
+                  step={1}
+                  value={weight}
+                  disabled={structureLocked || !participating}
+                  aria-label={`${draft.name} 权重`}
+                  aria-valuetext={`${weight}`}
+                  onChange={(event) => onWeightChange(draft.id, Number(event.target.value))}
+                />
               </label>
             </div>
           </div>
@@ -297,6 +329,6 @@ export function PersonaEditor({
           </label>
         </div>
       )}
-    </main>
+    </section>
   )
 }

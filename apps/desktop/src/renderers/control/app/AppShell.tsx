@@ -44,7 +44,7 @@ export type AppShellProps = {
   colorTheme: ColorTheme
   onColorThemeToggle: () => void
   sessionStatus: SessionStatus
-  audienceCount: number
+  audienceCount: number | null
   modeName: string
   elapsedSeconds: number
   barrageTotal: number
@@ -130,6 +130,9 @@ export function AppShell({
   const themeSwitchLabel =
     colorTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'
   const ThemeSwitchIcon = colorTheme === 'dark' ? Sun : Moon
+  const audienceCountLabel = audienceCount ?? '--'
+  const fillsWorkspace =
+    activeView === 'live' || activeView === 'viewers' || activeView === 'ai-calls'
 
   return (
     <div className="grid h-screen w-screen grid-cols-[224px_minmax(0,1fr)] overflow-hidden bg-[var(--bg)] pt-8 max-[1240px]:grid-cols-[200px_minmax(0,1fr)]">
@@ -178,7 +181,7 @@ export function AppShell({
                         : 'bg-[var(--panel-raise)] text-[var(--text-dim)]'
                     ].join(' ')}
                   >
-                    {audienceCount}
+                    {audienceCountLabel}
                   </span>
                 )}
               </button>
@@ -206,7 +209,9 @@ export function AppShell({
           </div>
           <div className="grid min-h-6.5 grid-cols-[1fr_auto] items-center gap-2 text-xs text-[var(--text-dim)]">
             <span>在线观众</span>
-            <strong className="text-[11px] text-[var(--text)]">{audienceCount} 人</strong>
+            <strong className="text-[11px] text-[var(--text)]">
+              {audienceCount === null ? '--' : `${audienceCount} 人`}
+            </strong>
           </div>
         </section>
       </aside>
@@ -249,10 +254,10 @@ export function AppShell({
               </span>
               <span
                 className="inline-flex h-7.5 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--panel)] px-3 text-xs font-bold tabular-nums text-[var(--text-dim)]"
-                title="在线观众"
+                title={audienceCount === null ? '在线观众尚未同步' : '在线观众'}
               >
                 <Users size={14} className="text-[var(--text-faint)]" aria-hidden="true" />
-                {audienceCount}
+                {audienceCountLabel}
               </span>
             </div>
             <span className="mx-0.5 h-5 w-px bg-[var(--border)]" aria-hidden="true" />
@@ -271,9 +276,7 @@ export function AppShell({
         <main
           className={[
             'min-h-0 min-w-0 px-4.5 py-4',
-            activeView === 'live' || activeView === 'ai-calls'
-              ? 'flex flex-col overflow-hidden'
-              : 'overflow-auto'
+            fillsWorkspace ? 'flex flex-col overflow-hidden' : 'overflow-auto'
           ].join(' ')}
           data-control-workspace
         >
@@ -304,15 +307,7 @@ export function AppShell({
               )}
             </section>
           )}
-          <div
-            className={
-              activeView === 'live' || activeView === 'ai-calls'
-                ? 'min-h-0 flex-1'
-                : undefined
-            }
-          >
-            {children}
-          </div>
+          <div className={fillsWorkspace ? 'min-h-0 flex-1' : undefined}>{children}</div>
         </main>
 
         <footer className="flex h-7.5 items-center gap-4.5 border-t border-[var(--border)] bg-[var(--chrome)] px-4 text-[11px]">

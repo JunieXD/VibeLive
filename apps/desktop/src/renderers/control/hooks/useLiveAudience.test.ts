@@ -3,7 +3,10 @@ import type {
   BackendAudienceSnapshot,
   BackendViewerSnapshot
 } from '../../../shared/contracts'
-import { mergeViewerSnapshot } from './useLiveAudience'
+import {
+  mergeViewerSnapshot,
+  resolveLiveAudienceRequest
+} from './useLiveAudience'
 
 const viewer: BackendViewerSnapshot = {
   viewer_instance_id: 'viewer-1',
@@ -91,5 +94,31 @@ describe('mergeViewerSnapshot', () => {
     expect(merged.population_revision).toBe(4)
     expect(merged.active_count).toBe(0)
     expect(merged.viewers[0].presence_state).toBe('kicked')
+  })
+})
+
+describe('resolveLiveAudienceRequest', () => {
+  it('turns a rejected viewer request into a displayable error result', async () => {
+    const result = await resolveLiveAudienceRequest(
+      () => Promise.reject(new Error('观众已被其他管理员移除')),
+      '操作请求未完成。'
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      error: '观众已被其他管理员移除'
+    })
+  })
+
+  it('uses the fallback message for non-Error rejections', async () => {
+    const result = await resolveLiveAudienceRequest(
+      () => Promise.reject('offline'),
+      '无法读取直播观众数据。'
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      error: '无法读取直播观众数据。'
+    })
   })
 })

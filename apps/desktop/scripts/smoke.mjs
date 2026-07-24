@@ -322,6 +322,8 @@ try {
     path: resolve(artifactDirectory, 'audience-workspace-1120.png')
   })
   await page.getByRole('button', { name: '人格阵容', exact: true }).click()
+  await page.locator('[data-audience-persona-open]').first().click()
+  await page.getByRole('dialog', { name: /编辑/ }).waitFor()
   const personaLayout = await page.evaluate(() => {
     const metrics = (selector) => {
       const element = document.querySelector(selector)
@@ -1101,6 +1103,8 @@ try {
 
   await page.getByRole('button', { name: /AI 观众/ }).click()
   await page.getByRole('heading', { name: 'AI 观众', exact: true }).waitFor()
+  await page.locator('[data-audience-persona-open]').first().click()
+  await page.getByRole('dialog', { name: /编辑/ }).waitFor()
   const liveEditPolicy = {
     modeEditable: await page.getByLabel('观众模式').isEnabled(),
     duplicateEnabled: await page.getByRole('button', { name: '复制为自定义模式' }).isEnabled(),
@@ -1281,6 +1285,7 @@ try {
 
   await page.getByRole('button', { name: /AI 观众/ }).click()
   await page.getByLabel('观众模式').selectOption('room-6657')
+  await page.getByRole('button', { name: '模式参数', exact: true }).click()
   await page.locator('[data-audience-range] input').first().fill('7')
 
   console.log(

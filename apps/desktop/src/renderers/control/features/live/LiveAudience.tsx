@@ -1,13 +1,18 @@
 import { useMemo, useState } from 'react'
-import { ArrowRight, UserMinus, Volume2, VolumeX } from 'lucide-react'
+import { ArrowRight, RefreshCw, UserMinus, Volume2, VolumeX, X } from 'lucide-react'
 import type { LiveAudienceProps } from './liveTypes'
 
 type Filter = 'active' | 'muted' | 'all'
 
 export function LiveAudience({
   audience,
+  audienceLoading,
+  audienceError,
+  operationError,
   pendingViewerId,
   onViewAll,
+  onRetryAudience,
+  onDismissOperationError,
   onMute,
   onUnmute,
   onKick
@@ -30,13 +35,21 @@ export function LiveAudience({
         viewer.presence_state !== 'ended'
     )
   }, [audience, filter, now])
+  const notice = audienceError ?? operationError
+  const emptyMessage = audience
+    ? '暂无观众'
+    : audienceLoading
+      ? '正在同步直播观众...'
+      : audienceError
+        ? '观众数据暂不可用'
+        : '等待观众数据'
 
   return (
     <section className="viewer-panel">
       <div className="panel-heading compact">
         <span className="panel-title">当前观众</span>
         <span className="viewer-panel-heading-actions">
-          <span className="chat-count">{audience?.active_count ?? 0}</span>
+          <span className="chat-count">{audience?.active_count ?? '--'}</span>
           {onViewAll && (
             <button
               type="button"
@@ -75,10 +88,37 @@ export function LiveAudience({
         </select>
       </div>
       <div className="viewer-list">
+        {notice && (
+          <div className="viewer-inline-notice" role="alert">
+            <span>
+              {audienceError ? `同步失败：${audienceError}` : operationError}
+            </span>
+            {audienceError ? (
+              <button
+                type="button"
+                disabled={audienceLoading}
+                onClick={() => void onRetryAudience()}
+                title="重新同步直播观众"
+                aria-label="重新同步直播观众"
+              >
+                <RefreshCw size={13} aria-hidden="true" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onDismissOperationError}
+                title="关闭错误提示"
+                aria-label="关闭错误提示"
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
         {viewers.map((viewer) => {
           const muted = (viewer.muted_until_ms ?? 0) > now
           const active = viewer.presence_state === 'active'
-          const pending = pendingViewerId === viewer.viewer_instance_id
+          const pending = pendingViewerId !== null
           return (
             <div className="viewer-row" key={viewer.viewer_instance_id}>
               <span className="viewer-avatar">{viewer.display_name.charAt(0)}</span>
@@ -96,6 +136,7 @@ export function LiveAudience({
                     onClick={() => void (muted
                       ? onUnmute(viewer.viewer_instance_id)
                       : onMute(viewer.viewer_instance_id, muteDurationMs))}
+                    aria-label={`${muted ? '解除禁言' : '限时禁言'}：${viewer.display_name}`}
                     title={muted ? '解除禁言' : '限时禁言'}
                     type="button"
                   >
@@ -113,6 +154,7 @@ export function LiveAudience({
                         void onKick(viewer.viewer_instance_id)
                       }
                     }}
+                    aria-label={`踢出本场直播：${viewer.display_name}`}
                     title="踢出本场直播"
                     type="button"
                   >
@@ -123,7 +165,7 @@ export function LiveAudience({
             </div>
           )
         })}
-        {viewers.length === 0 && <p className="viewer-empty">暂无观众</p>}
+        {viewers.length === 0 && <p className="viewer-empty">{emptyMessage}</p>}
       </div>
     </section>
   )

@@ -94,7 +94,8 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
   })
   const liveAudience = useLiveAudience(
     backend.status?.session.sessionId ?? null,
-    media.audienceSessionActive
+    media.audienceSessionActive,
+    backend.connection === 'connected'
   )
   const activeAudienceMode =
     audience.workspace.modeState.modes.find(
@@ -205,7 +206,11 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
         colorTheme={colorTheme}
         onColorThemeToggle={toggleColorTheme}
         sessionStatus={session.status}
-        audienceCount={liveAudience.audience?.active_count ?? 0}
+        audienceCount={
+          media.audienceSessionActive
+            ? liveAudience.audience?.active_count ?? null
+            : 0
+        }
         modeName={activeAudienceMode?.name ?? '未选择'}
         elapsedSeconds={elapsedSeconds}
         barrageTotal={barrage.barrageTotal}
@@ -284,8 +289,13 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             }}
             audience={{
               audience: liveAudience.audience,
+              audienceLoading: liveAudience.audienceLoading,
+              audienceError: liveAudience.audienceError,
+              operationError: liveAudience.operationError,
               pendingViewerId: liveAudience.pendingViewerId,
               onViewAll: () => setActiveView('viewers'),
+              onRetryAudience: liveAudience.refresh,
+              onDismissOperationError: liveAudience.clearOperationError,
               onMute: liveAudience.mute,
               onUnmute: liveAudience.unmute,
               onKick: liveAudience.kick
@@ -333,7 +343,12 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
           <ViewerManagementView
             sessionStatus={session.status}
             audience={liveAudience.audience}
+            audienceLoading={liveAudience.audienceLoading}
+            audienceError={liveAudience.audienceError}
+            operationError={liveAudience.operationError}
             pendingViewerId={liveAudience.pendingViewerId}
+            onRetryAudience={liveAudience.refresh}
+            onDismissOperationError={liveAudience.clearOperationError}
             onMute={liveAudience.mute}
             onUnmute={liveAudience.unmute}
             onKick={liveAudience.kick}

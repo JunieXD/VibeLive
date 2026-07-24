@@ -1,6 +1,7 @@
 import { Copy, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react'
 import type { AudienceMode, AudienceWorkspaceState } from '../../../../shared/audience'
 import { IconButton } from './IconButton'
+import { Popover } from './Popover'
 import { cx } from './styles'
 
 type ModeToolbarProps = {
@@ -83,142 +84,177 @@ export function ModeToolbar({
         </div>
       </div>
       <div className={cx('aw-mode-controls')}>
-        <label>
-          <span>目标在线</span>
-          <input
-            type="number"
-            min={1}
-            max={32}
-            value={activeMode.targetConcurrentViewers}
-            onChange={(event) => {
-              const targetConcurrentViewers = Math.max(1, clampActivityValue(event.target.value))
-              onPatchMode({
-                targetConcurrentViewers,
-                normalResponseRange: [
-                  Math.min(activeMode.normalResponseRange[0], targetConcurrentViewers),
-                  Math.min(activeMode.normalResponseRange[1], targetConcurrentViewers)
-                ],
-                highlightResponseRange: [
-                  Math.min(activeMode.highlightResponseRange[0], targetConcurrentViewers),
-                  Math.min(activeMode.highlightResponseRange[1], targetConcurrentViewers)
-                ]
-              })
-            }}
-          />
-        </label>
-        <label className={cx('aw-range-control')} data-audience-range>
-          <span>普通响应</span>
-          <input
-            type="number"
-            min={0}
-            max={activeMode.targetConcurrentViewers}
-            value={activeMode.normalResponseRange[0]}
-            onChange={(event) =>
-              onPatchMode({
-                normalResponseRange: [
-                  Math.min(
-                    clampActivityValue(event.target.value, activeMode.targetConcurrentViewers),
-                    activeMode.normalResponseRange[1]
-                  ),
-                  activeMode.normalResponseRange[1]
-                ]
-              })
-            }
-          />
-          <b>至</b>
-          <input
-            type="number"
-            min={0}
-            max={activeMode.targetConcurrentViewers}
-            value={activeMode.normalResponseRange[1]}
-            onChange={(event) =>
-              onPatchMode({
-                normalResponseRange: [
-                  activeMode.normalResponseRange[0],
-                  Math.max(
-                    clampActivityValue(event.target.value, activeMode.targetConcurrentViewers),
-                    activeMode.normalResponseRange[0]
+        <span className={cx('aw-mode-summary')} title="目标人数 · 普通响应 · 高光响应">
+          目标 {activeMode.targetConcurrentViewers} · 普通 {activeMode.normalResponseRange[0]}–
+          {activeMode.normalResponseRange[1]} · 高光 {activeMode.highlightResponseRange[0]}–
+          {activeMode.highlightResponseRange[1]}
+        </span>
+        <Popover
+          title="模式参数"
+          trigger={
+            <>
+              <SlidersHorizontal size={15} />
+              <span>参数</span>
+            </>
+          }
+        >
+          <div className={cx('aw-popover-section')}>
+            <h4>响应规模</h4>
+            <label>
+              <span>目标在线</span>
+              <input
+                type="number"
+                min={1}
+                max={32}
+                value={activeMode.targetConcurrentViewers}
+                onChange={(event) => {
+                  const targetConcurrentViewers = Math.max(
+                    1,
+                    clampActivityValue(event.target.value)
                   )
-                ]
-              })
-            }
-          />
-        </label>
-        <label className={cx('aw-range-control')} data-audience-range>
-          <span>高光响应</span>
-          <input
-            type="number"
-            min={0}
-            max={activeMode.targetConcurrentViewers}
-            value={activeMode.highlightResponseRange[0]}
-            onChange={(event) =>
-              onPatchMode({
-                highlightResponseRange: [
-                  Math.min(
-                    clampActivityValue(event.target.value, activeMode.targetConcurrentViewers),
-                    activeMode.highlightResponseRange[1]
-                  ),
-                  activeMode.highlightResponseRange[1]
-                ]
-              })
-            }
-          />
-          <b>至</b>
-          <input
-            type="number"
-            min={0}
-            max={activeMode.targetConcurrentViewers}
-            value={activeMode.highlightResponseRange[1]}
-            onChange={(event) =>
-              onPatchMode({
-                highlightResponseRange: [
-                  activeMode.highlightResponseRange[0],
-                  Math.max(
-                    clampActivityValue(event.target.value, activeMode.targetConcurrentViewers),
-                    activeMode.highlightResponseRange[0]
-                  )
-                ]
-              })
-            }
-          />
-        </label>
-        <label>
-          <span>冷场策略</span>
-          <select
-            value={activeMode.ambience}
-            onChange={(event) =>
-              onPatchMode({ ambience: event.target.value as AudienceMode['ambience'] })
-            }
-          >
-            <option value="natural">自然静默</option>
-            <option value="continuous">持续暖场</option>
-          </select>
-        </label>
-        <label>
-          <span>视觉</span>
-          <select
-            value={activeMode.visualSettings.viewerVisualInputMode}
-            onChange={(event) =>
-              onPatchMode({
-                visualSettings: {
-                  ...activeMode.visualSettings,
-                  viewerVisualInputMode: event.target.value as
-                    AudienceMode['visualSettings']['viewerVisualInputMode']
+                  onPatchMode({
+                    targetConcurrentViewers,
+                    normalResponseRange: [
+                      Math.min(activeMode.normalResponseRange[0], targetConcurrentViewers),
+                      Math.min(activeMode.normalResponseRange[1], targetConcurrentViewers)
+                    ],
+                    highlightResponseRange: [
+                      Math.min(activeMode.highlightResponseRange[0], targetConcurrentViewers),
+                      Math.min(activeMode.highlightResponseRange[1], targetConcurrentViewers)
+                    ]
+                  })
+                }}
+              />
+            </label>
+            <label data-audience-range>
+              <span>普通响应</span>
+              <div className={cx('aw-range-pair')}>
+                <input
+                  type="number"
+                  min={0}
+                  max={activeMode.targetConcurrentViewers}
+                  value={activeMode.normalResponseRange[0]}
+                  onChange={(event) =>
+                    onPatchMode({
+                      normalResponseRange: [
+                        Math.min(
+                          clampActivityValue(
+                            event.target.value,
+                            activeMode.targetConcurrentViewers
+                          ),
+                          activeMode.normalResponseRange[1]
+                        ),
+                        activeMode.normalResponseRange[1]
+                      ]
+                    })
+                  }
+                />
+                <b>至</b>
+                <input
+                  type="number"
+                  min={0}
+                  max={activeMode.targetConcurrentViewers}
+                  value={activeMode.normalResponseRange[1]}
+                  onChange={(event) =>
+                    onPatchMode({
+                      normalResponseRange: [
+                        activeMode.normalResponseRange[0],
+                        Math.max(
+                          clampActivityValue(
+                            event.target.value,
+                            activeMode.targetConcurrentViewers
+                          ),
+                          activeMode.normalResponseRange[0]
+                        )
+                      ]
+                    })
+                  }
+                />
+              </div>
+            </label>
+            <label data-audience-range>
+              <span>高光响应</span>
+              <div className={cx('aw-range-pair')}>
+                <input
+                  type="number"
+                  min={0}
+                  max={activeMode.targetConcurrentViewers}
+                  value={activeMode.highlightResponseRange[0]}
+                  onChange={(event) =>
+                    onPatchMode({
+                      highlightResponseRange: [
+                        Math.min(
+                          clampActivityValue(
+                            event.target.value,
+                            activeMode.targetConcurrentViewers
+                          ),
+                          activeMode.highlightResponseRange[1]
+                        ),
+                        activeMode.highlightResponseRange[1]
+                      ]
+                    })
+                  }
+                />
+                <b>至</b>
+                <input
+                  type="number"
+                  min={0}
+                  max={activeMode.targetConcurrentViewers}
+                  value={activeMode.highlightResponseRange[1]}
+                  onChange={(event) =>
+                    onPatchMode({
+                      highlightResponseRange: [
+                        activeMode.highlightResponseRange[0],
+                        Math.max(
+                          clampActivityValue(
+                            event.target.value,
+                            activeMode.targetConcurrentViewers
+                          ),
+                          activeMode.highlightResponseRange[0]
+                        )
+                      ]
+                    })
+                  }
+                />
+              </div>
+            </label>
+          </div>
+          <div className={cx('aw-popover-section')}>
+            <h4>行为策略</h4>
+            <label>
+              <span>冷场策略</span>
+              <select
+                value={activeMode.ambience}
+                onChange={(event) =>
+                  onPatchMode({ ambience: event.target.value as AudienceMode['ambience'] })
                 }
-              })
-            }
-          >
-            <option value="text_only">纯文本</option>
-            <option value="direct_frames">独立帧</option>
-            <option value="shared_summary">共享摘要</option>
-          </select>
-        </label>
-        <details className={cx('aw-frame-policy')}>
-          <summary title="帧束策略">
-            <SlidersHorizontal size={15} />
-            <span>帧束</span>
-          </summary>
-          <div className={cx('aw-frame-policy-menu')}>
+              >
+                <option value="natural">自然静默</option>
+                <option value="continuous">持续暖场</option>
+              </select>
+            </label>
+            <label>
+              <span>视觉输入</span>
+              <select
+                value={activeMode.visualSettings.viewerVisualInputMode}
+                onChange={(event) =>
+                  onPatchMode({
+                    visualSettings: {
+                      ...activeMode.visualSettings,
+                      viewerVisualInputMode: event.target.value as
+                        AudienceMode['visualSettings']['viewerVisualInputMode']
+                    }
+                  })
+                }
+              >
+                <option value="text_only">纯文本</option>
+                <option value="direct_frames">独立帧</option>
+                <option value="shared_summary">共享摘要</option>
+              </select>
+            </label>
+          </div>
+          <div className={cx('aw-popover-section')}>
+            <h4>帧束策略</h4>
             <label>
               <span>选择策略</span>
               <select
@@ -309,7 +345,7 @@ export function ModeToolbar({
               />
             </label>
           </div>
-        </details>
+        </Popover>
         <div className={cx('aw-toolbar-actions')}>
           <IconButton
             title="复制为自定义模式"

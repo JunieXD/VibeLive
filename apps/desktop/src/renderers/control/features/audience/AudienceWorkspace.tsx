@@ -119,6 +119,7 @@ export function AudienceWorkspace({
 }: AudienceWorkspaceProps): React.JSX.Element {
   const [tab, setTab] = useState<WorkspaceTab>('personas')
   const [editorTab, setEditorTab] = useState<EditorTab>('form')
+  const [personaEditorOpen, setPersonaEditorOpen] = useState(false)
   const [personaSearch, setPersonaSearch] = useState('')
   const [selectedPersonaId, setSelectedPersonaId] = useState(
     workspace.personas[0]?.id ?? ''
@@ -154,6 +155,14 @@ export function AudienceWorkspace({
     setPersonaError('')
   }, [activeMode?.id, selectedBasePersona])
 
+  useEffect(() => {
+    if (!personaEditorOpen) return
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setPersonaEditorOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [personaEditorOpen])
 
   if (!activeMode) {
     return (
@@ -218,6 +227,7 @@ export function AudienceWorkspace({
   const choosePersona = (personaId: string): void => {
     setSelectedPersonaId(personaId)
     setEditorTab('form')
+    setPersonaEditorOpen(true)
   }
 
   const persistPersonaOverride = (base: Persona, next: Persona): void => {
@@ -297,6 +307,7 @@ export function AudienceWorkspace({
       personas: [...workspace.personas, persona]
     })
     setSelectedPersonaId(id)
+    setPersonaEditorOpen(true)
   }
 
   const deleteCustomPersona = (): void => {
@@ -326,6 +337,7 @@ export function AudienceWorkspace({
       modeState: { ...workspace.modeState, modes }
     })
     setSelectedPersonaId(workspace.personas.find((persona) => persona.id !== personaId)?.id ?? '')
+    setPersonaEditorOpen(false)
   }
 
   const duplicateMode = (): void => {
@@ -439,7 +451,10 @@ export function AudienceWorkspace({
         <button
           type="button"
           className={cx(tab === 'memes' && 'active')}
-          onClick={() => setTab('memes')}
+          onClick={() => {
+            setPersonaEditorOpen(false)
+            setTab('memes')
+          }}
         >
           <Library size={15} />
           成长梗库
@@ -447,7 +462,10 @@ export function AudienceWorkspace({
         <button
           type="button"
           className={cx(tab === 'memories' && 'active')}
-          onClick={() => setTab('memories')}
+          onClick={() => {
+            setPersonaEditorOpen(false)
+            setTab('memories')
+          }}
         >
           <Brain size={15} />
           长期记忆
@@ -460,31 +478,12 @@ export function AudienceWorkspace({
             personas={personaRows}
             allPersonas={workspace.personas}
             activeMode={activeMode}
-            selectedPersonaId={selectedPersonaId}
+            selectedPersonaId={personaEditorOpen ? selectedPersonaId : ''}
             search={personaSearch}
             structureLocked={structureLocked}
             onSearchChange={setPersonaSearch}
             onAdd={addCustomPersona}
             onChoose={choosePersona}
-            onParticipationChange={setPersonaParticipation}
-            onWeightChange={setPersonaWeight}
-          />
-          <PersonaEditor
-            activeMode={activeMode}
-            draft={personaDraft}
-            selectedBasePersona={selectedBasePersona}
-            error={personaError}
-            editorTab={editorTab}
-            markdownDraft={markdownDraft}
-            structureLocked={structureLocked}
-            builtInPersonaIds={BUILT_IN_PERSONA_IDS}
-            setDraft={setPersonaDraft}
-            setEditorTab={setEditorTab}
-            setMarkdownDraft={setMarkdownDraft}
-            onDelete={deleteCustomPersona}
-            onReset={resetPersona}
-            onApplyMarkdown={applyMarkdown}
-            onSave={savePersona}
             onParticipationChange={setPersonaParticipation}
           />
         </div>
@@ -492,6 +491,44 @@ export function AudienceWorkspace({
         <BackendMemePanel brain={sharedBrain} available={sharedBrainAvailable} />
       ) : (
         <RoomMemoryPanel brain={sharedBrain} available={sharedBrainAvailable} />
+      )}
+
+      {tab === 'personas' && personaEditorOpen && (
+        <div className={cx('aw-floating-layer')} data-audience-editor-layer>
+          <button
+            type="button"
+            className={cx('aw-floating-backdrop')}
+            aria-label="关闭人格编辑"
+            onClick={() => setPersonaEditorOpen(false)}
+          />
+          <div
+            className={cx('aw-floating-panel')}
+            role="dialog"
+            aria-modal="true"
+            aria-label={personaDraft ? `编辑 ${personaDraft.name}` : '编辑人格'}
+          >
+            <PersonaEditor
+              activeMode={activeMode}
+              draft={personaDraft}
+              selectedBasePersona={selectedBasePersona}
+              error={personaError}
+              editorTab={editorTab}
+              markdownDraft={markdownDraft}
+              structureLocked={structureLocked}
+              builtInPersonaIds={BUILT_IN_PERSONA_IDS}
+              setDraft={setPersonaDraft}
+              setEditorTab={setEditorTab}
+              setMarkdownDraft={setMarkdownDraft}
+              onClose={() => setPersonaEditorOpen(false)}
+              onDelete={deleteCustomPersona}
+              onReset={resetPersona}
+              onApplyMarkdown={applyMarkdown}
+              onSave={savePersona}
+              onParticipationChange={setPersonaParticipation}
+              onWeightChange={setPersonaWeight}
+            />
+          </div>
+        </div>
       )}
     </section>
   )

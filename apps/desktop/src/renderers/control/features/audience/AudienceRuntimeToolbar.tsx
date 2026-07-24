@@ -1,9 +1,10 @@
-import { Bug, Check, RefreshCcw, RefreshCw, RotateCcw, TestTube2 } from 'lucide-react'
+import { Bug, Check, MoreHorizontal, RefreshCcw, RefreshCw, RotateCcw, TestTube2 } from 'lucide-react'
 import type {
   DebugTraceSummary,
   ProviderProbeResult,
   RuntimeQuerySnapshot
 } from '../../../../shared/backend-client'
+import { Popover } from './Popover'
 import { cx } from './styles'
 
 export type AudienceRuntimeToolbarProps = {
@@ -56,6 +57,13 @@ export function AudienceRuntimeToolbar({
   onLoadTraces
 }: AudienceRuntimeToolbarProps): React.JSX.Element {
   const latestTrace = traces[0]
+  const probeLabel = probing
+    ? 'Probe 检测中'
+    : probe
+      ? `Probe ${probe.status}`
+      : probeError
+        ? 'Probe 失败'
+        : 'Probe'
   return (
     <div className={cx('aw-runtime-toolbar')} data-audience-runtime>
       <div className={cx('aw-runtime-state')}>
@@ -91,27 +99,44 @@ export function AudienceRuntimeToolbar({
           {applying ? <RefreshCw className={cx('is-spinning')} size={14} /> : <Check size={14} />}
           {applying ? '应用中' : '应用到当前会话'}
         </button>
-        <button
-          type="button"
-          disabled={!runtime || runtime.config_revision <= 1 || rollingBack}
-          onClick={onRollback}
-        >
-          <RotateCcw size={14} />
-          回滚
-        </button>
-        <button
-          type="button"
-          disabled={probing || !canProbe}
-          title={canProbe ? '检测当前会话的 Provider 能力' : '开始或恢复直播后可检测 Provider'}
-          onClick={onProbe}
-        >
-          <TestTube2 size={14} />
-          {probing ? 'Probe 检测中' : probe ? `Probe ${probe.status}` : probeError ? 'Probe 失败' : 'Probe'}
-        </button>
-        <button type="button" disabled={!runtime || loadingTraces} onClick={onLoadTraces}>
-          <Bug size={14} />
-          {latestTrace ? `Trace ${latestTrace.trace_id.slice(0, 8)}` : 'Trace'}
-        </button>
+        <Popover title="更多操作" iconTrigger trigger={<MoreHorizontal size={15} />} panelWidth={220}>
+          <div className={cx('aw-menu')}>
+            <button
+              type="button"
+              className={cx('aw-menu-item')}
+              data-popover-close
+              disabled={!runtime || runtime.config_revision <= 1 || rollingBack}
+              onClick={onRollback}
+            >
+              <RotateCcw size={14} />
+              回滚
+              <span>{runtime && runtime.config_revision > 1 ? `r${runtime.config_revision - 1}` : ''}</span>
+            </button>
+            <button
+              type="button"
+              className={cx('aw-menu-item')}
+              data-popover-close
+              disabled={probing || !canProbe}
+              title={canProbe ? '检测当前会话的 Provider 能力' : '开始或恢复直播后可检测 Provider'}
+              onClick={onProbe}
+            >
+              <TestTube2 size={14} />
+              Provider 检测
+              <span>{probeLabel}</span>
+            </button>
+            <button
+              type="button"
+              className={cx('aw-menu-item')}
+              data-popover-close
+              disabled={!runtime || loadingTraces}
+              onClick={onLoadTraces}
+            >
+              <Bug size={14} />
+              调试 Trace
+              <span>{latestTrace ? latestTrace.trace_id.slice(0, 8) : ''}</span>
+            </button>
+          </div>
+        </Popover>
       </div>
     </div>
   )

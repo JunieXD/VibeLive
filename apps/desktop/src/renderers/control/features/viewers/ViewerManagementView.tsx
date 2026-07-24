@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Clock3,
+  LoaderCircle,
   LogIn,
+  RefreshCw,
   Search,
   ShieldAlert,
   UserMinus,
   Users,
   Volume2,
-  VolumeX
+  VolumeX,
+  X
 } from 'lucide-react'
 import type { BackendViewerSnapshot } from '../../../../shared/contracts'
 import type { SessionStatus } from '../../../../shared/session'
@@ -59,7 +62,12 @@ function viewerStateLabel(viewer: BackendViewerSnapshot, now: number): string {
 export function ViewerManagementView({
   sessionStatus,
   audience,
+  audienceLoading,
+  audienceError,
+  operationError,
   pendingViewerId,
+  onRetryAudience,
+  onDismissOperationError,
   onMute,
   onUnmute,
   onKick
@@ -79,6 +87,9 @@ export function ViewerManagementView({
     viewers.find((viewer) => viewer.viewer_instance_id === selectedViewerId) ?? null
   const muteDurationMs =
     muteDuration === 'custom' ? customMuteMinutes * 60_000 : Number(muteDuration)
+  const noticeMessage = audienceError
+    ? `观众数据更新失败：${audienceError}`
+    : operationError
 
   useEffect(() => {
     if (!selectedViewerId || !viewers.some(
@@ -100,12 +111,58 @@ export function ViewerManagementView({
     await onKick(viewer.viewer_instance_id)
   }
 
-  if (sessionStatus === 'idle' || !audience) {
+  if (sessionStatus === 'idle') {
     return (
       <section className="viewer-management viewer-management-empty">
         <span className="viewer-management-empty-icon"><Users size={28} /></span>
         <h2>本场暂无观众</h2>
         <p>开播后将生成本场新的 AI 观众，直播结束后观众列表会自动清空。</p>
+      </section>
+    )
+  }
+
+  if (!audience) {
+    const hasError = audienceError !== null
+    return (
+      <section
+        className="viewer-management viewer-management-empty"
+        role={hasError ? 'alert' : 'status'}
+        aria-busy={audienceLoading}
+      >
+        <span
+          className={[
+            'viewer-management-empty-icon',
+            audienceLoading ? 'syncing' : ''
+          ].join(' ')}
+        >
+          {audienceLoading
+            ? <LoaderCircle size={28} aria-hidden="true" />
+            : <Users size={28} aria-hidden="true" />}
+        </span>
+        <h2>
+          {hasError
+            ? '无法同步直播观众'
+            : audienceLoading
+              ? '正在同步直播观众'
+              : '观众会话尚未启动'}
+        </h2>
+        <p>
+          {audienceError ??
+            (audienceLoading
+              ? '正在读取服务端的本场观众快照。'
+              : '直播观众准备完成后会自动显示在这里。')}
+        </p>
+        {hasError && (
+          <button
+            className="viewer-management-empty-action"
+            type="button"
+            disabled={audienceLoading}
+            onClick={() => void onRetryAudience()}
+          >
+            <RefreshCw size={15} aria-hidden="true" />
+            重新同步
+          </button>
+        )}
       </section>
     )
   }
@@ -121,6 +178,32 @@ export function ViewerManagementView({
           <span>目标在线</span>
           <strong>{audience.target_concurrent_viewers}</strong>
         </div>
+        {noticeMessage && (
+          <div className="viewer-management-notice" role="alert">
+            <span>{noticeMessage}</span>
+            {audienceError ? (
+              <button
+                className="viewer-management-notice-action"
+                type="button"
+                disabled={audienceLoading}
+                onClick={() => void onRetryAudience()}
+              >
+                <RefreshCw size={14} aria-hidden="true" />
+                {audienceLoading ? '正在同步' : '重试'}
+              </button>
+            ) : (
+              <button
+                className="viewer-management-notice-dismiss"
+                type="button"
+                onClick={onDismissOperationError}
+                title="关闭错误提示"
+                aria-label="关闭错误提示"
+              >
+                <X size={14} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       <div className="viewer-management-toolbar">
@@ -166,12 +249,20 @@ export function ViewerManagementView({
               {viewers.map((viewer) => {
                 const muted = isViewerMuted(viewer, now)
                 const active = viewer.presence_state === 'active'
-                const pending = pendingViewerId === viewer.viewer_instance_id
+                const pending = pendingViewerId !== null
                 return (
                   <tr
                     key={viewer.viewer_instance_id}
                     className={selectedViewerId === viewer.viewer_instance_id ? 'selected' : ''}
+                    tabIndex={0}
+                    aria-label={`查看观众详情：${viewer.display_name}`}
                     onClick={() => setSelectedViewerId(viewer.viewer_instance_id)}
+                    onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return
+                      if (event.key !== 'Enter' && event.key !== ' ') return
+                      event.preventDefault()
+                      setSelectedViewerId(viewer.viewer_instance_id)
+                    }}
                   >
                     <td>
                       <span className="viewer-management-person">
@@ -195,8 +286,9 @@ export function ViewerManagementView({
                             disabled={pending}
                             title={muted ? '解除禁言' : '限时禁言'}
                             onClick={() => void (muted
-                              ? onUnmute(viewer.viewer_instance_id)
+                             ? onUnmute(viewer.viewer_instance_id)
                               : onMute(viewer.viewer_instance_id, muteDurationMs))}
+                            aria-label={`${muted ? '解除禁言' : '限时禁言'}：${viewer.display_name}`}
                           >
                             {muted ? <Volume2 size={15} /> : <VolumeX size={15} />}
                           </button>
@@ -207,6 +299,7 @@ export function ViewerManagementView({
                             className="danger"
                             disabled={pending}
                             title="踢出本场直播"
+                            aria-label={`踢出本场直播：${viewer.display_name}`}
                             onClick={() => void confirmKick(viewer)}
                           >
                             <UserMinus size={15} />
@@ -266,7 +359,7 @@ export function ViewerManagementView({
                   <div className="viewer-management-detail-actions">
                     <button
                       type="button"
-                      disabled={pendingViewerId === selectedViewer.viewer_instance_id}
+                      disabled={pendingViewerId !== null}
                       onClick={() => void (isViewerMuted(selectedViewer, now)
                         ? onUnmute(selectedViewer.viewer_instance_id)
                         : onMute(selectedViewer.viewer_instance_id, muteDurationMs))}
@@ -277,7 +370,7 @@ export function ViewerManagementView({
                     <button
                       type="button"
                       className="danger"
-                      disabled={pendingViewerId === selectedViewer.viewer_instance_id}
+                      disabled={pendingViewerId !== null}
                       onClick={() => void confirmKick(selectedViewer)}
                     >
                       <UserMinus size={15} />

@@ -1,4 +1,4 @@
-import { Plus, Search } from 'lucide-react'
+import { Pencil, Plus, Search } from 'lucide-react'
 import {
   allocateViewerCounts,
   createPersonaTemplate,
@@ -19,7 +19,6 @@ type PersonaListProps = {
   onAdd(): void
   onChoose(personaId: string): void
   onParticipationChange(personaId: string, enabled: boolean): void
-  onWeightChange(personaId: string, weight: number): void
 }
 
 function effectivePersona(base: Persona, mode: AudienceMode): Persona {
@@ -36,8 +35,7 @@ export function PersonaList({
   onSearchChange,
   onAdd,
   onChoose,
-  onParticipationChange,
-  onWeightChange
+  onParticipationChange
 }: PersonaListProps): React.JSX.Element {
   const allocations = new Map(
     allocateViewerCounts(
@@ -73,22 +71,25 @@ export function PersonaList({
                 'aw-persona-row',
                 persona.id === selectedPersonaId && 'selected'
               )}
-              onClick={() => onChoose(persona.id)}
             >
               <button
                 type="button"
                 className={cx('aw-persona-identity')}
+                data-audience-persona-open
                 onClick={() => onChoose(persona.id)}
               >
                 <i style={{ backgroundColor: resolved.color }}>{resolved.initials}</i>
                 <span>
                   <strong>{resolved.name}</strong>
-                  <small>
-                    {resolved.role}
-                    {participating ? ` · 实例 ${allocations.get(persona.id) ?? 0}` : ''}
-                  </small>
+                  <small>{resolved.role}</small>
                 </span>
               </button>
+              <div className={cx('aw-persona-preview')}>
+                <span>{resolved.behavior}</span>
+              </div>
+              <span className={cx('aw-persona-allocation')}>
+                {participating ? `${allocations.get(persona.id) ?? 0} Viewer` : '未参与'}
+              </span>
               <label
                 className={cx('aw-switch')}
                 data-audience-participation
@@ -97,22 +98,15 @@ export function PersonaList({
                 <input
                   type="checkbox"
                   checked={participating}
+                  disabled={structureLocked}
+                  aria-label={`${participating ? '停用' : '启用'}${resolved.name}`}
                   onChange={() => onParticipationChange(persona.id, !participating)}
                 />
                 <span aria-hidden="true" />
               </label>
-              <label className={cx('aw-weight')} title="当前模式权重">
-                <input
-                  type="range"
-                  min={1}
-                  max={5}
-                  step={1}
-                  disabled={!participating}
-                  value={participating ? activeMode.personaWeights[persona.id] ?? 1 : 0}
-                  onChange={(event) => onWeightChange(persona.id, Number(event.target.value))}
-                />
-                <b>{participating ? activeMode.personaWeights[persona.id] ?? 1 : 0}</b>
-              </label>
+              <IconButton title={`编辑${resolved.name}`} onClick={() => onChoose(persona.id)}>
+                <Pencil size={14} />
+              </IconButton>
             </article>
           )
         })}
