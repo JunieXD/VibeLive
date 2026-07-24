@@ -37,6 +37,7 @@ from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleProviderError,
     OpenAICompatibleTimeoutError,
     OpenAICompatibleTransportError,
+    default_reasoning_options,
 )
 
 
@@ -93,113 +94,14 @@ class OpenAICompatibleViewerRuntimeConfig:
     request_timeout_seconds: float = 30.0
 
 
-_EVIDENCE_REF_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["source", "event_id", "frame_index"],
-    "properties": {
-        "source": {"type": "string", "enum": ["event", "frame"]},
-        "event_id": {
-            "anyOf": [
-                {"type": "string", "minLength": 1, "maxLength": 128},
-                {"type": "null"},
-            ]
-        },
-        "frame_index": {
-            "anyOf": [
-                {"type": "integer", "minimum": 0},
-                {"type": "null"},
-            ]
-        },
-    },
-}
-_VIEWER_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "generation_request_id",
-        "viewer_instance_id",
-        "viewer_sequence",
-        "action",
-        "intent",
-        "target",
-        "text",
-        "reaction_type",
-        "evidence_refs",
-    ],
-    "properties": {
-        "generation_request_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "viewer_instance_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "viewer_sequence": {"type": "integer", "minimum": 1},
-        "action": {"type": "string", "enum": ["barrage", "silence"]},
-        "intent": {
-            "type": "string",
-            "enum": [
-                "react_to_host",
-                "react_to_scene",
-                "reply_to_viewer",
-                "ask_question",
-                "agree",
-                "disagree",
-                "encourage",
-                "joke",
-                "continue_thread",
-                "room_meta",
-                "silence",
-            ],
-        },
-        "target": {
-            "anyOf": [
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["kind", "viewer_instance_id", "event_id"],
-                    "properties": {
-                        "kind": {
-                            "type": "string",
-                            "enum": ["host", "scene", "room", "viewer", "event"],
-                        },
-                        "viewer_instance_id": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}]
-                        },
-                        "event_id": {
-                            "anyOf": [{"type": "string"}, {"type": "null"}]
-                        },
-                    },
-                },
-                {"type": "null"},
-            ]
-        },
-        "text": {
-            "anyOf": [
-                {"type": "string", "minLength": 1, "maxLength": 4000},
-                {"type": "null"},
-            ]
-        },
-        "reaction_type": {"type": "string", "minLength": 1, "maxLength": 64},
-        "evidence_refs": {
-            "type": "array",
-            "maxItems": 128,
-            "items": _EVIDENCE_REF_SCHEMA,
-        },
-    },
-}
-_VISUAL_SUMMARY_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["summary"],
-    "properties": {
-        "summary": {"type": "string", "minLength": 1, "maxLength": 8_000},
-    },
-}
-_HISTORY_SUMMARY_SCHEMA: Final[dict[str, object]] = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["summary"],
-    "properties": {
-        "summary": {"type": "string", "minLength": 1, "maxLength": 6000},
-    },
-}
+_VIEWER_JSON_EXAMPLE: Final = (
+    '{"generation_request_id":"request-id","viewer_instance_id":"viewer-id",'
+    '"viewer_sequence":1,"action":"barrage","intent":"react_to_host",'
+    '"target":{"kind":"host","viewer_instance_id":null,"event_id":"event-id"},'
+    '"text":"这波漂亮","reaction_type":"comment",'
+    '"evidence_refs":[{"source":"event","event_id":"event-id","frame_index":null}]}'
+)
+_SUMMARY_JSON_EXAMPLE: Final = '{"summary":"画面中的关键变化"}'
 _VIEWER_SYSTEM_PROMPT: Final = (
     "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
     "is only a behavioral tendency and is not your name or a system role. Produce zero or one "
@@ -207,17 +109,19 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "event, but may target only IDs explicitly allowed by the request. Shared room memory is "
     "public background, not proof that you personally attended an earlier stream. Use only "
     "evidence references present in the input. Prefer a natural Chinese message of "
-    "20 characters or fewer. Return only the required JSON object."
+    "20 characters or fewer. Return exactly one JSON object, with no Markdown or prose. "
+    f"Use this shape: {_VIEWER_JSON_EXAMPLE}"
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
     "Summarize only visible, decision-relevant changes across the ordered frame bundle. "
-    "Do not invent events or identities. Return only the required JSON object."
+    "Do not invent events or identities. Return exactly one JSON object, with no Markdown "
+    f"or prose. Use this shape: {_SUMMARY_JSON_EXAMPLE}"
 )
 _HISTORY_SUMMARY_SYSTEM_PROMPT: Final = (
     "Compress the supplied earlier live-room history into a factual chronological "
     "summary. Preserve names, direct questions, unresolved requests, important game "
-    "events, agreements, disagreements, and running context. Do not invent details. "
-    "Return only the required JSON object."
+    "events, agreements, disagreements, and running context. Do not invent details. Return "
+    f"exactly one JSON object, with no Markdown or prose. Use this shape: {_SUMMARY_JSON_EXAMPLE}"
 )
 _ROLE_OUTPUT_TOKEN_BUDGET: Final = 4_096
 
@@ -260,12 +164,10 @@ class OpenAICompatibleViewerRuntimeProvider:
         try:
             self._ensure_available(self._viewer)
             content = await self._viewer_content(request)
-            payload = self._structured_payload(
+            payload = self._json_payload(
                 model_id=self.config.provider.viewer_model,
                 system_prompt=_VIEWER_SYSTEM_PROMPT,
                 content=content,
-                schema_name="viewer_generation_response",
-                schema=_VIEWER_SCHEMA,
             )
             lifecycle.sent(build_openai_request_summary(payload))
             response = await self._send(self._viewer, payload, lifecycle=lifecycle)
@@ -328,12 +230,10 @@ class OpenAICompatibleViewerRuntimeProvider:
                 raise ViewerRuntimeProviderBlockedError(
                     "Visual summary requires a resolvable FrameBundle"
                 )
-            payload = self._structured_payload(
+            payload = self._json_payload(
                 model_id=self.config.provider.visual_summary_model,
                 system_prompt=_VISUAL_SUMMARY_SYSTEM_PROMPT,
                 content=content,
-                schema_name="visual_summary",
-                schema=_VISUAL_SUMMARY_SCHEMA,
             )
             lifecycle.sent(build_openai_request_summary(payload))
             response = await self._send(
@@ -378,12 +278,10 @@ class OpenAICompatibleViewerRuntimeProvider:
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        payload = self._structured_payload(
+        payload = self._json_payload(
             model_id=self.config.provider.viewer_model,
             system_prompt=_HISTORY_SUMMARY_SYSTEM_PROMPT,
             content=context,
-            schema_name="conversation_history_summary",
-            schema=_HISTORY_SUMMARY_SCHEMA,
         )
         response = await self._send(self._viewer, payload)
         output = self._structured_output(response)
@@ -570,16 +468,14 @@ class OpenAICompatibleViewerRuntimeProvider:
             )
         return parts
 
-    @staticmethod
-    def _structured_payload(
+    def _json_payload(
+        self,
         *,
         model_id: str,
         system_prompt: str,
         content: str | list[dict[str, object]],
-        schema_name: str,
-        schema: dict[str, object],
     ) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "model": model_id,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -588,15 +484,9 @@ class OpenAICompatibleViewerRuntimeProvider:
             "stream": False,
             "n": 1,
             "max_tokens": _ROLE_OUTPUT_TOKEN_BUDGET,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema_name,
-                    "strict": True,
-                    "schema": schema,
-                },
-            },
         }
+        payload.update(default_reasoning_options(self.config.base_url, model_id))
+        return payload
 
     @staticmethod
     def _structured_output(response: httpx.Response) -> dict[str, object]:
