@@ -8,6 +8,7 @@ from advx_backend.application.observation_wave_builder import select_frame_bundl
 from advx_backend.application.ports.asr import TranscriptSegment
 from advx_backend.application.reaction_scheduler import (
     LatestWinsReactionScheduler,
+    ReactionPreparationError,
     ReactionSchedulerConfig,
 )
 from advx_backend.application.reaction_service import ReactionResult
@@ -70,6 +71,19 @@ class _BlockingExecutor:
         self.started.append(observation.observation_id)
         await self.release.wait()
         return ReactionResult(published_events=(), validations=())
+
+
+class _PreparationFailureExecutor:
+    def __init__(self) -> None:
+        self.attempts = 0
+
+    async def react(self, observation: Observation) -> ReactionResult:
+        del observation
+        self.attempts += 1
+        try:
+            raise ValueError("frame metadata temporarily unavailable")
+        except ValueError as error:
+            raise ReactionPreparationError("preparation failed") from error
 
 
 class _Ids:
@@ -178,6 +192,31 @@ async def test_new_input_starts_without_waiting_for_an_earlier_wave() -> None:
     executor.release.set()
     assert await first is not None
     assert await second is not None
+
+
+@pytest.mark.asyncio
+async def test_preparation_failure_retries_once_and_is_reported() -> None:
+    executor = _PreparationFailureExecutor()
+    reported: list[tuple[str, str]] = []
+
+    async def report(observation: Observation, error: Exception) -> None:
+        reported.append((observation.observation_id, type(error.__cause__).__name__))
+
+    scheduler = LatestWinsReactionScheduler(
+        executor=executor,
+        session_tasks=_SessionTasks(),
+        clock=_Clock(),
+        config=ReactionSchedulerConfig(preparation_retry_backoff_ms=0),
+        failure_reporter=report,
+    )
+
+    result = await scheduler.submit(
+        Observation(session_id="session", observation_id="failed", created_at_ms=1_000)
+    )
+
+    assert await result is None
+    assert executor.attempts == 2
+    assert reported == [("failed", "ValueError")]
 
 
 @pytest.mark.asyncio
