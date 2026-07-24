@@ -6,7 +6,7 @@
 >
 > 更新日期：2026-07-24
 >
-> 当前仓库已经实现 Electron/React、FastAPI/SQLite、StepFun ASR、OpenAI-compatible Provider、Room shared brain、PersonaTemplate/ViewerInstance 分离、SceneAssessment、独立 Viewer 决策与请求、观众生命周期和管理、原子热更新、Debug/replay，以及 protocol v3、Audience contract v2 和 workspace v3 联动基线。确定性 replay、桌面测试和 Provider 合同测试已通过；credentialed E2E 仍取决于本地凭据与上游可用性。完整设计和验收标准以 [VIEWER_BEHAVIOR_REDESIGN.md](./VIEWER_BEHAVIOR_REDESIGN.md) 为准。
+> AI 观众发言行为以 [AUDIENCE_SPEAKING_PRODUCT_SPEC.md](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) 为准。本文中任何 Director、中心选人、画面变化直接触发或展示配额相关的描述均为历史设计，不代表当前实现。
 
 ## 1. 架构目标
 

@@ -1,6 +1,6 @@
 # AI 观众联动需求锁定记录
 
-> 状态：Act 1 需求访谈完成
+> 状态：历史需求记录。AI 观众发言部分已由 [AUDIENCE_SPEAKING_PRODUCT_SPEC.md](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) 取代；其中 Director 相关约束不再适用。
 >
 > 日期：2026-07-24
 >

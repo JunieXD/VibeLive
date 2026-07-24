@@ -218,7 +218,7 @@ class OpenAICompatibleProvider:
             discovered_model_ids = ()
             discovery_check = self.normalize_probe_error("model_discovery", None, error)
 
-        structured_roles = ("director", "viewer", "memory")
+        structured_roles = ("viewer", "memory")
         structured_checks = await asyncio.gather(
             *(
                 self._probe_chat(

@@ -1,7 +1,7 @@
 import type { AiCallTrace } from '../../../../shared/backend-client'
 
 export const aiCallRoleLabels = {
-  director: '导演',
+  legacy_director: '旧版导演记录',
   viewer: '观众',
   visual_summary: '视觉摘要',
   memory: '记忆',

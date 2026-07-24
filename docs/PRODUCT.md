@@ -4,7 +4,7 @@
 >
 > 目标平台：Windows、macOS
 >
-> 本文只描述产品行为。可替换的技术实现见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+> 本文的 AI 观众发言章节已由 [AUDIENCE_SPEAKING_PRODUCT_SPEC.md](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) 取代。若与该规格冲突，以该规格为准，尤其不再使用 Director 或中心选人。
 
 ## 1. 产品概述
 

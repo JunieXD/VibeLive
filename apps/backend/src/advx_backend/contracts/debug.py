@@ -160,7 +160,7 @@ class TraceQueryResponse(DebugContractModel):
 
 
 class AiCallRole(StrEnum):
-    DIRECTOR = "director"
+    LEGACY_DIRECTOR = "legacy_director"
     VIEWER = "viewer"
     VISUAL_SUMMARY = "visual_summary"
     MEMORY = "memory"

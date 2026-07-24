@@ -99,9 +99,9 @@ def test_query_filters_by_session_role_status_and_correlation() -> None:
     )
     store.upsert(
         ai_call(
-            "call-director",
+            "call-legacy-director",
             correlation_id="other",
-            role=AiCallRole.DIRECTOR,
+            role=AiCallRole.LEGACY_DIRECTOR,
             status=AiCallStatus.FAILED,
         )
     )
@@ -183,6 +183,19 @@ def test_jsonl_reload_marks_unfinished_calls_interrupted(tmp_path: Path) -> None
     ).items[0].updated_at_ms == 100
 
 
+def test_jsonl_reload_migrates_legacy_director_role(tmp_path: Path) -> None:
+    path = tmp_path / "ai-calls.jsonl"
+    legacy = ai_call("call-legacy").model_dump(mode="json")
+    legacy["role"] = "director"
+    path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+
+    reloaded = AiCallStore(path=path)
+
+    assert reloaded.query().items[0].role is AiCallRole.LEGACY_DIRECTOR
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["role"] == "legacy_director"
+
+
 def test_trace_store_migrates_legacy_trace_fields(tmp_path: Path) -> None:
     path = tmp_path / "viewer-traces.jsonl"
     trace = ObservationWaveTrace(
@@ -202,6 +215,7 @@ def test_trace_store_migrates_legacy_trace_fields(tmp_path: Path) -> None:
         status=ObservationWaveStatus.COMPLETED,
     ).model_dump(mode="json")
     trace["director_status"] = trace.pop("status")
+    trace["decision_source"] = "director"
     viewer_trace = {
         "trace_kind": "viewer_request",
         "trace_schema_version": 1,
@@ -220,6 +234,7 @@ def test_trace_store_migrates_legacy_trace_fields(tmp_path: Path) -> None:
             "observation_id": "observation-1",
             "created_at_ms": 10,
             "expires_at_ms": 20,
+            "decision_source": "director",
         },
         "viewer_instance_id": "viewer-1",
         "viewer_sequence": 1,
@@ -252,8 +267,10 @@ def test_trace_store_migrates_legacy_trace_fields(tmp_path: Path) -> None:
     assert reloaded.query().waves[0].status is ObservationWaveStatus.COMPLETED
     persisted = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
     assert persisted[0]["status"] == "completed"
+    assert persisted[0]["decision_source"] == "legacy_director"
     assert "director_status" not in persisted[0]
     assert persisted[1]["decision"]["decision_id"] == "decision-1"
+    assert persisted[1]["decision"]["decision_source"] == "legacy_director"
     assert "director_budget" not in persisted[1]
     assert "director_decision" not in persisted[1]
 

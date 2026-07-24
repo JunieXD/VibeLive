@@ -87,3 +87,46 @@ async def test_probe_reports_output_token_exhaustion_without_reading_reasoning()
     assert check.error_code == "output_token_limit"
     await provider.aclose()
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_capability_probe_only_checks_active_model_roles() -> None:
+    requested_models: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "viewer-model"}]})
+        payload = json.loads(request.content)
+        requested_models.append(payload["model"])
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": '{"ok":true}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = provider_with(client)
+
+    result = await provider.probe_capabilities(
+        role_models={
+            "viewer": "viewer-model",
+            "memory": "memory-model",
+            "visual_summary": "vision-model",
+        }
+    )
+
+    assert result.status.value == "passed"
+    assert "director_structured_output" not in {
+        check.capability for check in result.checks
+    }
+    assert requested_models.count("viewer-model") == 3
+    assert requested_models.count("memory-model") == 1
+    assert requested_models.count("vision-model") == 1
+    await provider.aclose()
+    await client.aclose()

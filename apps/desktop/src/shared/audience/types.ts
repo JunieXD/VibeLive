@@ -101,7 +101,7 @@ export type MemeSourceKind =
   | 'screen_event'
   | 'audience_barrage'
   | 'manual'
-export type MemeCreator = 'director' | 'user'
+export type MemeCreator = 'system' | 'user'
 
 export type CrowdDecision = {
   readonly modeId: string

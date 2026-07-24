@@ -22,7 +22,7 @@ class SceneAssessment(BaseModel):
     suggested_reaction_types: list[str] = Field(default_factory=list, max_length=32)
     maximum_responses: int = Field(ge=0, le=32)
     reason_codes: list[str] = Field(default_factory=list, max_length=32)
-    decision_source: DecisionSource = DecisionSource.DIRECTOR
+    decision_source: DecisionSource = DecisionSource.AUTONOMOUS
     created_at_ms: int = Field(ge=0)
     expires_at_ms: int = Field(gt=0)
 

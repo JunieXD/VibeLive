@@ -202,13 +202,19 @@ class TraceStore:
 
     @staticmethod
     def _migrate_observation_wave_trace(raw: Any) -> tuple[Any, bool]:
-        if not isinstance(raw, dict) or "director_status" not in raw:
+        if not isinstance(raw, dict):
             return raw, False
 
         migrated = dict(raw)
-        migrated.setdefault("status", migrated["director_status"])
-        del migrated["director_status"]
-        return migrated, True
+        was_migrated = False
+        if "director_status" in migrated:
+            migrated.setdefault("status", migrated["director_status"])
+            del migrated["director_status"]
+            was_migrated = True
+        if migrated.get("decision_source") == "director":
+            migrated["decision_source"] = "legacy_director"
+            was_migrated = True
+        return migrated, was_migrated
 
     @staticmethod
     def _migrate_viewer_request_trace(raw: Any) -> tuple[Any, bool]:
@@ -223,6 +229,13 @@ class TraceStore:
             was_migrated = True
         if "director_budget" in migrated:
             del migrated["director_budget"]
+            was_migrated = True
+        decision = migrated.get("decision")
+        if isinstance(decision, dict) and decision.get("decision_source") == "director":
+            migrated["decision"] = {
+                **decision,
+                "decision_source": "legacy_director",
+            }
             was_migrated = True
         return migrated, was_migrated
 

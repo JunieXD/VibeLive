@@ -4,7 +4,7 @@
 >
 > 更新日期：2026-07-24
 >
-> 本文细化 FastAPI 本地后端的模块、依赖、运行时数据流和 SQLite 持久化设计。产品行为以 [PRODUCT.md](./PRODUCT.md) 为准，跨运行时边界以 [ARCHITECTURE.md](./ARCHITECTURE.md) 为准，Viewer runtime 的实施顺序和验收标准以 [VIEWER_RUNTIME_INTEGRATION_PLAN.md](./VIEWER_RUNTIME_INTEGRATION_PLAN.md) 为准，架构决定以 [DECISIONS.md](./DECISIONS.md) 为准。
+> 本文细化 FastAPI 本地后端的模块、依赖、运行时数据流和 SQLite 持久化设计。AI 观众发言行为以 [AUDIENCE_SPEAKING_PRODUCT_SPEC.md](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) 为准；本文中的 Director 描述均已废弃。
 
 ## 1. 设计结论
 

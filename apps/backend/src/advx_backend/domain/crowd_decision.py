@@ -8,7 +8,7 @@ class CrowdDomainModel(BaseModel):
 
 
 class DecisionSource(StrEnum):
-    DIRECTOR = "director"
+    LEGACY_DIRECTOR = "legacy_director"
     FALLBACK = "fallback"
     AUTONOMOUS = "autonomous"
 
@@ -23,7 +23,7 @@ class CrowdDecision(CrowdDomainModel):
     reason_codes: list[str] = Field(default_factory=list, max_length=32)
     evidence_event_ids: list[str] = Field(default_factory=list, max_length=128)
     evidence_frame_indexes: list[int] = Field(default_factory=list, max_length=32)
-    decision_source: DecisionSource = DecisionSource.DIRECTOR
+    decision_source: DecisionSource = DecisionSource.AUTONOMOUS
     created_at_ms: int = Field(ge=0)
     expires_at_ms: int = Field(gt=0)
 

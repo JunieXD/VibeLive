@@ -106,6 +106,7 @@ class AiCallStore:
         assert self._path is not None
         if not self._path.exists():
             return
+        migrated = False
         with self._path.open(encoding="utf-8") as handle:
             lines = handle.readlines()
             for index, line in enumerate(lines):
@@ -118,15 +119,23 @@ class AiCallStore:
                         break
                     raise
                 assert_redacted_artifact(raw)
+                raw, was_migrated = self._migrate_legacy_role(raw)
+                migrated = migrated or was_migrated
                 trace = AiCallTrace.model_validate(raw)
                 if trace.call_id not in self._items and len(self._items) >= self._max_items:
                     self._items.popitem(last=False)
                 self._items[trace.call_id] = trace
                 self._writes_since_compaction += 1
-        if self._interrupt_incomplete():
+        if migrated or self._interrupt_incomplete():
             self._persist()
         elif self._writes_since_compaction >= self._max_items * 4:
             self._persist()
+
+    @staticmethod
+    def _migrate_legacy_role(raw: object) -> tuple[object, bool]:
+        if not isinstance(raw, dict) or raw.get("role") != "director":
+            return raw, False
+        return {**raw, "role": "legacy_director"}, True
 
     def _interrupt_incomplete(self) -> bool:
         interrupted_at_ms = self._clock_ms()

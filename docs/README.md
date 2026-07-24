@@ -3,6 +3,8 @@
 > 状态：产品方向基线
 >
 > 更新日期：2026-07-24
+>
+> AI 观众发言机制以 [AUDIENCE_SPEAKING_PRODUCT_SPEC.md](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) 为准；旧文档中关于 Director 的描述均已废弃。
 
 ## 产品定义
 

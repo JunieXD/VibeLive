@@ -908,7 +908,7 @@ export interface components {
          * AiCallRole
          * @enum {string}
          */
-        AiCallRole: "director" | "viewer" | "visual_summary" | "memory" | "asr";
+        AiCallRole: "legacy_director" | "viewer" | "visual_summary" | "memory" | "asr";
         /**
          * AiCallStatus
          * @enum {string}
@@ -1060,7 +1060,7 @@ export interface components {
             evidence_event_ids?: string[];
             /** Evidence Frame Indexes */
             evidence_frame_indexes?: number[];
-            /** @default director */
+            /** @default autonomous */
             decision_source: components["schemas"]["DecisionSource"];
             /** Created At Ms */
             created_at_ms: number;
@@ -1157,7 +1157,7 @@ export interface components {
          * DecisionSource
          * @enum {string}
          */
-        DecisionSource: "director" | "fallback" | "autonomous";
+        DecisionSource: "legacy_director" | "fallback" | "autonomous";
         /** ExpectedRevisionRequest */
         ExpectedRevisionRequest: {
             /** Expected Revision */
@@ -3048,7 +3048,7 @@ export interface components {
             maximum_responses: number;
             /** Reason Codes */
             reason_codes?: string[];
-            /** @default director */
+            /** @default autonomous */
             decision_source: components["schemas"]["DecisionSource"];
             /** Created At Ms */
             created_at_ms: number;

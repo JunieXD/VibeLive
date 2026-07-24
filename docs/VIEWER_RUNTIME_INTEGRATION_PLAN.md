@@ -1,6 +1,6 @@
 # AI 观众前后端联动实施计划
 
-> 状态：实现、本地质量门、deterministic 证据和 Windows Electron 联动已完成；完整 credentialed StepFun E2E 因生产 Director 上游超时以 `BLOCKED` 收口
+> 状态：历史实施计划。AI 观众发言部分已由 [AUDIENCE_SPEAKING_PRODUCT_SPEC.md](./AUDIENCE_SPEAKING_PRODUCT_SPEC.md) 取代；其中 Director 相关链路不再适用。
 >
 > 锁定日期：2026-07-24
 >
