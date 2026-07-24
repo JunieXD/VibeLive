@@ -326,7 +326,6 @@ try {
   const backendProof = await backendProofResponse.json()
   assert.equal(backendProof.backend_pid, ready.backend_pid)
   assert.equal(backendProof.external_transport_call_count, 0)
-  assert.ok(backendProof.director_calls >= 1)
   assert.ok(backendProof.viewer_calls >= 1)
 
   proof = {
@@ -381,7 +380,6 @@ try {
       timeline_screenshot: aiCallsTimelineScreenshotPath
     },
     calls: {
-      director: backendProof.director_calls,
       viewer: backendProof.viewer_calls,
       memory_extractor: backendProof.memory_extractor_calls
     }

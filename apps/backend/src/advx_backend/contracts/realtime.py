@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
+from advx_backend.application.ports.asr import AudioSource
 from advx_backend.contracts.audience import ViewerPresenceEvent
 from advx_backend.contracts.protocol import PROTOCOL_VERSION
 from advx_backend.contracts.session import SessionSnapshot
@@ -93,6 +94,7 @@ class ClientAudioCommit(RealtimeMessage):
     session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     input_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     committed_at_ms: int = Field(ge=0)
+    source: AudioSource = AudioSource.MICROPHONE
 
 
 class ClientVoiceActivity(RealtimeMessage):
@@ -101,6 +103,7 @@ class ClientVoiceActivity(RealtimeMessage):
     type: Literal["client.voice.activity"] = "client.voice.activity"
     session_id: str = Field(min_length=1, max_length=MAX_INGEST_IDENTIFIER_LENGTH)
     occurred_at_ms: int = Field(ge=0)
+    source: AudioSource = AudioSource.MICROPHONE
 
 
 ClientMessage = Annotated[
@@ -213,6 +216,18 @@ class IngestRejected(RealtimeMessage):
     input_kind: IngestInputKind | None = None
 
 
+class AsrTranscriptEvent(RealtimeMessage):
+    type: Literal["asr.transcript"] = "asr.transcript"
+    protocol_version: Literal[3] = PROTOCOL_VERSION
+    source: AudioSource
+    text: str = Field(min_length=1, max_length=MAX_TEXT_INPUT_LENGTH)
+    final: bool
+    started_at_ms: int = Field(ge=0)
+    ended_at_ms: int = Field(ge=0)
+    utterance_id: str | None = None
+    revision: int = Field(ge=1)
+
+
 ServerMessage = Annotated[
     BackendReady
     | BackendPong
@@ -221,6 +236,7 @@ ServerMessage = Annotated[
     | RealtimeProtocolError
     | IngestAck
     | IngestRejected
+    | AsrTranscriptEvent
     | ViewerPresenceEvent,
     Field(discriminator="type"),
 ]

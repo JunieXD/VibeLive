@@ -232,6 +232,126 @@ describe("BackendClient runtime v2", () => {
     }));
   });
 
+  it("carries the audio source through binary, commit and voice activity messages", async () => {
+    const client = new BackendClient({ localToken: "token" });
+    const sendBinary = vi.fn();
+    const sendJson = vi.fn();
+    const bridge = client as unknown as {
+      session: {
+        sessionId: string;
+        state: "running";
+        startedAtMs: number;
+        updatedAtMs: number;
+        revision: number;
+      };
+      waitForIngest(): Promise<void>;
+      sendBinary(message: Uint8Array): void;
+      sendJson(message: unknown): void;
+    };
+    bridge.session = {
+      sessionId: "session-1",
+      state: "running",
+      startedAtMs: 1,
+      updatedAtMs: 1,
+      revision: 1
+    };
+    bridge.waitForIngest = async () => undefined;
+    bridge.sendBinary = sendBinary;
+    bridge.sendJson = sendJson;
+
+    await client.submitAudioSegment({
+      inputId: "audio-1",
+      capturedAtMs: 10,
+      body: new Uint8Array([1, 2]),
+      source: "system_audio"
+    });
+    client.notifyVoiceActivity("system_audio", 20);
+
+    const binary = sendBinary.mock.calls[0][0] as Uint8Array;
+    expect(binary[4]).toBe(2);
+    expect(binary[5]).toBe(1);
+    expect(binary[6]).toBe(2);
+    expect(sendJson).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        type: "client.audio.commit",
+        input_id: "audio-1",
+        source: "system_audio"
+      })
+    );
+    expect(sendJson).toHaveBeenNthCalledWith(2, {
+      type: "client.voice.activity",
+      protocol_version: 3,
+      session_id: "session-1",
+      source: "system_audio",
+      occurred_at_ms: 20
+    });
+  });
+
+  it("serializes audio independently per source", async () => {
+    const client = new BackendClient({ localToken: "token" });
+    const sendBinary = vi.fn();
+    const sendJson = vi.fn();
+    let releaseMicrophoneReceived: (() => void) | undefined;
+    const microphoneReceived = new Promise<void>((resolve) => {
+      releaseMicrophoneReceived = resolve;
+    });
+    const bridge = client as unknown as {
+      session: {
+        sessionId: string;
+        state: "running";
+        startedAtMs: number;
+        updatedAtMs: number;
+        revision: number;
+      };
+      waitForIngest(inputId: string, stage: "received" | "committed"): Promise<void>;
+      sendBinary(message: Uint8Array): void;
+      sendJson(message: unknown): void;
+    };
+    bridge.session = {
+      sessionId: "session-1",
+      state: "running",
+      startedAtMs: 1,
+      updatedAtMs: 1,
+      revision: 1
+    };
+    bridge.waitForIngest = (inputId, stage) =>
+      inputId === "microphone-1" && stage === "received"
+        ? microphoneReceived
+        : Promise.resolve();
+    bridge.sendBinary = sendBinary;
+    bridge.sendJson = sendJson;
+
+    const microphone = client.submitAudioSegment({
+      inputId: "microphone-1",
+      capturedAtMs: 10,
+      body: new Uint8Array([1]),
+      source: "microphone"
+    });
+    await client.submitAudioSegment({
+      inputId: "system-1",
+      capturedAtMs: 11,
+      body: new Uint8Array([2]),
+      source: "system_audio"
+    });
+
+    expect(sendBinary.mock.calls.map(([message]) => (message as Uint8Array)[6])).toEqual([
+      1,
+      2
+    ]);
+    expect(sendJson).toHaveBeenCalledTimes(1);
+    expect(sendJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "client.audio.commit",
+        input_id: "system-1",
+        source: "system_audio"
+      })
+    );
+
+    releaseMicrophoneReceived?.();
+    await microphone;
+  });
+
   it("uses shared-brain authoritative memory and meme endpoints", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } })
@@ -691,6 +811,37 @@ describe("BackendClient runtime v2", () => {
       generationRequestId: "generation-1",
       personaId: "reaction_qmark",
       viewerSequence: 2
+    });
+  });
+
+  it("maps validated ASR transcript messages to desktop events", () => {
+    const client = new BackendClient({ localToken: "token" });
+    const listener = vi.fn();
+    client.onTranscript(listener);
+    const bridge = client as unknown as {
+      handleMessage(message: object): void;
+    };
+
+    bridge.handleMessage({
+      type: "asr.transcript",
+      protocol_version: 3,
+      source: "system_audio",
+      text: "captured speech",
+      final: true,
+      started_at_ms: 100,
+      ended_at_ms: 250,
+      utterance_id: "utterance-1",
+      revision: 2
+    });
+
+    expect(listener).toHaveBeenCalledWith({
+      source: "system_audio",
+      text: "captured speech",
+      final: true,
+      startedAtMs: 100,
+      endedAtMs: 250,
+      utteranceId: "utterance-1",
+      revision: 2
     });
   });
 

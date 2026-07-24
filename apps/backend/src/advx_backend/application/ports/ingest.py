@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
+from advx_backend.application.ports.asr import AudioSource
 from advx_backend.domain.observation import FrameRef
 
 
@@ -70,6 +71,7 @@ class AudioInput:
     captured_at_ms: int
     format: str
     body: bytes = field(repr=False)
+    source: AudioSource = AudioSource.MICROPHONE
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
@@ -77,6 +79,7 @@ class AudioInput:
         _require_timestamp(self.captured_at_ms, "captured_at_ms")
         _require_non_empty_string(self.format, "format")
         _require_media_body(self.body, "body")
+        object.__setattr__(self, "source", AudioSource(self.source))
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +87,13 @@ class AudioCommit:
     session_id: str
     input_id: str
     committed_at_ms: int
+    source: AudioSource = AudioSource.MICROPHONE
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
         _require_non_empty_string(self.input_id, "input_id")
         _require_timestamp(self.committed_at_ms, "committed_at_ms")
+        object.__setattr__(self, "source", AudioSource(self.source))
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,7 +214,12 @@ class IngestPort(Protocol):
 
     async def commit_audio(self, commit: AudioCommit) -> IngestReceipt: ...
 
-    async def notify_voice_activity(self, session_id: str, occurred_at_ms: int) -> None: ...
+    async def notify_voice_activity(
+        self,
+        session_id: str,
+        occurred_at_ms: int,
+        source: AudioSource = AudioSource.MICROPHONE,
+    ) -> None: ...
 
     async def submit_frame(self, input: FrameInput) -> IngestReceipt: ...
 

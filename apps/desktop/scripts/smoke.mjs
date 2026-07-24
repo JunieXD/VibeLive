@@ -390,6 +390,7 @@ try {
 
   assert.deepEqual(
     {
+      displayMode: configuredSettings.displayMode,
       fontSizePx: configuredSettings.fontSizePx,
       fontFamily: configuredSettings.fontFamily,
       bold: configuredSettings.bold,
@@ -400,6 +401,7 @@ try {
       region: configuredSettings.region
     },
     {
+      displayMode: 'overlay',
       fontSizePx: 30,
       fontFamily: 'system',
       bold: false,
@@ -409,6 +411,80 @@ try {
       density: 3,
       region: { topPercent: 20, bottomPercent: 60 }
     }
+  )
+
+  await page.getByRole('button', { name: '互动悬浮窗', exact: true }).click()
+  await page.waitForTimeout(350)
+  assert.equal(
+    await page.evaluate(async () => (await window.advx.getOverlaySettings()).displayMode),
+    'floating'
+  )
+  await page.evaluate(async () => {
+    await window.advx.showOverlay()
+    for (let index = 0; index < 4; index += 1) {
+      await window.advx.pushBarrage({
+        barrageId: `floating-chat-${index}`,
+        audienceId: `floating-audience-${index % 3}`,
+        audienceName: index === 0 ? '羊-有毒的' : `互动观众 ${index + 1}`,
+        text: [
+          '这么帅',
+          '坐在牛客坐牢',
+          '开个签到题就不会了',
+          'wa 了3发了'
+        ][index],
+        color: index === 0 ? '#65c9e5' : '#78bfa4',
+        createdAt: Date.now() + index,
+        mode: 'scroll'
+      })
+    }
+  })
+
+  let floatingChatPage = electronApp
+    .windows()
+    .find((candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+    )
+  floatingChatPage ??= await electronApp.waitForEvent('window', {
+    predicate: (candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+  })
+  await floatingChatPage.getByText('wa 了3发了', { exact: true }).waitFor()
+  const floatingChatProof = await floatingChatPage.evaluate(() => ({
+    title: document.querySelector('.titlebar-brand strong')?.textContent?.trim(),
+    rows: document.querySelectorAll('.message-row').length,
+    audienceCount: document.querySelector('.interaction-summary span')?.textContent?.trim(),
+    overflow:
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    composerVisible:
+      document.querySelector('.composer') instanceof HTMLElement &&
+      document.querySelector('.composer')?.getBoundingClientRect().height > 0,
+    controls: document.querySelectorAll('.window-actions button').length
+  }))
+  assert.equal(floatingChatProof.title, '直播互动')
+  assert.equal(floatingChatProof.rows, 4)
+  assert.equal(floatingChatProof.audienceCount, '3')
+  assert.ok(floatingChatProof.overflow <= 1, 'Floating chat overflowed horizontally.')
+  assert.equal(floatingChatProof.composerVisible, true)
+  assert.equal(floatingChatProof.controls, 2)
+  await floatingChatPage.screenshot({
+    path: resolve(artifactDirectory, 'floating-chat-window.png')
+  })
+  await floatingChatPage.getByTitle('关闭互动窗').click()
+  await electronApp.evaluate(async ({ BrowserWindow }) => {
+    const floatingWindow = BrowserWindow.getAllWindows().find((window) =>
+      window.webContents.getURL().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
+    )
+    if (!floatingWindow) throw new Error('Floating chat window was not created.')
+    for (let attempt = 0; attempt < 20 && floatingWindow.isVisible(); attempt += 1) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25))
+    }
+    if (floatingWindow.isVisible()) throw new Error('Floating chat window did not hide.')
+  })
+  await page.getByRole('button', { name: '屏幕弹幕', exact: true }).click()
+  await page.waitForTimeout(350)
+  assert.equal(
+    await page.evaluate(async () => (await window.advx.getOverlaySettings()).displayMode),
+    'overlay'
   )
 
   await page.screenshot({
@@ -1340,7 +1416,8 @@ try {
     ['mock-scroll-3', '画面很清楚，继续冲', 'scroll'],
     ['mock-top-1', '顶端固定：本场最佳', 'top'],
     ['mock-top-2', '顶端固定：名场面预定', 'top'],
-    ['mock-bottom-1', '底端固定：感谢观看', 'bottom']
+    ['mock-bottom-1', '底端固定：感谢观看', 'bottom'],
+    ['mock-bottom-2', '底端固定：下次再见', 'bottom']
   ].map(([barrageId, text, mode], index) => ({
     barrageId,
     audienceId: `mock-audience-${index}`,
@@ -1357,7 +1434,7 @@ try {
     }
   }, mockBarrageEvents)
   await restartedOverlayPage.waitForFunction(
-    () => document.querySelectorAll('.overlay-barrage').length === 6
+    () => document.querySelectorAll('.overlay-barrage').length === 7
   )
   await restartedOverlayPage.waitForTimeout(1_200)
   const modeMock = await restartedOverlayPage.evaluate(() => {
@@ -1394,17 +1471,24 @@ try {
         top: topStyle.animationDuration,
         bottom: bottomStyle.animationDuration
       },
-      fixedRects: [top, bottom].map((item) => {
-        const rect = item.getBoundingClientRect()
-        return { top: rect.top, bottom: rect.bottom }
-      }),
+      fixedRects: Object.fromEntries(
+        ['top', 'bottom'].map((mode) => [
+          mode,
+          [...document.querySelectorAll(`.overlay-barrage--${mode}`)]
+            .map((item) => {
+              const rect = item.getBoundingClientRect()
+              return { top: rect.top, bottom: rect.bottom }
+            })
+            .sort((left, right) => left.top - right.top)
+        ])
+      ),
       rootHeight: rootRect.height,
       identityNodeCount: document.querySelectorAll('.overlay-name, .ai-watermark, img').length
     }
   })
   assert.ok(modeMock, 'Three-mode mock styles were not readable.')
-  assert.equal(modeMock.count, 6)
-  assert.deepEqual(modeMock.modes, { scroll: 3, top: 2, bottom: 1 })
+  assert.equal(modeMock.count, 7)
+  assert.deepEqual(modeMock.modes, { scroll: 3, top: 2, bottom: 2 })
   assert.equal(modeMock.fontSize, '25px')
   assert.match(modeMock.fontFamily, /SimHei/)
   assert.ok(['700', 'bold'].includes(modeMock.fontWeight))
@@ -1416,8 +1500,15 @@ try {
     bottom: '4s'
   })
   assert.equal(modeMock.identityNodeCount, 0)
+  for (const rects of Object.values(modeMock.fixedRects)) {
+    assert.equal(rects.length, 2)
+    assert.ok(
+      Math.abs(rects[1].top - rects[0].bottom - 6) <= 1,
+      'Adjacent fixed barrages did not keep the compact six-pixel gap.'
+    )
+  }
   assert.ok(
-    modeMock.fixedRects.every(
+    Object.values(modeMock.fixedRects).flat().every(
       (rect) => rect.top >= -1 && rect.bottom <= modeMock.rootHeight * 0.5 + 1
     ),
     'A fixed barrage escaped the default top-half display region.'
@@ -1444,6 +1535,7 @@ try {
   )
   console.log(`Settings screenshot: ${resolve(artifactDirectory, 'overlay-settings.png')}`)
   console.log(`Overlay screenshot: ${resolve(artifactDirectory, 'overlay-renderer.png')}`)
+  console.log(`Floating chat: ${resolve(artifactDirectory, 'floating-chat-window.png')}`)
   console.log(`Three-mode mock: ${resolve(artifactDirectory, 'overlay-modes-mock.png')}`)
   console.log(`Proof: ${resolve(artifactDirectory, 'overlay-smoke-proof.json')}`)
 } finally {

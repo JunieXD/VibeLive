@@ -10,7 +10,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from advx_backend.application.ports.asr import AudioChunk, TranscriptSegment
+from advx_backend.application.ports.asr import AudioChunk, AudioSource, TranscriptSegment
 from advx_backend.application.ports.ingest import (
     AudioCommit,
     AudioInput,
@@ -72,11 +72,12 @@ class RecordedRuntimeFixture:
     viewer_provider: _RecordedViewerProvider
     memory_extractor: _RecordedMemoryExtractor
     asr_provider: _RecordedAsrProvider
+    asr_providers: Mapping[AudioSource, _RecordedAsrProvider]
     output_ledger: _RecordedOutputLedger
 
     @property
     def external_transport_call_count(self) -> int:
-        return self.asr_provider.external_calls
+        return sum(provider.external_calls for provider in self.asr_providers.values())
 
 
 class _VirtualClock:
@@ -178,6 +179,7 @@ class _RecordedViewerProvider:
         self._ledger = ledger
         self.viewer_calls = 0
         self.visual_calls = 0
+        self.history_calls = 0
 
     async def generate(self, request: object) -> ViewerGenerationResponse:
         self.viewer_calls += 1
@@ -223,6 +225,22 @@ class _RecordedViewerProvider:
         summary = visual.get("summary")
         if not isinstance(summary, str) or not summary.strip():
             raise ViewerRuntimeProtocolError("recorded visual summary is blank")
+        return summary.strip()
+
+    async def summarize_history(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        existing_summary: str | None,
+        older_history: str,
+    ) -> str:
+        del session_id, audience_epoch, existing_summary, older_history
+        self.history_calls += 1
+        history = self._ledger.consume("history_summary")
+        summary = history.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ViewerRuntimeProtocolError("recorded history summary is blank")
         return summary.strip()
 
     async def aclose(self) -> None:
@@ -285,28 +303,40 @@ class _RecordedMemoryExtractor:
 
 
 class _RecordedAsrProvider:
-    def __init__(self, ledger: _RecordedOutputLedger) -> None:
+    def __init__(
+        self,
+        ledger: _RecordedOutputLedger,
+        *,
+        source: AudioSource,
+        final_delivered: asyncio.Event,
+    ) -> None:
         self._ledger = ledger
+        self._source = source
         self._queue: asyncio.Queue[TranscriptSegment | None] = asyncio.Queue()
         self._session_id: str | None = None
         self._pushed: AudioChunk | None = None
-        self.final_delivered = asyncio.Event()
+        self.final_delivered = final_delivered
         self.external_calls = 0
 
     async def start(self) -> None:
         return None
 
     async def push_audio(self, chunk: AudioChunk) -> None:
+        if chunk.source is not self._source:
+            raise ValueError("recorded ASR received the wrong audio source")
         self._session_id = chunk.session_id
         self._pushed = chunk
 
-    async def commit(self) -> None:
+    async def commit(self, source: AudioSource = AudioSource.MICROPHONE) -> None:
+        if source is not self._source:
+            raise ValueError("recorded ASR commit source does not match provider source")
         if self._session_id is None or self._pushed is None:
             raise RuntimeError("recorded ASR has no pending audio")
         output = self._ledger.consume("asr")
         await self._queue.put(
             TranscriptSegment(
                 session_id=self._session_id,
+                source=self._pushed.source,
                 text=str(output.get("text", "recorded final transcript")),
                 started_at_ms=int(
                     output.get("started_at_ms", self._pushed.started_at_ms)
@@ -395,12 +425,21 @@ def build_recorded_runtime_fixture(
     ledger = _RecordedOutputLedger(bundle)
     viewer = _RecordedViewerProvider(ledger)
     memory = _RecordedMemoryExtractor(ledger)
-    asr = _RecordedAsrProvider(ledger)
+    final_delivered = asyncio.Event()
+    asr_providers = {
+        source: _RecordedAsrProvider(
+            ledger,
+            source=source,
+            final_delivered=final_delivered,
+        )
+        for source in AudioSource
+    }
+    asr = asr_providers[AudioSource.MICROPHONE]
     runtime.configure_recorded_runtime_pipeline(
         request=_provider_request(bundle),
         viewer_provider=viewer,
         memory_extractor=memory,
-        asr_provider=asr,
+        asr_providers=asr_providers,
     )
 
     from advx_backend.main import create_app
@@ -412,6 +451,7 @@ def build_recorded_runtime_fixture(
         viewer_provider=viewer,
         memory_extractor=memory,
         asr_provider=asr,
+        asr_providers=asr_providers,
         output_ledger=ledger,
     )
 

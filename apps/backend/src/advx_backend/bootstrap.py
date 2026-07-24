@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from advx_backend.application.generation_service import GenerationService
 from advx_backend.application.ingest_gateway import IngestGateway
 from advx_backend.application.ingest_service import IngestService
 from advx_backend.application.memory_extractor import RoomMemoryExtractor
-from advx_backend.application.ports.asr import AsrProvider
+from advx_backend.application.ports.asr import AsrProvider, AudioSource
 from advx_backend.application.ports.generation import (
     AudienceSelector,
     AudienceSnapshotProvider,
@@ -77,7 +78,7 @@ from advx_backend.infrastructure.persistence.sqlite import (
 )
 from advx_backend.infrastructure.security.local_token import create_local_token
 from advx_backend.infrastructure.system import SystemClock, UuidIdGenerator
-from advx_backend.providers.asr import StepFunAsrConfig, StepFunAsrProvider
+from advx_backend.providers.asr import AsrProviderMux, StepFunAsrConfig, StepFunAsrProvider
 from advx_backend.providers.model import OpenAICompatibleProvider
 
 BACKEND_VERSION = "0.1.0"
@@ -202,7 +203,7 @@ class BackendRuntime:
         init=False,
         repr=False,
     )
-    _owned_asr_provider: StepFunAsrProvider | None = field(
+    _owned_asr_provider: AsrProvider | None = field(
         default=None,
         init=False,
         repr=False,
@@ -355,6 +356,7 @@ class BackendRuntime:
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
             voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
             ambient_enabled=self.ambient_enabled,
+            transcript_publisher=self.realtime_broker,
         )
         self.session_resources.add_resource(ingest_service)
         self.ingest_gateway.configure(ingest_service)
@@ -399,7 +401,7 @@ class BackendRuntime:
         external_config: ExternalProviderConfig,
         viewer_provider_override: object | None = None,
         memory_extractor_override: RoomMemoryExtractor | None = None,
-        asr_provider_override: AsrProvider | None = None,
+        asr_provider_override: Mapping[AudioSource, AsrProvider] | None = None,
     ) -> IngestService:
         configured = self.provider_configuration_store.current()
         if configured is not None:
@@ -421,20 +423,26 @@ class BackendRuntime:
         )
         viewer_provider = self.provider_router
         memory_extractor = self.provider_router
-        owned_asr_provider = (
-            StepFunAsrProvider(
-                StepFunAsrConfig(
-                    api_key=external_config.asr_api_key,
-                    base_url=external_config.asr_base_url,
-                    model=external_config.asr_model,
-                ),
-                ai_call_sink=self.debug_service,
+        owned_asr_provider = None
+        if asr_provider_override is None:
+            asr_config = StepFunAsrConfig(
+                api_key=external_config.asr_api_key,
+                base_url=external_config.asr_base_url,
+                model=external_config.asr_model,
             )
-            if asr_provider_override is None
-            else None
-        )
+            owned_asr_provider = AsrProviderMux(
+                {
+                    source: StepFunAsrProvider(
+                        asr_config,
+                        ai_call_sink=self.debug_service,
+                    )
+                    for source in AudioSource
+                }
+            )
         asr_provider = (
-            owned_asr_provider if asr_provider_override is None else asr_provider_override
+            owned_asr_provider
+            if asr_provider_override is None
+            else AsrProviderMux(asr_provider_override)
         )
         viewer_runtime = ViewerRuntime(
             provider=viewer_provider,
@@ -492,6 +500,7 @@ class BackendRuntime:
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
             voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
             ambient_enabled=self.ambient_enabled,
+            transcript_publisher=self.realtime_broker,
         )
         self.session_resources.add_resource(viewer_runtime)
         self.session_resources.add_resource(coordinator)
@@ -511,7 +520,7 @@ class BackendRuntime:
         request: ProviderConfigurationRequest,
         viewer_provider: object,
         memory_extractor: RoomMemoryExtractor,
-        asr_provider: AsrProvider,
+        asr_providers: Mapping[AudioSource, AsrProvider],
     ) -> IngestService:
         """Configure the production graph with isolated deterministic adapters."""
 
@@ -525,7 +534,7 @@ class BackendRuntime:
             ),
             viewer_provider_override=viewer_provider,
             memory_extractor_override=memory_extractor,
-            asr_provider_override=asr_provider,
+            asr_provider_override=asr_providers,
         )
 
     @property

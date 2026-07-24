@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field, is_dataclass
@@ -40,6 +41,7 @@ from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleTransportError,
     default_reasoning_options,
 )
+from advx_backend.providers.model.provider_rate_gate import ProviderRateGate
 
 
 class ViewerRuntimeProviderError(RuntimeError):
@@ -122,13 +124,14 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "indexes from the input. Include decision_reason for every result: one concise Chinese "
     "sentence of 40 characters or fewer stating the visible persona or evidence basis for the "
     "barrage or silence decision. Do not include hidden reasoning, probabilities, or chain of "
-    "thought. Prefer a natural Chinese message of "
-    "20 characters or fewer. Return exactly one JSON object, with no Markdown or prose. "
-    f"For a barrage use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE} "
-    f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE} "
+    "thought. "
     "For a host, scene, or room target, viewer_instance_id and event_id must both be null. "
     "For a viewer target, provide viewer_instance_id only; for an event target, provide event_id "
-    "only. Never use an empty string for text."
+    "only. Use null, never an empty string, for every absent target ID. Never use an empty "
+    "string for text. Prefer a natural Chinese message of 20 characters or fewer. Return "
+    "exactly one JSON object, with no Markdown or prose. "
+    f"For a barrage use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE} "
+    f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE}"
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
     "Summarize only visible, decision-relevant changes across the ordered frame bundle. "
@@ -154,12 +157,14 @@ class OpenAICompatibleViewerRuntimeProvider:
         client: httpx.AsyncClient | None = None,
         frame_resolver: FrameResolver | None = None,
         ai_call_sink: AiCallSink | None = None,
+        rate_gate: ProviderRateGate | None = None,
     ) -> None:
         self.config = config
         self._client = client if client is not None else httpx.AsyncClient()
         self._owns_client = client is None
         self._frame_resolver = frame_resolver
         self._ai_call_sink = ai_call_sink
+        self._rate_gate = rate_gate or ProviderRateGate()
         self._viewer = self._role_provider(config.provider.viewer_model)
         self._visual_summary = self._role_provider(config.provider.visual_summary_model)
         self._close_lock = asyncio.Lock()
@@ -187,8 +192,7 @@ class OpenAICompatibleViewerRuntimeProvider:
                 system_prompt=_VIEWER_SYSTEM_PROMPT,
                 content=content,
             )
-            lifecycle.sent(build_openai_request_summary(payload))
-            response = await self._send(
+            response = await self._send_rate_limited(
                 self._viewer,
                 payload,
                 lifecycle=lifecycle,
@@ -205,6 +209,7 @@ class OpenAICompatibleViewerRuntimeProvider:
                     "viewer_sequence": request.viewer_sequence,
                 }
             )
+            self._canonicalize_target(output)
             self._canonicalize_evidence_refs(output)
             try:
                 result = ViewerGenerationResponse.model_validate(output)
@@ -260,8 +265,7 @@ class OpenAICompatibleViewerRuntimeProvider:
                 system_prompt=_VISUAL_SUMMARY_SYSTEM_PROMPT,
                 content=content,
             )
-            lifecycle.sent(build_openai_request_summary(payload))
-            response = await self._send(
+            response = await self._send_rate_limited(
                 self._visual_summary,
                 payload,
                 lifecycle=lifecycle,
@@ -303,17 +307,44 @@ class OpenAICompatibleViewerRuntimeProvider:
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        payload = self._json_payload(
+        lifecycle = self._call_lifecycle(
+            role=AiCallRole.HISTORY_SUMMARY,
+            correlation_id=(
+                "history-"
+                f"{hashlib.sha256(context.encode('utf-8')).hexdigest()[:32]}"
+            ),
             model_id=self.config.provider.viewer_model,
-            system_prompt=_HISTORY_SUMMARY_SYSTEM_PROMPT,
-            content=context,
+            scope=AiCallScope(
+                session_id=session_id,
+                audience_epoch=audience_epoch,
+            ),
         )
-        response = await self._send(self._viewer, payload)
-        output = self._structured_output(response)
-        summary = output.get("summary")
-        if not isinstance(summary, str) or not summary.strip():
-            raise ViewerRuntimeProtocolError("History summary response was blank")
-        return summary.strip()[:6_000]
+        try:
+            self._ensure_available(self._viewer)
+            payload = self._json_payload(
+                model_id=self.config.provider.viewer_model,
+                system_prompt=_HISTORY_SUMMARY_SYSTEM_PROMPT,
+                content=context,
+            )
+            response = await self._send_rate_limited(
+                self._viewer,
+                payload,
+                lifecycle=lifecycle,
+            )
+            lifecycle.received(build_http_response_summary(response))
+            output = self._structured_output(response)
+            summary = output.get("summary")
+            if not isinstance(summary, str) or not summary.strip():
+                raise ViewerRuntimeProtocolError("History summary response was blank")
+            normalized_summary = summary.strip()[:6_000]
+            lifecycle.succeeded({"summary": normalized_summary})
+            return normalized_summary
+        except asyncio.CancelledError:
+            lifecycle.cancelled()
+            raise
+        except Exception as error:
+            lifecycle.failed(error)
+            raise
 
     async def aclose(self) -> None:
         async with self._close_lock:
@@ -357,6 +388,33 @@ class OpenAICompatibleViewerRuntimeProvider:
             endpoint=f"{self.config.base_url.rstrip('/')}/chat/completions",
             scope=scope,
         )
+
+    async def _send_rate_limited(
+        self,
+        provider: OpenAICompatibleProvider | None,
+        payload: dict[str, object],
+        *,
+        lifecycle: AiCallLifecycle,
+        capture_model_output: bool = False,
+    ) -> httpx.Response:
+        async with self._rate_gate.lease() as rate_limit_generation:
+            lifecycle.sent(build_openai_request_summary(payload))
+            try:
+                response = await self._send(
+                    provider,
+                    payload,
+                    lifecycle=lifecycle,
+                    capture_model_output=capture_model_output,
+                )
+            except ViewerRuntimeProviderError as error:
+                if error.status_code == 429:
+                    await self._rate_gate.defer_for_rate_limit(
+                        error.retry_after_seconds
+                    )
+                raise
+            else:
+                await self._rate_gate.record_success(rate_limit_generation)
+        return response
 
     async def _send(
         self,
@@ -572,6 +630,15 @@ class OpenAICompatibleViewerRuntimeProvider:
             )
         }
         return ",".join(sorted(codes))[:512] or "unknown_validation_error"
+
+    @staticmethod
+    def _canonicalize_target(output: dict[str, object]) -> None:
+        target = output.get("target")
+        if not isinstance(target, dict):
+            return
+        for identifier in ("viewer_instance_id", "event_id"):
+            if target.get(identifier) == "":
+                target[identifier] = None
 
     @staticmethod
     def _canonicalize_evidence_refs(output: dict[str, object]) -> None:

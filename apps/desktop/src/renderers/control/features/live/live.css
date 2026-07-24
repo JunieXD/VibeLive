@@ -652,15 +652,8 @@
 }
 
 .viewer-avatar {
-  display: grid;
   width: 24px;
   height: 24px;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--avatar-bg);
-  color: var(--avatar-ink);
-  font-size: 10px;
-  font-weight: 800;
 }
 
 .viewer-identity {
@@ -1084,6 +1077,25 @@
   transition: width 80ms linear;
 }
 
+.mixer-channel {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.mixer-channel small {
+  max-width: 170px;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mixer-channel small.ok {
+  color: var(--ok);
+}
+
 .device-strip {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1123,6 +1135,15 @@
 
 .device-control > div {
   min-width: 0;
+}
+
+.device-status {
+  display: block;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .device-control .select-dropdown-trigger {

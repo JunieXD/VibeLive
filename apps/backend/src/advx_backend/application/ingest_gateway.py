@@ -1,3 +1,4 @@
+from advx_backend.application.ports.asr import AudioSource
 from advx_backend.application.ports.ingest import (
     AudioCommit,
     AudioInput,
@@ -39,8 +40,13 @@ class IngestGateway:
     async def commit_audio(self, commit: AudioCommit) -> IngestReceipt:
         return await self._require_port().commit_audio(commit)
 
-    async def notify_voice_activity(self, session_id: str, occurred_at_ms: int) -> None:
-        await self._require_port().notify_voice_activity(session_id, occurred_at_ms)
+    async def notify_voice_activity(
+        self,
+        session_id: str,
+        occurred_at_ms: int,
+        source: AudioSource = AudioSource.MICROPHONE,
+    ) -> None:
+        await self._require_port().notify_voice_activity(session_id, occurred_at_ms, source)
 
     async def submit_frame(self, input: FrameInput) -> IngestReceipt:
         return await self._require_port().submit_frame(input)

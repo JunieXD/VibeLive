@@ -9,6 +9,7 @@ from advx_backend.application.context_builder import ContextBuilder
 from advx_backend.application.ports.asr import (
     AsrProvider,
     AudioChunk,
+    AudioSource,
     TranscriptSegment,
     TranscriptTargetResolver,
 )
@@ -25,6 +26,10 @@ from advx_backend.application.ports.ingest import (
 )
 from advx_backend.application.ports.session import Clock
 from advx_backend.application.room_service import RoomService
+from advx_backend.contracts.realtime import (
+    MAX_TEXT_INPUT_LENGTH,
+    AsrTranscriptEvent,
+)
 from advx_backend.domain.observation import Observation
 from advx_backend.domain.room import RoomEventSource
 
@@ -35,6 +40,10 @@ class ObservationScheduler(Protocol):
     async def submit(self, observation: Observation) -> asyncio.Future[object | None]: ...
 
     async def cancel_session(self, session_id: str) -> None: ...
+
+
+class TranscriptPublisher(Protocol):
+    async def publish_transcript(self, event: AsrTranscriptEvent) -> None: ...
 
 
 class IngestServiceError(RuntimeError):
@@ -76,6 +85,7 @@ class IngestCapacityExceededError(IngestServiceError):
 class _TrackedInput:
     kind: IngestInputKind
     timestamp_ms: int
+    source: AudioSource | None = None
     accepted: bool = False
 
 
@@ -108,6 +118,7 @@ class IngestService:
         voice_turn_silence_ms: int = 1_500,
         ambient_enabled: Callable[[str], Awaitable[bool]] | None = None,
         ambient_interval_ms: int = 30_000,
+        transcript_publisher: TranscriptPublisher | None = None,
     ) -> None:
         if max_tracked_input_ids < 1:
             raise ValueError("max_tracked_input_ids must be at least one")
@@ -133,13 +144,14 @@ class IngestService:
         self._voice_turn_silence_ms = voice_turn_silence_ms
         self._ambient_enabled = ambient_enabled
         self._ambient_interval_ms = ambient_interval_ms
+        self._transcript_publisher = transcript_publisher
         self._active_session_id: str | None = None
         self._seen_inputs: OrderedDict[str, _TrackedInput] = OrderedDict()
         self._seen_utterances: OrderedDict[str, int] = OrderedDict()
-        self._partial_transcripts: dict[str, TranscriptSegment] = {}
-        self._voice_turns: dict[str, _VoiceTurn] = {}
-        self._timestamp_floors: dict[IngestInputKind, int] = {}
-        self._pending_audio_id: str | None = None
+        self._partial_transcripts: dict[tuple[str, AudioSource], TranscriptSegment] = {}
+        self._voice_turns: dict[tuple[str, AudioSource], _VoiceTurn] = {}
+        self._timestamp_floors: dict[tuple[IngestInputKind, AudioSource | None], int] = {}
+        self._pending_audio_ids: dict[AudioSource, str] = {}
         self._result_task: asyncio.Task[None] | None = None
         self._ambient_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -180,14 +192,19 @@ class IngestService:
     ) -> None:
         self._voice_target_resolver = resolver
 
-    async def notify_voice_activity(self, session_id: str, occurred_at_ms: int) -> None:
+    async def notify_voice_activity(
+        self,
+        session_id: str,
+        occurred_at_ms: int,
+        source: AudioSource = AudioSource.MICROPHONE,
+    ) -> None:
         """Keep a short pause inside one spoken turn when speech resumes."""
         if occurred_at_ms < 0:
             raise ValueError("occurred_at_ms must be non-negative")
         async with self._lock:
             if self._active_session_id != session_id:
                 raise IngestSessionNotActiveError(session_id, self._active_session_id)
-            turn = self._voice_turns.get(session_id)
+            turn = self._voice_turns.get((session_id, source))
             task = None if turn is None else turn.task
             if turn is not None:
                 turn.task = None
@@ -300,6 +317,7 @@ class IngestService:
             await self._asr_provider.push_audio(
                 AudioChunk(
                     session_id=input.session_id,
+                    source=input.source,
                     started_at_ms=input.captured_at_ms,
                     ended_at_ms=input.captured_at_ms + duration_ms,
                     sample_rate=sample_rate,
@@ -312,21 +330,24 @@ class IngestService:
         finally:
             await self._settle(input.input_id, accepted=pushed)
             if not pushed:
-                await self._release_audio(input.input_id)
+                await self._release_audio(input.input_id, input.source)
         return self._receipt(input.session_id, input.input_id, IngestInputKind.AUDIO)
 
     async def commit_audio(self, commit: AudioCommit) -> IngestReceipt:
         await self._require_running(commit.session_id)
         async with self._lock:
             self._require_active_locked(commit.session_id)
-            if self._pending_audio_id != commit.input_id:
+            if self._pending_audio_ids.get(commit.source) != commit.input_id:
                 raise UnknownAudioInputError(commit.input_id)
             if (
-                last_audio_at_ms := self._timestamp_for(IngestInputKind.AUDIO)
+                last_audio_at_ms := self._timestamp_for(
+                    IngestInputKind.AUDIO,
+                    commit.source,
+                )
             ) is not None and commit.committed_at_ms < last_audio_at_ms:
                 raise IngestInputOutOfOrderError("audio commit precedes its captured input")
-        await self._asr_provider.commit()
-        await self._release_audio(commit.input_id)
+        await self._asr_provider.commit(commit.source)
+        await self._release_audio(commit.input_id, commit.source)
         return self._receipt(
             commit.session_id,
             commit.input_id,
@@ -345,9 +366,22 @@ class IngestService:
             except Exception as error:
                 if not await self._is_active(session_id):
                     return
+                status_code = getattr(error, "status_code", None)
+                utterance_id = getattr(error, "utterance_id", None)
                 logger.warning(
-                    "ASR result stream failed",
-                    extra={"session_id": session_id, "error_type": type(error).__name__},
+                    "ASR result stream failed: %s",
+                    error,
+                    extra={
+                        "session_id": session_id,
+                        "utterance_id": (
+                            utterance_id if isinstance(utterance_id, str) else None
+                        ),
+                        "upstream_http_status": (
+                            status_code if isinstance(status_code, int) else None
+                        ),
+                        "retryable": bool(getattr(error, "retryable", False)),
+                        "error_type": type(error).__name__,
+                    },
                 )
 
     async def _consume_transcript(
@@ -381,12 +415,24 @@ class IngestService:
                     )
 
     async def _handle_transcript(self, session_id: str, segment: TranscriptSegment) -> None:
-        if not segment.text.strip() or segment.session_id != session_id:
+        text = segment.text.strip()
+        if not text or segment.session_id != session_id:
+            return
+        if len(text) > MAX_TEXT_INPUT_LENGTH:
+            logger.warning(
+                "discarded ASR transcript exceeding the Room text limit",
+                extra={
+                    "session_id": session_id,
+                    "audio_source": segment.source.value,
+                    "text_length": len(text),
+                },
+            )
             return
         if not segment.final:
             async with self._lock:
                 if self._active_session_id == session_id:
-                    self._partial_transcripts[session_id] = segment
+                    self._partial_transcripts[(session_id, segment.source)] = segment
+            await self._publish_transcript(segment)
             return
         if not await self._session_tasks.accepts_results(session_id):
             return
@@ -395,7 +441,7 @@ class IngestService:
             f"{session_id}:{segment.started_at_ms}:"
             f"{segment.ended_at_ms}:{segment.text.strip()}"
         )
-        utterance_key = f"{session_id}\0{utterance_id}"
+        utterance_key = f"{session_id}\0{segment.source.value}\0{utterance_id}"
         async with self._lock:
             if self._seen_utterances.get(utterance_key, 0) >= segment.revision:
                 return
@@ -418,7 +464,11 @@ class IngestService:
         event = await self._room_service.append_event(
             session_id,
             source_type=RoomEventSource.USER_VOICE,
-            source_id="host",
+            source_id=(
+                "host"
+                if segment.source is AudioSource.MICROPHONE
+                else "system-audio"
+            ),
             text=segment.text.strip(),
             payload={
                 "final": True,
@@ -426,6 +476,7 @@ class IngestService:
                 "ended_at_ms": segment.ended_at_ms,
                 "utterance_id": utterance_id,
                 "revision": segment.revision,
+                "audio_source": segment.source.value,
                 **target_payload,
             },
         )
@@ -436,9 +487,13 @@ class IngestService:
                 self._seen_utterances.move_to_end(utterance_key)
                 while len(self._seen_utterances) > self._max_tracked_input_ids:
                     self._seen_utterances.popitem(last=False)
-            self._partial_transcripts.pop(session_id, None)
+            self._partial_transcripts.pop((session_id, segment.source), None)
+        await self._publish_transcript(
+            segment.model_copy(update={"utterance_id": utterance_id})
+        )
         await self._queue_voice_turn(
             session_id,
+            source=segment.source,
             event_id=event.event_id,
             ended_at_ms=segment.ended_at_ms,
             target_viewer_id=target_viewer_id,
@@ -449,6 +504,7 @@ class IngestService:
         self,
         session_id: str,
         *,
+        source: AudioSource,
         event_id: str,
         ended_at_ms: int,
         target_viewer_id: str | None,
@@ -458,7 +514,8 @@ class IngestService:
         async with self._lock:
             if self._active_session_id != session_id:
                 return
-            turn = self._voice_turns.get(session_id)
+            turn_key = (session_id, source)
+            turn = self._voice_turns.get(turn_key)
             if turn is None:
                 turn = _VoiceTurn(
                     event_ids=[],
@@ -466,7 +523,7 @@ class IngestService:
                     target_persona_id=target_persona_id,
                     last_ended_at_ms=ended_at_ms,
                 )
-                self._voice_turns[session_id] = turn
+                self._voice_turns[turn_key] = turn
             else:
                 previous_task = turn.task
                 turn.last_ended_at_ms = max(turn.last_ended_at_ms, ended_at_ms)
@@ -478,13 +535,18 @@ class IngestService:
                     turn.target_persona_id = None
             turn.event_ids.append(event_id)
             turn.task = asyncio.create_task(
-                self._finalize_voice_turn(session_id, turn),
-                name=f"ingest-voice-turn:{session_id}",
+                self._finalize_voice_turn(session_id, source, turn),
+                name=f"ingest-voice-turn:{session_id}:{source.value}",
             )
         if previous_task is not None:
             previous_task.cancel()
 
-    async def _finalize_voice_turn(self, session_id: str, turn: _VoiceTurn) -> None:
+    async def _finalize_voice_turn(
+        self,
+        session_id: str,
+        source: AudioSource,
+        turn: _VoiceTurn,
+    ) -> None:
         try:
             remaining_ms = max(
                 0,
@@ -494,11 +556,11 @@ class IngestService:
             async with self._lock:
                 if (
                     self._active_session_id != session_id
-                    or self._voice_turns.get(session_id) is not turn
+                    or self._voice_turns.get((session_id, source)) is not turn
                     or turn.task is not asyncio.current_task()
                 ):
                     return
-                self._voice_turns.pop(session_id, None)
+                self._voice_turns.pop((session_id, source), None)
                 event_ids = tuple(turn.event_ids)
                 target_viewer_id = turn.target_viewer_id
                 target_persona_id = turn.target_persona_id
@@ -541,8 +603,40 @@ class IngestService:
         except asyncio.CancelledError:
             raise
 
-    def partial_transcript_snapshot(self, session_id: str) -> TranscriptSegment | None:
-        return self._partial_transcripts.get(session_id)
+    def partial_transcript_snapshot(
+        self,
+        session_id: str,
+        source: AudioSource = AudioSource.MICROPHONE,
+    ) -> TranscriptSegment | None:
+        return self._partial_transcripts.get((session_id, source))
+
+    async def _publish_transcript(self, segment: TranscriptSegment) -> None:
+        if self._transcript_publisher is None:
+            return
+        try:
+            await self._transcript_publisher.publish_transcript(
+                AsrTranscriptEvent(
+                    source=segment.source,
+                    text=segment.text.strip(),
+                    final=segment.final,
+                    started_at_ms=segment.started_at_ms,
+                    ended_at_ms=segment.ended_at_ms,
+                    utterance_id=segment.utterance_id,
+                    revision=segment.revision,
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning(
+                "realtime ASR transcript publication failed",
+                extra={
+                    "session_id": segment.session_id,
+                    "audio_source": segment.source.value,
+                    "final": segment.final,
+                    "error_type": type(error).__name__,
+                },
+            )
 
     async def _schedule_observation(
         self,
@@ -586,22 +680,23 @@ class IngestService:
         async with self._lock:
             self._require_active_locked(input.session_id)
             self._require_unique_locked(input.input_id)
-            if self._pending_audio_id is not None:
+            if input.source in self._pending_audio_ids:
                 raise IngestInputOutOfOrderError("the previous audio input is not committed")
-            last_audio_at_ms = self._timestamp_for(IngestInputKind.AUDIO)
+            last_audio_at_ms = self._timestamp_for(IngestInputKind.AUDIO, input.source)
             if last_audio_at_ms is not None and input.captured_at_ms < last_audio_at_ms:
                 raise IngestInputOutOfOrderError("audio input is out of order")
             self._remember_locked(
                 input.input_id,
                 IngestInputKind.AUDIO,
                 input.captured_at_ms,
+                source=input.source,
             )
-            self._pending_audio_id = input.input_id
+            self._pending_audio_ids[input.source] = input.input_id
 
-    async def _release_audio(self, input_id: str) -> None:
+    async def _release_audio(self, input_id: str, source: AudioSource) -> None:
         async with self._lock:
-            if self._pending_audio_id == input_id:
-                self._pending_audio_id = None
+            if self._pending_audio_ids.get(source) == input_id:
+                self._pending_audio_ids.pop(source, None)
 
     async def _settle(self, input_id: str, *, accepted: bool) -> None:
         async with self._lock:
@@ -636,14 +731,20 @@ class IngestService:
         input_id: str,
         kind: IngestInputKind,
         timestamp_ms: int,
+        source: AudioSource | None = None,
     ) -> None:
-        self._seen_inputs[input_id] = _TrackedInput(kind=kind, timestamp_ms=timestamp_ms)
+        self._seen_inputs[input_id] = _TrackedInput(
+            kind=kind,
+            timestamp_ms=timestamp_ms,
+            source=source,
+        )
         while len(self._seen_inputs) > self._max_tracked_input_ids:
             evicted = next(
                 (
                     (tracked_id, tracked)
                     for tracked_id, tracked in self._seen_inputs.items()
-                    if tracked.accepted and tracked_id != self._pending_audio_id
+                    if tracked.accepted
+                    and tracked_id not in self._pending_audio_ids.values()
                 ),
                 None,
             )
@@ -652,15 +753,22 @@ class IngestService:
                 raise IngestCapacityExceededError("too many ingest inputs are in progress")
             evicted_id, tracked = evicted
             self._seen_inputs.pop(evicted_id)
-            current_floor = self._timestamp_floors.get(tracked.kind)
+            floor_key = (tracked.kind, tracked.source)
+            current_floor = self._timestamp_floors.get(floor_key)
             if current_floor is None or tracked.timestamp_ms > current_floor:
-                self._timestamp_floors[tracked.kind] = tracked.timestamp_ms
+                self._timestamp_floors[floor_key] = tracked.timestamp_ms
 
-    def _timestamp_for(self, kind: IngestInputKind) -> int | None:
+    def _timestamp_for(
+        self,
+        kind: IngestInputKind,
+        source: AudioSource | None = None,
+    ) -> int | None:
         timestamps = [
-            tracked.timestamp_ms for tracked in self._seen_inputs.values() if tracked.kind is kind
+            tracked.timestamp_ms
+            for tracked in self._seen_inputs.values()
+            if tracked.kind is kind and tracked.source is source
         ]
-        floor = self._timestamp_floors.get(kind)
+        floor = self._timestamp_floors.get((kind, source))
         if floor is not None:
             timestamps.append(floor)
         return max(timestamps, default=None)
@@ -702,4 +810,4 @@ class IngestService:
         self._partial_transcripts.clear()
         self._voice_turns.clear()
         self._timestamp_floors.clear()
-        self._pending_audio_id = None
+        self._pending_audio_ids.clear()

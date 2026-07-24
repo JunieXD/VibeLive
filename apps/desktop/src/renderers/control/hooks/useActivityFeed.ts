@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AudioSource } from '../../../shared/contracts'
 
 export type ActivityItem = {
   id: string
-  source: 'user' | 'audience' | 'system'
+  source: 'user' | 'audience' | 'system' | 'transcript'
   author: string
   text: string
   color?: string
@@ -50,6 +51,25 @@ export function useActivityFeed() {
     ])
   }, [])
 
+  const appendTranscriptActivity = useCallback((
+    source: AudioSource,
+    text: string,
+    utteranceId: string
+  ): void => {
+    const id = `transcript-${source}-${utteranceId}`
+    const item: ActivityItem = {
+      id,
+      source: 'transcript',
+      author: source === 'microphone' ? '麦克风（主播）' : '系统声音',
+      text
+    }
+    setActivity((current) => {
+      const existing = current.findIndex((entry) => entry.id === id)
+      if (existing === -1) return [...current.slice(-40), item]
+      return current.map((entry, index) => index === existing ? item : entry)
+    })
+  }, [])
+
   const clearAudienceActivity = useCallback((): void => {
     setActivity((current) => current.filter((item) => item.source !== 'audience'))
   }, [])
@@ -67,6 +87,7 @@ export function useActivityFeed() {
     appendSystemActivity,
     appendAudienceActivity,
     appendUserActivity,
+    appendTranscriptActivity,
     clearAudienceActivity
   }
 }

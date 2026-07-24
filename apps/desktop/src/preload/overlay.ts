@@ -1,6 +1,19 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { BarrageEvent, OverlayApi, OverlaySettings } from "../shared/contracts";
-import { readOverlayIpcEnvelope } from "../shared/overlay-protocol";
+
+// Sandboxed preloads cannot require Rollup's emitted sibling chunks.
+function readOverlayIpcEnvelope<T>(value: unknown): T | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("protocolVersion" in value) ||
+    value.protocolVersion !== 2 ||
+    !("payload" in value)
+  ) {
+    return null;
+  }
+  return value.payload as T;
+}
 
 const api: OverlayApi = {
   onBarrage: (listener) => {

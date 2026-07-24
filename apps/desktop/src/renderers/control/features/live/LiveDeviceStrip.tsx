@@ -1,4 +1,4 @@
-import { Camera, CameraOff, KeyRound, Mic, Volume2 } from 'lucide-react'
+import { AudioLines, Camera, CameraOff, KeyRound, Mic, Volume2 } from 'lucide-react'
 import { SelectDropdown } from '../../components/SelectDropdown'
 import type { LiveDeviceStripProps } from './liveTypes'
 
@@ -9,6 +9,10 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
     selectedMicrophoneId,
     microphoneReady,
     microphonePermission,
+    systemAudioEnabled,
+    systemAudioSupported,
+    systemAudioReady,
+    systemAudioStatus,
     cameras,
     cameraStream,
     cameraEnabled,
@@ -18,6 +22,7 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
     mediaTransitioning,
     onChangeMicrophone,
     onRequestMicrophoneAccess,
+    onToggleSystemAudio,
     onChangeCamera,
     onToggleCamera
   } = props
@@ -63,6 +68,28 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
         </div>
 
         <div className="device-control">
+          <AudioLines size={16} />
+          <div>
+            <label htmlFor="system-audio-toggle">系统声音 · 推荐</label>
+            <span className="device-status">
+              {systemAudioSupported ? systemAudioStatus : '仅 Windows 支持'}
+            </span>
+          </div>
+          <button
+            id="system-audio-toggle"
+            className={`ghost-button ${systemAudioReady ? 'camera-active' : ''}`}
+            type="button"
+            role="switch"
+            aria-checked={systemAudioEnabled}
+            disabled={!systemAudioSupported || mediaTransitioning || session.status === 'starting' || session.status === 'stopping'}
+            onClick={() => void onToggleSystemAudio()}
+          >
+            <AudioLines size={15} />
+            {systemAudioEnabled ? '关闭' : '开启'}
+          </button>
+        </div>
+
+        <div className="device-control">
           <Camera size={16} />
           <div>
             <label htmlFor="camera">摄像头</label>
@@ -101,6 +128,10 @@ export function LiveDeviceStrip(props: LiveDeviceStripProps): React.JSX.Element 
             : microphoneReady
               ? '正在进行本地音量检测'
               : '授权后可实时检测麦克风音量'}
+        </div>
+        <div className="privacy-note">
+          <AudioLines size={14} />
+          麦克风与系统原始音频仅发送给 StepFun、不持久化；模型只接收最终转写
         </div>
         <div className="privacy-note">
           <Camera size={14} />

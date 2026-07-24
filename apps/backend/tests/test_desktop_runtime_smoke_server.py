@@ -3,7 +3,31 @@ from pathlib import Path
 
 import pytest
 
-from advx_backend.application.recorded_scenario import build_recorded_runtime_fixture
+from advx_backend.application.recorded_scenario import (
+    _RecordedViewerProvider,
+    build_recorded_runtime_fixture,
+)
+from advx_backend.contracts.replay import (
+    RecordedOutputConsumption,
+    RecordedProviderOutput,
+    RecordedReplayEvidence,
+)
+
+
+class _HistoryLedger:
+    def __init__(self, output: RecordedProviderOutput) -> None:
+        self._output = output
+        self.roles: list[str] = []
+
+    def consume(
+        self,
+        role: str,
+        *,
+        runtime_request_id: str | None = None,
+    ) -> dict[str, object]:
+        del runtime_request_id
+        self.roles.append(role)
+        return dict(self._output.output)
 
 
 def _server_module():
@@ -38,3 +62,40 @@ async def test_smoke_fixture_uses_production_graph_without_external_transports(
     async with fixture.app.router.lifespan_context(fixture.app):
         assert fixture.runtime.database.started is True
     assert fixture.runtime.database.started is False
+
+
+@pytest.mark.asyncio
+async def test_recorded_history_summary_is_whitelisted_consumed_and_evidenced() -> None:
+    output = RecordedProviderOutput(
+        generation_request_id="history-1",
+        provider_role="history_summary",
+        output={"summary": "录制的历史摘要"},
+    )
+    ledger = _HistoryLedger(output)
+    provider = _RecordedViewerProvider(ledger)
+
+    summary = await provider.summarize_history(
+        session_id="session",
+        audience_epoch=1,
+        existing_summary=None,
+        older_history="待压缩历史",
+    )
+    consumption = RecordedOutputConsumption(
+        provider_role="history_summary",
+        generation_request_id="history-1",
+        call_index=1,
+    )
+    evidence = RecordedReplayEvidence(
+        decisions=[],
+        selected_viewer_ids=[],
+        barrages=[],
+        memories=[],
+        traces=[],
+        consumed_provider_roles=["history_summary"],
+        consumed_provider_outputs=[consumption],
+    )
+
+    assert summary == "录制的历史摘要"
+    assert provider.history_calls == 1
+    assert ledger.roles == ["history_summary"]
+    assert evidence.consumed_provider_roles == ["history_summary"]

@@ -394,7 +394,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           type="button"
           disabled={!isSessionActive}
           onClick={() => void onToggleOverlay()}
-          title={overlayVisible ? '隐藏弹幕覆盖层' : '显示弹幕覆盖层'}
+          title={overlayVisible ? '隐藏弹幕窗口' : '显示弹幕窗口'}
         >
           {overlayVisible ? <EyeOff size={16} /> : <Eye size={16} />}
           {overlayVisible ? '隐藏' : '显示'}
@@ -451,7 +451,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
       </div>
       {audienceSessionActive && (
         <p className="provider-disclosure">
-          屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型供应商；原始音频仅发送给 StepFun ASR，生成模型仅接收最终转写。原始音频和连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。
+          屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型供应商；麦克风与系统原始音频仅发送给 StepFun ASR、不会持久化，生成模型只接收最终转写。连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。
         </p>
       )}
     </section>

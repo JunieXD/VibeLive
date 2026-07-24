@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canStartLive } from './useMediaController'
+import { canStartLive, resolveAudioChannelStatus } from './useMediaController'
 
 describe('live start eligibility', () => {
   it('allows a screen-only session without optional services or microphones', () => {
@@ -49,5 +49,26 @@ describe('live start eligibility', () => {
         hasCamera: false
       })
     ).toBe(false)
+  })
+})
+
+describe('audio channel UI status', () => {
+  it('shows a source-specific transport rejection instead of capture ready', () => {
+    expect(
+      resolveAudioChannelStatus({
+        paused: false,
+        ready: true,
+        transportError: 'system upload rejected',
+        idleStatus: '等待采集'
+      })
+    ).toBe('传输异常')
+    expect(
+      resolveAudioChannelStatus({
+        paused: false,
+        ready: true,
+        transportError: null,
+        idleStatus: '待检测'
+      })
+    ).toBe('正常')
   })
 })

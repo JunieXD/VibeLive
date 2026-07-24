@@ -1,0 +1,94 @@
+.viewer-avatar-visual {
+  --viewer-avatar-bg: #29475b;
+  --viewer-avatar-ink: #8fd8ff;
+  display: grid;
+  overflow: hidden;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 50%;
+  background: var(--viewer-avatar-bg);
+  color: var(--viewer-avatar-ink);
+}
+
+.viewer-avatar-visual svg {
+  width: 58%;
+  height: 58%;
+  stroke-width: 2.2;
+}
+
+.viewer-avatar-visual[data-avatar-tone="1"] {
+  --viewer-avatar-bg: #4a3859;
+  --viewer-avatar-ink: #deb7ff;
+}
+
+.viewer-avatar-visual[data-avatar-tone="2"] {
+  --viewer-avatar-bg: #245546;
+  --viewer-avatar-ink: #8ee8c5;
+}
+
+.viewer-avatar-visual[data-avatar-tone="3"] {
+  --viewer-avatar-bg: #5c3d34;
+  --viewer-avatar-ink: #ffc0a9;
+}
+
+.viewer-avatar-visual[data-avatar-tone="4"] {
+  --viewer-avatar-bg: #5b5328;
+  --viewer-avatar-ink: #f5df7c;
+}
+
+.viewer-avatar-visual[data-avatar-tone="5"] {
+  --viewer-avatar-bg: #344f2e;
+  --viewer-avatar-ink: #b6e992;
+}
+
+.viewer-avatar-visual[data-avatar-tone="6"] {
+  --viewer-avatar-bg: #57374b;
+  --viewer-avatar-ink: #ffb4dd;
+}
+
+.viewer-avatar-visual[data-avatar-tone="7"] {
+  --viewer-avatar-bg: #304559;
+  --viewer-avatar-ink: #b9d6f4;
+}
+
+:root[data-theme="light"] .viewer-avatar-visual {
+  --viewer-avatar-bg: #dbeef9;
+  --viewer-avatar-ink: #1f5f83;
+  border-color: rgb(23 25 29 / 10%);
+}
+
+:root[data-theme="light"] .viewer-avatar-visual[data-avatar-tone="1"] {
+  --viewer-avatar-bg: #ede0f5;
+  --viewer-avatar-ink: #67407a;
+}
+
+:root[data-theme="light"] .viewer-avatar-visual[data-avatar-tone="2"] {
+  --viewer-avatar-bg: #d5efe5;
+  --viewer-avatar-ink: #24654f;
+}
+
+:root[data-theme="light"] .viewer-avatar-visual[data-avatar-tone="3"] {
+  --viewer-avatar-bg: #f6dfd7;
+  --viewer-avatar-ink: #7b4635;
+}
+
+:root[data-theme="light"] .viewer-avatar-visual[data-avatar-tone="4"] {
+  --viewer-avatar-bg: #f1e8bf;
+  --viewer-avatar-ink: #6a5a1d;
+}
+
+:root[data-theme="light"] .viewer-avatar-visual[data-avatar-tone="5"] {
+  --viewer-avatar-bg: #dfeeda;
+  --viewer-avatar-ink: #3c6b30;
+}
+
+:root[data-theme="light"] .viewer-avatar-visual[data-avatar-tone="6"] {
+  --viewer-avatar-bg: #f2dce9;
+  --viewer-avatar-ink: #7a3d61;
+}
+
+:root[data-theme="light"] .viewer-avatar-visual[data-avatar-tone="7"] {
+  --viewer-avatar-bg: #dde7f2;
+  --viewer-avatar-ink: #345b78;
+}

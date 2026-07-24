@@ -33,7 +33,7 @@ import {
 } from "./logging";
 import { restoreMacApplicationActivation } from "./mac-application-activation";
 import { createControlWindow } from "./windows/control";
-import { hideOverlay } from "./windows/overlay";
+import { hideBarrageOutputs } from "./windows/barrage-outputs";
 
 let controlWindow: BrowserWindow | null = null;
 let applicationTray: ApplicationTray | null = null;
@@ -363,7 +363,7 @@ async function initializeApplication(): Promise<void> {
 
   const emergencyShortcutRegistered = globalShortcut.register("CommandOrControl+Shift+X", () => {
     logger.warn("action.emergency-stop");
-    hideOverlay();
+    hideBarrageOutputs();
     controlWindow?.webContents.send("session:emergency-stop");
     controlWindow?.show();
     controlWindow?.focus();

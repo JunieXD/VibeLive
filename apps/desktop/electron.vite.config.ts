@@ -19,6 +19,7 @@ export default defineConfig({
         input: {
           control: resolve("src/preload/control.ts"),
           overlay: resolve("src/preload/overlay.ts"),
+          "floating-chat": resolve("src/preload/floating-chat.ts"),
           capture: resolve("src/preload/capture.ts")
         }
       }
@@ -32,6 +33,7 @@ export default defineConfig({
         input: {
           control: resolve("src/renderers/control/index.html"),
           overlay: resolve("src/renderers/overlay/index.html"),
+          "floating-chat": resolve("src/renderers/floating-chat/index.html"),
           capture: resolve("src/renderers/capture/index.html")
         }
       }

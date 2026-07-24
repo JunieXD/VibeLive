@@ -1,11 +1,18 @@
 from collections.abc import AsyncIterator
+from enum import StrEnum
 from typing import Protocol
 
 from pydantic import BaseModel, Field, model_validator
 
 
+class AudioSource(StrEnum):
+    MICROPHONE = "microphone"
+    SYSTEM_AUDIO = "system_audio"
+
+
 class AudioChunk(BaseModel):
     session_id: str
+    source: AudioSource = AudioSource.MICROPHONE
     started_at_ms: int = Field(ge=0)
     ended_at_ms: int = Field(ge=0)
     sample_rate: int = Field(gt=0)
@@ -22,6 +29,7 @@ class AudioChunk(BaseModel):
 
 class TranscriptSegment(BaseModel):
     session_id: str
+    source: AudioSource = AudioSource.MICROPHONE
     text: str
     started_at_ms: int = Field(ge=0)
     ended_at_ms: int = Field(ge=0)
@@ -61,7 +69,7 @@ class AsrProvider(Protocol):
 
     async def push_audio(self, chunk: AudioChunk) -> None: ...
 
-    async def commit(self) -> None: ...
+    async def commit(self, source: AudioSource = AudioSource.MICROPHONE) -> None: ...
 
     def results(self) -> AsyncIterator[TranscriptSegment]: ...
 

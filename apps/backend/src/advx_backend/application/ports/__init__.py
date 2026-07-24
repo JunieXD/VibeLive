@@ -1,4 +1,9 @@
-from advx_backend.application.ports.asr import AsrProvider, AudioChunk, TranscriptSegment
+from advx_backend.application.ports.asr import (
+    AsrProvider,
+    AudioChunk,
+    AudioSource,
+    TranscriptSegment,
+)
 from advx_backend.application.ports.audience_repository import AudienceRepository
 from advx_backend.application.ports.barrage import BarragePublisher
 from advx_backend.application.ports.generation import (
@@ -49,6 +54,7 @@ __all__ = [
     "AsrProvider",
     "AudioCommit",
     "AudioChunk",
+    "AudioSource",
     "AudioInput",
     "AudienceRepository",
     "AudienceBatch",

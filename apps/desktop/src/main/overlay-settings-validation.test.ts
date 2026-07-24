@@ -7,6 +7,7 @@ import {
 describe("overlay settings validation", () => {
   it("creates the requested defaults for the primary display", () => {
     expect(createDefaultOverlaySettings(42)).toEqual({
+      displayMode: "overlay",
       targetDisplayId: 42,
       fontSizePx: 25,
       fontFamily: "bilibili",
@@ -22,6 +23,7 @@ describe("overlay settings validation", () => {
   it("rejects out-of-range values and regions shorter than 20 percent", () => {
     const defaults = createDefaultOverlaySettings(1);
     for (const invalid of [
+      { ...defaults, displayMode: "sidebar" },
       { ...defaults, fontSizePx: 13 },
       { ...defaults, fontFamily: "comic-sans" },
       { ...defaults, bold: "yes" },
@@ -54,6 +56,7 @@ describe("overlay settings validation", () => {
     delete legacySettings.fontFamily;
     delete legacySettings.bold;
     delete legacySettings.outlineWidthPx;
+    delete legacySettings.displayMode;
 
     expect(normalizeOverlaySettings(legacySettings, 1, [1])).toEqual(settings);
   });
@@ -67,5 +70,14 @@ describe("overlay settings validation", () => {
     expect(normalizeOverlaySettings(legacySettings, 1, [1])).toEqual(
       createDefaultOverlaySettings(1)
     );
+  });
+
+  it("accepts the floating interaction window as the second display mode", () => {
+    const settings = {
+      ...createDefaultOverlaySettings(1),
+      displayMode: "floating" as const
+    };
+
+    expect(normalizeOverlaySettings(settings, 1, [1])).toEqual(settings);
   });
 });

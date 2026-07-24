@@ -1,13 +1,22 @@
-import type { OverlayFontFamily, OverlaySettings } from "../shared/contracts";
+import type {
+  BarrageDisplayMode,
+  OverlayFontFamily,
+  OverlaySettings
+} from "../shared/contracts";
 
 const OVERLAY_FONT_FAMILIES: readonly OverlayFontFamily[] = [
   "bilibili",
   "yahei",
   "system"
 ];
+const BARRAGE_DISPLAY_MODES: readonly BarrageDisplayMode[] = [
+  "overlay",
+  "floating"
+];
 
 export function createDefaultOverlaySettings(primaryDisplayId: number): OverlaySettings {
   return {
+    displayMode: "overlay",
     targetDisplayId: primaryDisplayId,
     fontSizePx: 25,
     fontFamily: "bilibili",
@@ -31,6 +40,10 @@ function isOverlayFontFamily(value: unknown): value is OverlayFontFamily {
   return OVERLAY_FONT_FAMILIES.includes(value as OverlayFontFamily);
 }
 
+function isBarrageDisplayMode(value: unknown): value is BarrageDisplayMode {
+  return BARRAGE_DISPLAY_MODES.includes(value as BarrageDisplayMode);
+}
+
 export function normalizeOverlaySettings(
   value: unknown,
   primaryDisplayId: number,
@@ -41,10 +54,12 @@ export function normalizeOverlaySettings(
   const settings = value as Partial<OverlaySettings>;
   const defaults = createDefaultOverlaySettings(primaryDisplayId);
   const region = settings.region;
+  const displayMode = settings.displayMode ?? defaults.displayMode;
   const fontFamily = settings.fontFamily ?? defaults.fontFamily;
   const bold = settings.bold ?? defaults.bold;
   const outlineWidthPx = settings.outlineWidthPx ?? defaults.outlineWidthPx;
   if (
+    !isBarrageDisplayMode(displayMode) ||
     !Number.isInteger(settings.targetDisplayId) ||
     !isNumberInRange(settings.fontSizePx, 14, 36) ||
     !isOverlayFontFamily(fontFamily) ||
@@ -62,6 +77,7 @@ export function normalizeOverlaySettings(
   }
 
   return {
+    displayMode,
     targetDisplayId: displayIds.includes(settings.targetDisplayId as number)
       ? (settings.targetDisplayId as number)
       : primaryDisplayId,

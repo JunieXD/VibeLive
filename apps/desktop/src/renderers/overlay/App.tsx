@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { OverlayFontFamily, OverlaySettings } from '../../shared/contracts'
 import {
   applySettingsToQueue,
+  BARRAGE_LINE_HEIGHT,
   DEFAULT_OVERLAY_SETTINGS,
   enqueueBarrage,
+  fixedBarrageLaneOffsetPx,
   FIXED_BARRAGE_DURATION_MS,
   fitSettingsToViewport,
   normalizeOverlaySettings,
@@ -152,6 +154,7 @@ export function App(): React.JSX.Element {
         '--overlay-font-family': FONT_FAMILY_STACKS[settings.fontFamily],
         '--overlay-font-weight': settings.bold ? 700 : 400,
         '--overlay-outline-shadow': outlineTextShadow(settings.outlineWidthPx),
+        '--overlay-line-height': BARRAGE_LINE_HEIGHT,
         '--overlay-speed': settings.speed,
         '--overlay-opacity': settings.opacity / 100,
         '--overlay-density': settings.density,
@@ -168,7 +171,11 @@ export function App(): React.JSX.Element {
           style={{
             '--lane': item.lane,
             '--lane-top': `${item.laneTopPercent}%`,
-            '--lane-bottom': `${item.laneBottomPercent}%`
+            '--lane-bottom': `${item.laneBottomPercent}%`,
+            '--fixed-lane-offset': `${fixedBarrageLaneOffsetPx(
+              item.lane,
+              settings.fontSizePx
+            )}px`
           } as React.CSSProperties}
         >
           {item.text}

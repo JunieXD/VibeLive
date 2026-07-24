@@ -10,6 +10,12 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
     captureStatus,
     cameraStatus,
     microphoneLevel,
+    microphoneStatus,
+    systemAudioLevel,
+    systemAudioReady,
+    systemAudioStatus,
+    microphonePartial,
+    systemAudioPartial,
     asrReady,
     asrStatus,
     visualSettings,
@@ -22,7 +28,7 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
   return (
     <section className="mixer-panel">
       <div className="panel-heading compact">
-        <span className="panel-title">混音与链路</span>
+        <span className="panel-title">音频通道与链路</span>
         <Gauge size={16} />
       </div>
       <div className="mixer-scroll" tabIndex={0} aria-label="混音与链路状态">
@@ -43,10 +49,33 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
         <div className="mixer-row">
           <span>
             <Mic size={14} />
-            麦克风
+            麦克风（主播）
           </span>
-          <div className="mixer-meter" aria-label={`麦克风音量 ${microphoneLevel}%`}>
-            <span style={{ width: `${microphoneLevel}%` }} />
+          <div className="mixer-channel">
+            <div className="mixer-meter" aria-label={`麦克风音量 ${microphoneLevel}%`}>
+              <span style={{ width: `${microphoneLevel}%` }} />
+            </div>
+            <small className={microphoneStatus === '正常' ? 'ok' : ''}>
+              {microphoneStatus === '传输异常'
+                ? microphoneStatus
+                : microphonePartial || microphoneStatus}
+            </small>
+          </div>
+        </div>
+        <div className="mixer-row">
+          <span>
+            <AudioLines size={14} />
+            系统声音
+          </span>
+          <div className="mixer-channel">
+            <div className="mixer-meter" aria-label={`系统声音音量 ${systemAudioLevel}%`}>
+              <span style={{ width: `${systemAudioLevel}%` }} />
+            </div>
+            <small className={systemAudioReady && systemAudioStatus === '正常' ? 'ok' : ''}>
+              {systemAudioStatus === '传输异常'
+                ? systemAudioStatus
+                : systemAudioPartial || systemAudioStatus}
+            </small>
           </div>
         </div>
         <div className="mixer-row">
