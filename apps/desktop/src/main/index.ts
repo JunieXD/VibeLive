@@ -61,6 +61,12 @@ function requestApplicationQuitFromSignal(signal: NodeJS.Signals): void {
   app.quit();
 }
 
+function restoreMacApplicationActivation(): void {
+  if (process.platform !== "darwin") return;
+  app.setActivationPolicy("regular");
+  app.dock.show();
+}
+
 process.on("SIGINT", () => requestApplicationQuitFromSignal("SIGINT"));
 process.on("SIGTERM", () => requestApplicationQuitFromSignal("SIGTERM"));
 
@@ -395,6 +401,7 @@ if (!hasSingleInstanceLock) {
   void app
     .whenReady()
     .then(async () => {
+      restoreMacApplicationActivation();
       try {
         await startDevelopmentShutdownControl();
       } catch (error) {
