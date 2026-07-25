@@ -21,8 +21,8 @@ import {
 
 describe('audience presets and modes', () => {
   it('preserves the original game catalog and adds cross-scene personas and modes', () => {
-    expect(BASE_PERSONAS).toHaveLength(44)
-    expect(new Set(BASE_PERSONAS.map((persona) => persona.id)).size).toBe(44)
+    expect(BASE_PERSONAS).toHaveLength(55)
+    expect(new Set(BASE_PERSONAS.map((persona) => persona.id)).size).toBe(55)
     expect(BASE_PERSONAS.map((persona) => persona.id)).toContain('reaction_qmark')
     expect(BASE_PERSONAS.map((persona) => persona.id)).toContain('instigator')
     expect(BASE_PERSONAS.find((persona) => persona.id === 'instigator')?.name).toBe('串子哥')
@@ -33,7 +33,11 @@ describe('audience presets and modes', () => {
       'craft_watcher',
       'kitchen_sidekick',
       'scenery_spotter',
-      'sports_spectator'
+      'sports_spectator',
+      'live_question_host',
+      'curious_guest',
+      'gentle_supporter',
+      'match_forecaster'
     ]))
     expect(BUILT_IN_MODES).toHaveLength(12)
     expect(BUILT_IN_MODES.slice(0, 6).map(totalViewerCount))
@@ -46,6 +50,7 @@ describe('audience presets and modes', () => {
       'travel-outdoor-room',
       'sports-watch-party'
     ])
+    expect(BUILT_IN_MODES.slice(6).every((mode) => mode.revision === 2)).toBe(true)
     expect(BUILT_IN_MODES.map((mode) => mode.name)).toEqual([
       'CSGO：热闹游戏房',
       'CSGO：6657 玩机器风格',
@@ -63,6 +68,23 @@ describe('audience presets and modes', () => {
     expect(BUILT_IN_MODES.every(
       (mode) => mode.visualSettings.barrageGenerationMode === 'per_viewer'
     )).toBe(true)
+    const gamePersonaIds = new Set(BASE_PERSONAS.slice(0, 32).map((persona) => persona.id))
+    for (const mode of BUILT_IN_MODES.slice(6)) {
+      expect(Object.keys(mode.personaCounts).filter((personaId) => gamePersonaIds.has(personaId)))
+        .toEqual([])
+    }
+    expect(Object.keys(
+      BUILT_IN_MODES.find((mode) => mode.id === 'food-life-room')?.personaCounts ?? {}
+    )).toEqual([
+      'kitchen_sidekick',
+      'flavor_imaginer',
+      'topic_starter',
+      'curious_guest',
+      'gentle_supporter',
+      'lighthearted_companion',
+      'live_question_host',
+      'measured_observer'
+    ])
     expect(BASE_PERSONAS.flatMap((persona) => validatePersona(persona))).toEqual([])
 
     const mode6657 = BUILT_IN_MODES.find((mode) => mode.id === 'room-6657')
@@ -309,13 +331,66 @@ describe('workspace persistence', () => {
 
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
-    expect(parsed.workspace.personas).toHaveLength(44)
+    expect(parsed.workspace.personas).toHaveLength(55)
     expect(parsed.workspace.modeState.modes.slice(0, 6).map((mode) => mode.id))
       .toEqual(previousBuiltInModeIds)
     expect(parsed.workspace.modeState.modes.slice(0, 6).map((mode) => mode.name))
       .toEqual(BUILT_IN_MODES.slice(0, 6).map((mode) => mode.name))
     expect(parsed.workspace.modeState.modes.map((mode) => mode.id))
       .toEqual(BUILT_IN_MODES.map((mode) => mode.id))
+  })
+
+  it('upgrades an untouched cross-scene mode without replacing a revised mode', () => {
+    const workspace = createInitialAudienceWorkspace()
+    const legacyFoodPersonaCounts = {
+      kitchen_sidekick: 3,
+      flavor_imaginer: 3,
+      topic_starter: 3,
+      curious_ten: 3,
+      comfort_voice: 2,
+      fun_seeker: 2,
+      question_catcher: 1,
+      calm_realist: 1
+    }
+    const persisted = {
+      ...workspace,
+      modeState: {
+        ...workspace.modeState,
+        modes: workspace.modeState.modes.map((mode) => {
+          if (mode.id === 'food-life-room') {
+            return {
+              ...mode,
+              revision: 1,
+              personaCounts: legacyFoodPersonaCounts
+            }
+          }
+          if (mode.id === 'music-live-room') {
+            return { ...mode, revision: 3, personaCounts: { music_listener: 18 } }
+          }
+          return mode
+        })
+      }
+    }
+
+    const parsed = parseAudienceWorkspaceState(persisted)
+
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    const food = parsed.workspace.modeState.modes.find((mode) => mode.id === 'food-life-room')
+    const music = parsed.workspace.modeState.modes.find((mode) => mode.id === 'music-live-room')
+    expect(food?.revision).toBe(2)
+    expect(Object.keys(food?.personaCounts ?? {})).toEqual([
+      'kitchen_sidekick',
+      'flavor_imaginer',
+      'topic_starter',
+      'curious_guest',
+      'gentle_supporter',
+      'lighthearted_companion',
+      'live_question_host',
+      'measured_observer'
+    ])
+    expect(music?.revision).toBe(3)
+    expect(music?.personaCounts).toEqual({ music_listener: 18 })
   })
 
   it('extracts v1 local memes for one-time Shared Brain migration', () => {

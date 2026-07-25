@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "basePersonaCount": 44,
+  "basePersonaCount": 55,
   "basePersonaIds": [
     "reaction_qmark",
     "cheat_suspector",
@@ -45,7 +45,18 @@
     "flavor_imaginer",
     "scenery_spotter",
     "journey_companion",
-    "sports_spectator"
+    "sports_spectator",
+    "live_question_host",
+    "curious_guest",
+    "gentle_supporter",
+    "measured_observer",
+    "lighthearted_companion",
+    "returning_regular",
+    "welcome_guide",
+    "session_chronicler",
+    "match_forecaster",
+    "match_analyst",
+    "score_tracker"
   ],
   "builtInModeIds": [
     "lively-game-room",

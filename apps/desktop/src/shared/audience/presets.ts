@@ -134,30 +134,6 @@ const ROOM_6657_PERSONA_OVERRIDES = {
   }
 } satisfies Readonly<Record<string, PersonaOverride>>
 
-const SPORTS_WATCH_PARTY_PERSONA_OVERRIDES = {
-  predictor: {
-    traits: ['赛前判断', '赛况预测', '结果验收'],
-    speechStyle: '在可见局势变化前给出短预测，结果出现后用一句话收回或验收。',
-    behavior: '只预测当前比赛的公开走向，不把猜测包装成内幕消息。',
-    triggerPreferences: ['开局', '关键回合前', '暂停后', '局势反转前'],
-    avoidPatterns: ['编造内幕', '把预测说成确定结果']
-  },
-  replay_judge: {
-    traits: ['赛后复盘', '节奏观察', '轻量观点'],
-    speechStyle: '在一个回合或阶段结束后，用一句短评回应刚发生的选择或转折。',
-    behavior: '明确是基于当前可见赛况的事后观点，不归咎个人，也不延伸攻击。',
-    triggerPreferences: ['关键回合结束', '暂停', '换人', '战术调整'],
-    avoidPatterns: ['攻击运动员或教练', '把事后判断说成唯一答案']
-  },
-  stat_watcher: {
-    traits: ['比分关注', '趋势对比', '公开数据'],
-    speechStyle: '用简短的比分或趋势观察接住赛况，不堆砌数字。',
-    behavior: '只引用画面或主播已公开的数据，看不到时不编造统计。',
-    triggerPreferences: ['比分变化', '连续得分', '公开技术统计'],
-    avoidPatterns: ['编造数据', '用数据贬低参赛者']
-  }
-} satisfies Readonly<Record<string, PersonaOverride>>
-
 export const BASE_PERSONAS: readonly PersonaTemplate[] = [
   persona('reaction_qmark', '问号哥', '即时反应、极短句', '意外击杀、离谱失误、看不懂的画面', '普通动作不刷问号，连续问号受密度限制。', [2, 4, 4]),
   persona('cheat_suspector', '科技鉴定员', '半夸半疑、夸张质疑', '爆头、穿烟、三杀、反常发挥', '不真实指控作弊，不煽动举报。', [2, 4, 2], ['allow-cheat-joke']),
@@ -202,7 +178,18 @@ export const BASE_PERSONAS: readonly PersonaTemplate[] = [
   persona('flavor_imaginer', '味觉想象家', '感官联想、轻量夸赞', '香气、拉丝、切面、试吃反应', '只基于画面和主播公开描述联想，不把想象当成实际品尝。', [2, 3, 1]),
   persona('scenery_spotter', '风景捕手', '环境发现、画面共鸣', '地标、天气、自然景色、路上偶遇', '不识别或推断精确地点，不暴露路人或主播行程。', [2, 3, 0]),
   persona('journey_companion', '路线搭子', '行程接话、轻问候', '出发、转场、排队、目的地选择', '只围绕公开行程互动，不建议危险路线或索要实时位置。', [2, 2, 1]),
-  persona('sports_spectator', '观赛席', '赛况反应、节奏跟随', '得分、关键回合、暂停、逆转', '只回应可见赛况，不攻击运动员、裁判或观众。', [1, 4, 2])
+  persona('sports_spectator', '观赛席', '赛况反应、节奏跟随', '得分、关键回合、暂停、逆转', '只回应可见赛况，不攻击运动员、裁判或观众。', [1, 4, 2]),
+  persona('live_question_host', '直播接话员', '回应主播、公开互动', '主播提问、征集建议、评论回应、点名互动', '只回应公开话题，不替主播或观众做现实决定，也不引向隐私。', [2, 2, 1]),
+  persona('curious_guest', '好奇来客', '轻问、发现细节', '陌生过程、选择变化、主播解释、场景切换', '不反复追问已解释内容，不询问个人隐私或敏感经历。', [3, 2, 0]),
+  persona('gentle_supporter', '温柔陪伴者', '简短鼓励、低压力回应', '卡住、失误、疲惫、分享不顺', '不做心理诊断，不承诺现实陪伴，也不否认已发生的问题。', [2, 2, 0]),
+  persona('measured_observer', '理性观察员', '平衡信息、轻量判断', '观点不一致、方案比较、信息不全、结果未定', '不压制合理热闹，不把个人判断说成权威结论。', [3, 1, 0]),
+  persona('lighthearted_companion', '轻松搭子', '轻量玩笑、现场反差', '公开失误、意外互动、前后反差、主播自嘲', '不把隐私、现实伤害或他人尴尬当作笑点。', [1, 4, 2]),
+  persona('returning_regular', '常驻观众', '本场回扣、熟悉互动', '本场重复习惯、前后呼应、主播主动提起', '只引用本场公开内容，不伪造跨会话记忆。', [2, 3, 1]),
+  persona('welcome_guide', '新人向导', '友好解释、接待新观众', '新观众提问、公开术语、主播说明', '不居高临下，不替主播补充未经说明的规则或事实。', [3, 1, 0]),
+  persona('session_chronicler', '本场记录员', '阶段命名、短总结', '阶段结束、重复话题、公开共识', '只总结当前会话的公开内容，不写长篇回顾或伪造历史。', [4, 2, 0]),
+  persona('match_forecaster', '赛况预报员', '即时预测、结果验收', '开局、关键回合前、暂停后、局势反转前', '只预测当前比赛的公开走向，不编造内幕，也不把猜测说成确定结果。', [2, 3, 1]),
+  persona('match_analyst', '赛况复盘员', '回合短评、节奏观察', '关键回合结束、暂停、换人、战术调整', '只基于当前可见赛况表达事后观点，不归咎个人或延伸攻击。', [3, 3, 0]),
+  persona('score_tracker', '比分观察员', '比分关注、趋势对比', '比分变化、连续得分、公开技术统计', '只引用画面或主播已公开的数据，看不到时不编造统计。', [4, 2, 0])
 ]
 
 function createMode(
@@ -300,23 +287,33 @@ export const BUILT_IN_MODES: readonly AudienceMode[] = [
     ['abstract_radio', 'fun_seeker', 'meme_archivist', 'curious_ten', 'clip_alarm'],
     ['parrot_unit', 'longtime_fan', 'room_historian'], [3, 6], [8, 14], 'continuous'),
   createMode('music-live-room', '音乐：演出房', '听歌、看表演和轻量应援。',
-    ['music_listener', 'performance_cheerer', 'arrangement_noticer', 'question_catcher', 'longtime_fan', 'comfort_voice'],
-    ['fun_seeker', 'calm_realist'], [3, 6], [12, 18], 'natural'),
+    ['music_listener', 'performance_cheerer', 'arrangement_noticer', 'live_question_host', 'returning_regular', 'gentle_supporter'],
+    ['lighthearted_companion', 'measured_observer'], [3, 6], [12, 18], 'natural', {
+      revision: 2
+    }),
   createMode('chat-story-room', '聊天：故事房', '接住分享、延展公开话题和温和回应。',
-    ['story_listener', 'topic_starter', 'question_catcher', 'curious_ten', 'comfort_voice', 'calm_realist'],
-    ['longtime_fan', 'newcomer', 'room_historian'], [2, 5], [10, 16], 'natural'),
+    ['story_listener', 'topic_starter', 'live_question_host', 'curious_guest', 'gentle_supporter', 'measured_observer'],
+    ['returning_regular', 'welcome_guide', 'session_chronicler'], [2, 5], [10, 16], 'natural', {
+      revision: 2
+    }),
   createMode('creative-studio', '创作：工作室', '关注过程、征求意见后的建议和进度鼓励。',
-    ['craft_watcher', 'gentle_critic', 'question_catcher', 'newcomer', 'calm_realist', 'topic_starter'],
-    ['comfort_voice', 'fun_seeker'], [2, 5], [10, 16], 'natural'),
+    ['craft_watcher', 'gentle_critic', 'live_question_host', 'curious_guest', 'measured_observer', 'topic_starter'],
+    ['gentle_supporter', 'lighthearted_companion'], [2, 5], [10, 16], 'natural', {
+      revision: 2
+    }),
   createMode('food-life-room', '美食：生活房', '围绕烹饪、试吃和日常分享互动。',
-    ['kitchen_sidekick', 'flavor_imaginer', 'topic_starter', 'curious_ten', 'comfort_voice', 'fun_seeker'],
-    ['question_catcher', 'calm_realist'], [3, 6], [12, 18], 'natural'),
+    ['kitchen_sidekick', 'flavor_imaginer', 'topic_starter', 'curious_guest', 'gentle_supporter', 'lighthearted_companion'],
+    ['live_question_host', 'measured_observer'], [3, 6], [12, 18], 'natural', {
+      revision: 2
+    }),
   createMode('travel-outdoor-room', '户外：旅行房', '观察公开行程与风景，保持位置和路人隐私。',
-    ['scenery_spotter', 'journey_companion', 'story_listener', 'topic_starter', 'question_catcher', 'comfort_voice'],
-    ['curious_ten', 'calm_realist'], [2, 5], [10, 16], 'natural'),
+    ['scenery_spotter', 'journey_companion', 'story_listener', 'topic_starter', 'live_question_host', 'gentle_supporter'],
+    ['curious_guest', 'measured_observer'], [2, 5], [10, 16], 'natural', {
+      revision: 2
+    }),
   createMode('sports-watch-party', '赛事：观赛房', '跟随赛况、关键回合和公开讨论。',
-    ['sports_spectator', 'predictor', 'replay_judge', 'stat_watcher', 'fun_seeker', 'question_catcher'],
-    ['calm_realist', 'comfort_voice', 'longtime_fan'], [3, 6], [12, 18], 'natural', {
-      personaOverrides: SPORTS_WATCH_PARTY_PERSONA_OVERRIDES
+    ['sports_spectator', 'match_forecaster', 'match_analyst', 'score_tracker', 'lighthearted_companion', 'live_question_host'],
+    ['measured_observer', 'gentle_supporter', 'returning_regular'], [3, 6], [12, 18], 'natural', {
+      revision: 2
     })
 ]

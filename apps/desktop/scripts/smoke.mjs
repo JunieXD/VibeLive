@@ -191,8 +191,8 @@ try {
   if (modeValues.length !== 12) {
     throw new Error('Expected the complete built-in audience mode catalog.')
   }
-  if ((await page.locator('[data-audience-persona-row]').count()) !== 44) {
-    throw new Error('Expected the complete 44-persona catalog.')
+  if ((await page.locator('[data-audience-persona-row]').count()) !== 55) {
+    throw new Error('Expected the complete 55-persona catalog.')
   }
   await selectDropdown(page, '观众模式', 'room-6657')
   await page.waitForFunction(

@@ -14,7 +14,13 @@ const MODE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const MAX_FRAME_BUNDLE_SIZE = 5
 const MAX_FRAME_WINDOW_MS = 30_000
 const BUILT_IN_MODE_MIGRATIONS = new Map([
-  ['room-6657', { fromRevision: 1, toRevision: 2 }]
+  ['room-6657', { fromRevision: 1, toRevision: 2 }],
+  ['music-live-room', { fromRevision: 1, toRevision: 2 }],
+  ['chat-story-room', { fromRevision: 1, toRevision: 2 }],
+  ['creative-studio', { fromRevision: 1, toRevision: 2 }],
+  ['food-life-room', { fromRevision: 1, toRevision: 2 }],
+  ['travel-outdoor-room', { fromRevision: 1, toRevision: 2 }],
+  ['sports-watch-party', { fromRevision: 1, toRevision: 2 }]
 ])
 const BUILT_IN_MODE_LEGACY_NAMES = new Map([
   ['lively-game-room', '热闹游戏房'],
