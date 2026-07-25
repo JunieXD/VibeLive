@@ -17,6 +17,9 @@ importers:
       '@advx/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@echogarden/fvad-wasm':
+        specifier: 0.2.0
+        version: 0.2.0
       electron-log:
         specifier: ^5.4.4
         version: 5.4.4
@@ -169,6 +172,9 @@ packages:
   '@babel/types@7.29.7':
     resolution: {integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==}
     engines: {node: '>=6.9.0'}
+
+  '@echogarden/fvad-wasm@0.2.0':
+    resolution: {integrity: sha512-jPPzN6uV23dsOkKnGxajBDw81Xx3ICecw72sIzI+m4PzFWpSf/QOLvlgf7mySfqCngD54LRC1aDgD5haB45dbg==}
 
   '@electron-internal/extract-zip@1.0.4':
     resolution: {integrity: sha512-Zr1Vs7E9tpCNhZHDAbFVXc2gEVCG9RqPDjrno5+bdgB6LRAuvgyMHJut4NCVyYwtAieapMzc3fiQ3CSTi75ARg==}
@@ -2383,6 +2389,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@echogarden/fvad-wasm@0.2.0': {}
 
   '@electron-internal/extract-zip@1.0.4': {}
 

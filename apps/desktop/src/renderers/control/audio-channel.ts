@@ -8,6 +8,12 @@ import {
 } from './audio'
 import type { VisualMode } from './visual'
 
+export type VoiceActivityDetector = {
+  detect(samples: Float32Array, inputSampleRate: number): boolean | null
+  reset(): void
+  dispose(): void
+}
+
 export type BufferedAudioChunk = {
   samples: Float32Array
   sampleRate: number
@@ -35,6 +41,7 @@ export type AudioChannelState = {
   candidateChunks: Float32Array[]
   candidateStartedAt: number | null
   noiseFloor: number
+  voiceActivityDetector: VoiceActivityDetector | null
   bufferedChunks: BufferedAudioChunk[]
   lastSystemAudioSubmittedAtMs: number | null
   systemAudioSubmissionPending: boolean
@@ -60,6 +67,7 @@ export function createAudioChannelState(source: AudioSource): AudioChannelState 
     candidateChunks: [],
     candidateStartedAt: null,
     noiseFloor: 0.003,
+    voiceActivityDetector: null,
     bufferedChunks: [],
     lastSystemAudioSubmittedAtMs: null,
     systemAudioSubmissionPending: false,
@@ -84,6 +92,37 @@ export function resetAudioSegment(channel: AudioChannelState): void {
 export function resetSpeechGate(channel: AudioChannelState): void {
   resetAudioSegment(channel)
   channel.noiseFloor = 0.003
+  try {
+    channel.voiceActivityDetector?.reset()
+  } catch {
+    clearVoiceActivityDetector(channel)
+  }
+}
+
+export function clearVoiceActivityDetector(channel: AudioChannelState): void {
+  const detector = channel.voiceActivityDetector
+  channel.voiceActivityDetector = null
+  try {
+    detector?.dispose()
+  } catch {
+    // A failed cleanup must not make microphone capture unavailable.
+  }
+}
+
+export function detectMicrophoneSpeech(
+  channel: AudioChannelState,
+  samples: Float32Array,
+  sampleRate: number,
+  fallback: boolean
+): boolean {
+  const detector = channel.voiceActivityDetector
+  if (channel.source !== 'microphone' || detector === null) return fallback
+  try {
+    return detector.detect(samples, sampleRate) ?? fallback
+  } catch {
+    clearVoiceActivityDetector(channel)
+    return fallback
+  }
 }
 
 export function clearSystemAudioBuffer(channel: AudioChannelState): void {

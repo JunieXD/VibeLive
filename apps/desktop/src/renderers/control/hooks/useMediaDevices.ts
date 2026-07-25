@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import type { DesktopSource, MediaAccessStatus } from '../../../shared/contracts'
 import type { SessionStatus } from '../../../shared/session'
 import {
+  clearVoiceActivityDetector,
   clearSystemAudioBuffer,
   createAudioChannelState,
+  detectMicrophoneSpeech,
   markSystemAudioSubmitted,
   observeSystemAudioChunk,
   pendingStandaloneSystemAudioSnapshot,
@@ -24,6 +26,7 @@ import {
   speechThresholds,
   updateNoiseFloor
 } from '../audio'
+import { createWebRtcVoiceActivityDetector } from '../web-rtc-vad'
 import {
   bindMediaStreamToVideo,
   calculateMicrophoneLevel,
@@ -380,6 +383,7 @@ export function useMediaDevices({
     const stream = microphoneStreamRef.current
     microphoneStreamRef.current = null
     channel.stream = null
+    clearVoiceActivityDetector(channel)
     stopMediaStream(stream)
     await flushMicrophoneSegment(channel)
     updateAudioTransportError(channel, null, setMicrophoneTransportError)
@@ -622,9 +626,18 @@ export function useMediaDevices({
         }
 
         const thresholds = speechThresholds(channel.noiseFloor)
+        const fallbackSpeech = level >= (
+          channel.segmentStartedAt === null ? thresholds.start : thresholds.continue
+        )
+        const speechDetected = detectMicrophoneSpeech(
+          channel,
+          copy,
+          sampleRate,
+          fallbackSpeech
+        )
         if (channel.segmentStartedAt === null) {
           channel.noiseFloor = updateNoiseFloor(channel.noiseFloor, level)
-          if (level < thresholds.start) {
+          if (!speechDetected) {
             channel.candidateChunks = []
             channel.candidateStartedAt = null
             return
@@ -648,7 +661,7 @@ export function useMediaDevices({
           channel.lastSpeechAt = now
           return
         }
-        if (level >= thresholds.continue) {
+        if (speechDetected) {
           channel.lastSpeechAt = now
         } else if (
           channel.lastSpeechAt !== null &&
@@ -665,8 +678,20 @@ export function useMediaDevices({
       channel.context = context
       channel.processor = processor
       channel.sampleRate = context.sampleRate
-      if (channel.source === 'microphone') resetSpeechGate(channel)
-      else {
+      if (channel.source === 'microphone') {
+        resetSpeechGate(channel)
+        void createWebRtcVoiceActivityDetector()
+          .then((detector) => {
+            if (channel.stream !== stream || channel.processor !== processor) {
+              detector.dispose()
+              return
+            }
+            clearVoiceActivityDetector(channel)
+            channel.voiceActivityDetector = detector
+          })
+          // VAD improves segmentation but must never prevent microphone capture.
+          .catch(() => undefined)
+      } else {
         resetAudioSegment(channel)
         clearSystemAudioBuffer(channel)
       }

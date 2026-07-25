@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   appendSystemAudioBuffer,
   clearSystemAudioBuffer,
+  detectMicrophoneSpeech,
   createAudioChannelState,
   markSystemAudioSubmitted,
   observeSystemAudioChunk,
@@ -30,6 +31,45 @@ describe('audio channel state', () => {
     resetAudioSegment(microphone)
     expect(microphone.chunks).toHaveLength(0)
     expect(systemAudio.source).toBe('system_audio')
+  })
+
+  it('uses the microphone VAD when available and keeps the RMS gate as a fallback', () => {
+    const channel = createAudioChannelState('microphone')
+    const calls: Array<[number, number]> = []
+    channel.voiceActivityDetector = {
+      detect: (samples, sampleRate) => {
+        calls.push([samples.length, sampleRate])
+        return false
+      },
+      reset: () => undefined,
+      dispose: () => undefined
+    }
+
+    expect(detectMicrophoneSpeech(channel, new Float32Array(320), 16_000, true)).toBe(false)
+    expect(calls).toEqual([[320, 16_000]])
+
+    channel.voiceActivityDetector = {
+      detect: () => null,
+      reset: () => undefined,
+      dispose: () => undefined
+    }
+    expect(detectMicrophoneSpeech(channel, new Float32Array(320), 16_000, true)).toBe(true)
+  })
+
+  it('falls back to the RMS gate when a microphone VAD fails', () => {
+    const channel = createAudioChannelState('microphone')
+    let disposed = false
+    channel.voiceActivityDetector = {
+      detect: () => {
+        throw new Error('wasm unavailable')
+      },
+      reset: () => undefined,
+      dispose: () => { disposed = true }
+    }
+
+    expect(detectMicrophoneSpeech(channel, new Float32Array(320), 16_000, true)).toBe(true)
+    expect(channel.voiceActivityDetector).toBeNull()
+    expect(disposed).toBe(true)
   })
 
   it('releases only the hidden camera-only loopback video', () => {
