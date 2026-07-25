@@ -30,17 +30,41 @@ describe("overlay settings validation", () => {
     delete legacySettings.fontFamily;
     delete legacySettings.bold;
     delete legacySettings.outlineWidthPx;
-    delete legacySettings.displayMode;
+    delete legacySettings.displayModes;
 
     expect(normalizeOverlaySettings(legacySettings, 1, [1])).toEqual(settings);
   });
 
-  it("accepts the floating interaction window as the second display mode", () => {
+  it("migrates a legacy single display mode", () => {
     const settings = {
       ...createDefaultOverlaySettings(1),
       displayMode: "floating" as const
     };
+    delete (settings as Partial<typeof settings>).displayModes;
+
+    expect(normalizeOverlaySettings(settings, 1, [1])).toEqual({
+      ...createDefaultOverlaySettings(1),
+      displayModes: ["floating"]
+    });
+  });
+
+  it("accepts both display outputs at once", () => {
+    const settings = {
+      ...createDefaultOverlaySettings(1),
+      displayModes: ["overlay", "floating"] as const
+    };
 
     expect(normalizeOverlaySettings(settings, 1, [1])).toEqual(settings);
+  });
+
+  it("rejects an empty or duplicated display-output selection", () => {
+    const settings = createDefaultOverlaySettings(1);
+
+    expect(
+      normalizeOverlaySettings({ ...settings, displayModes: [] }, 1, [1])
+    ).toBeNull();
+    expect(
+      normalizeOverlaySettings({ ...settings, displayModes: ["overlay", "overlay"] }, 1, [1])
+    ).toBeNull();
   });
 });

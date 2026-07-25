@@ -149,8 +149,8 @@ try {
 
   const commandTooltipCases = [
     ['暂停', '暂停 AI 观察和麦克风，画面预览会继续保留。'],
-    ['清屏', '清空房间互动记录，以及屏幕弹幕或悬浮互动窗中的内容。'],
-    ['显示', '按设置打开屏幕弹幕或悬浮互动窗。']
+    ['清屏', '清空房间互动记录，以及屏幕弹幕和悬浮互动窗中的内容。'],
+    ['显示', '按设置打开已启用的弹幕输出。']
   ]
   for (const [buttonName, tooltipText] of commandTooltipCases) {
     await page.getByRole('button', { name: buttonName, exact: true }).hover()

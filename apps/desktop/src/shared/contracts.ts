@@ -284,7 +284,7 @@ export type OverlayRegion = {
 export type OverlayFontFamily = 'bilibili' | 'yahei' | 'system'
 
 export type OverlaySettings = {
-  displayMode: BarrageDisplayMode
+  displayModes: BarrageDisplayMode[]
   targetDisplayId: number
   fontSizePx: number
   fontFamily: OverlayFontFamily

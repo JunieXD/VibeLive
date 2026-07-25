@@ -22,15 +22,12 @@ function notifyVisibility(visible: boolean): void {
   visibilityListener?.(visible);
 }
 
-function showConfiguredOutput(settings: OverlaySettings): void {
-  if (settings.displayMode === "floating") {
-    hideOverlay();
-    showFloatingChat();
-    return;
-  }
+function showConfiguredOutputs(settings: OverlaySettings): void {
+  if (settings.displayModes.includes("overlay")) showOverlay();
+  else hideOverlay();
 
-  hideFloatingChat();
-  showOverlay();
+  if (settings.displayModes.includes("floating")) showFloatingChat();
+  else hideFloatingChat();
 }
 
 setFloatingChatHideRequestHandler(() => {
@@ -45,7 +42,7 @@ export function setBarrageOutputVisibilityListener(
 
 export function showBarrageOutputs(): boolean {
   const settings = getOverlaySettings();
-  showConfiguredOutput(settings);
+  showConfiguredOutputs(settings);
   outputsVisible = true;
   notifyVisibility(true);
   return true;
@@ -66,16 +63,14 @@ export function clearBarrageOutputs(): void {
 export function pushBarrageToOutputs(event: BarrageEvent): boolean {
   if (!outputsVisible) return false;
 
-  if (getOverlaySettings().displayMode === "floating") {
-    pushFloatingChatMessage(event);
-    return true;
-  }
+  const settings = getOverlaySettings();
+  if (settings.displayModes.includes("overlay")) pushBarrage(event);
+  if (settings.displayModes.includes("floating")) pushFloatingChatMessage(event);
 
-  pushBarrage(event);
   return true;
 }
 
 export function applyBarrageOutputSettings(settings: OverlaySettings): void {
   applyOverlaySettings(settings);
-  if (outputsVisible) showConfiguredOutput(settings);
+  if (outputsVisible) showConfiguredOutputs(settings);
 }

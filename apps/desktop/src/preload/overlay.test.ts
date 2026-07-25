@@ -20,7 +20,7 @@ vi.mock("electron", () => ({
 import "./overlay";
 
 const savedSettings: OverlaySettings = {
-  displayMode: "overlay",
+  displayModes: ["overlay"],
   targetDisplayId: 1,
   fontSizePx: 30,
   fontFamily: "system",

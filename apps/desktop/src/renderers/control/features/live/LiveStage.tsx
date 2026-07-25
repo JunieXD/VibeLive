@@ -389,7 +389,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
             id="clear-command-tooltip"
             role="tooltip"
           >
-            清空房间互动记录，以及屏幕弹幕或悬浮互动窗中的内容。
+              清空房间互动记录，以及屏幕弹幕和悬浮互动窗中的内容。
           </span>
         </span>
         <span className="command-control">
@@ -410,7 +410,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           >
             {overlayVisible
               ? '隐藏当前弹幕输出，不会清空已有互动记录。'
-              : '按设置打开屏幕弹幕或悬浮互动窗。'}
+              : '按设置打开已启用的弹幕输出。'}
           </span>
         </span>
         <span className="command-spacer" />

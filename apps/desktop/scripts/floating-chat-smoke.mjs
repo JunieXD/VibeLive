@@ -8,19 +8,19 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const artifactDirectory = resolve(root, 'artifacts')
 const userDataDirectory = resolve(artifactDirectory, 'floating-chat-smoke-user-data')
 
-async function waitForDisplayMode(page, expectedMode) {
+async function waitForDisplayModeEnabled(page, expectedMode, enabled = true) {
   const deadline = Date.now() + 5_000
-  let actualMode = null
+  let actualModes = []
 
   while (Date.now() < deadline) {
-    actualMode = await page.evaluate(
-      async () => (await window.advx.getOverlaySettings()).displayMode
+    actualModes = await page.evaluate(
+      async () => (await window.advx.getOverlaySettings()).displayModes
     )
-    if (actualMode === expectedMode) return
+    if (actualModes.includes(expectedMode) === enabled) return
     await page.waitForTimeout(100)
   }
 
-  assert.equal(actualMode, expectedMode)
+  assert.equal(actualModes.includes(expectedMode), enabled)
 }
 
 await mkdir(artifactDirectory, { recursive: true })
@@ -57,9 +57,10 @@ try {
   const controlPage = await electronApp.firstWindow()
   await controlPage.getByRole('heading', { name: '直播控制台', exact: true }).waitFor()
   await controlPage.getByRole('button', { name: '设置', exact: true }).click()
-  await controlPage.getByRole('button', { name: '互动悬浮窗', exact: true }).waitFor()
-  await controlPage.getByRole('button', { name: '互动悬浮窗', exact: true }).click()
-  await waitForDisplayMode(controlPage, 'floating')
+  const floatingChatToggle = controlPage.getByLabel('互动悬浮窗', { exact: true })
+  await floatingChatToggle.waitFor()
+  await floatingChatToggle.check()
+  await waitForDisplayModeEnabled(controlPage, 'floating')
   const settingsScreenshot = resolve(artifactDirectory, 'floating-chat-settings.png')
   await controlPage.screenshot({
     path: settingsScreenshot,
@@ -70,8 +71,8 @@ try {
     const visible = await window.advx.showOverlay()
     if (!visible) throw new Error('Floating chat output did not become visible.')
     const settings = await window.advx.getOverlaySettings()
-    if (settings.displayMode !== 'floating') {
-      throw new Error(`Unexpected barrage display mode: ${settings.displayMode}`)
+    if (!settings.displayModes.includes('floating')) {
+      throw new Error(`Floating chat output was not enabled: ${settings.displayModes}`)
     }
     const messages = [
       ['羊-有毒的', '这么帅', '#65c9e5'],
@@ -211,8 +212,9 @@ try {
     if (floatingWindow.isVisible()) throw new Error('Floating chat window did not hide.')
   })
 
-  await controlPage.getByRole('button', { name: '屏幕弹幕', exact: true }).click()
-  await waitForDisplayMode(controlPage, 'overlay')
+  await floatingChatToggle.uncheck()
+  await waitForDisplayModeEnabled(controlPage, 'floating', false)
+  await waitForDisplayModeEnabled(controlPage, 'overlay')
   await controlPage.evaluate(async () => {
     await window.advx.showOverlay()
     const dispatched = await window.advx.pushBarrage({

@@ -428,7 +428,7 @@ try {
 
   assert.deepEqual(
     {
-      displayMode: configuredSettings.displayMode,
+      displayModes: configuredSettings.displayModes,
       fontSizePx: configuredSettings.fontSizePx,
       fontFamily: configuredSettings.fontFamily,
       bold: configuredSettings.bold,
@@ -439,7 +439,7 @@ try {
       region: configuredSettings.region
     },
     {
-      displayMode: 'overlay',
+      displayModes: ['overlay'],
       fontSizePx: 30,
       fontFamily: 'system',
       bold: false,
@@ -451,12 +451,15 @@ try {
     }
   )
 
-  await page.getByRole('button', { name: '互动悬浮窗', exact: true }).click()
-  await page.waitForTimeout(350)
-  assert.equal(
-    await page.evaluate(async () => (await window.advx.getOverlaySettings()).displayMode),
-    'floating'
-  )
+  await page.getByLabel('互动悬浮窗', { exact: true }).check()
+  await page.waitForFunction(async () => {
+    const settings = await window.advx.getOverlaySettings()
+    return (
+      settings.displayModes.length === 2 &&
+      settings.displayModes.includes('overlay') &&
+      settings.displayModes.includes('floating')
+    )
+  })
   await page.evaluate(async () => {
     await window.advx.showOverlay()
     for (let index = 0; index < 4; index += 1) {
@@ -487,6 +490,14 @@ try {
       candidate.url().replaceAll('\\', '/').endsWith('/floating-chat/index.html')
   })
   await floatingChatPage.getByText('wa 了3发了', { exact: true }).waitFor()
+  let dualOutputOverlayPage = electronApp
+    .windows()
+    .find((candidate) => candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html'))
+  dualOutputOverlayPage ??= await electronApp.waitForEvent('window', {
+    predicate: (candidate) =>
+      candidate.url().replaceAll('\\', '/').endsWith('/overlay/index.html')
+  })
+  await dualOutputOverlayPage.getByText('wa 了3发了', { exact: true }).waitFor()
   const floatingChatProof = await floatingChatPage.evaluate(() => ({
     title: document.querySelector('.titlebar-brand strong')?.textContent?.trim(),
     rows: document.querySelectorAll('.message-row').length,
@@ -518,12 +529,15 @@ try {
     }
     if (floatingWindow.isVisible()) throw new Error('Floating chat window did not hide.')
   })
-  await page.getByRole('button', { name: '屏幕弹幕', exact: true }).click()
-  await page.waitForTimeout(350)
-  assert.equal(
-    await page.evaluate(async () => (await window.advx.getOverlaySettings()).displayMode),
-    'overlay'
-  )
+  await page.getByLabel('互动悬浮窗', { exact: true }).uncheck()
+  await page.waitForFunction(async () => {
+    const settings = await window.advx.getOverlaySettings()
+    return (
+      settings.displayModes.length === 1 &&
+      settings.displayModes.includes('overlay') &&
+      !settings.displayModes.includes('floating')
+    )
+  })
 
   await page.screenshot({
     path: resolve(artifactDirectory, 'overlay-settings.png'),

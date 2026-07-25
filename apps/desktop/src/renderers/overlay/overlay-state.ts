@@ -9,7 +9,7 @@ export const BARRAGE_LINE_HEIGHT = 1.125
 export const FIXED_BARRAGE_LANE_GAP_PX = 6
 
 export const DEFAULT_OVERLAY_SETTINGS: OverlaySettings = {
-  displayMode: 'overlay',
+  displayModes: ['overlay'],
   targetDisplayId: 0,
   fontSizePx: 25,
   fontFamily: 'bilibili',

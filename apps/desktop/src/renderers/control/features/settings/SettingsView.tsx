@@ -2,13 +2,13 @@ import {
   ArrowLeft,
   KeyRound,
   MessageSquareText,
-  MonitorUp,
   PanelBottom,
   PanelTop,
   SlidersHorizontal,
   Sparkles
 } from 'lucide-react'
 import type {
+  BarrageDisplayMode,
   BarrageMode,
   ModelConfigStatus,
   OverlaySettings,
@@ -57,9 +57,8 @@ const controlClassName =
   'min-h-9 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50'
 const actionButtonClassName =
   'inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-[var(--border-strong)] bg-[var(--panel-raise)] px-3 text-xs font-bold text-[var(--text)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
-const displayModeButtonClassName =
-  'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border bg-[var(--panel-raise)] px-3 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]'
 const sliderClassName = 'w-full cursor-pointer accent-[var(--accent)]'
+const BARRAGE_DISPLAY_MODES: readonly BarrageDisplayMode[] = ['overlay', 'floating']
 
 type SliderFieldProps = {
   label: string
@@ -106,6 +105,7 @@ function SliderField({
 type ToggleFieldProps = {
   label: string
   checked: boolean
+  disabled?: boolean
   notice?: string | null
   onChange: (checked: boolean) => void
 }
@@ -113,6 +113,7 @@ type ToggleFieldProps = {
 function ToggleField({
   label,
   checked,
+  disabled = false,
   notice,
   onChange
 }: ToggleFieldProps): React.JSX.Element {
@@ -126,12 +127,17 @@ function ToggleField({
           </small>
         )}
       </span>
-      <label className="relative inline-flex cursor-pointer items-center gap-2">
+      <label
+        className={`relative inline-flex items-center gap-2 ${
+          disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+        }`}
+      >
         <input
-          className="peer absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0"
+          className="peer absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
           aria-label={label}
           type="checkbox"
           checked={checked}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.checked)}
         />
         <span
@@ -181,6 +187,20 @@ export function SettingsView({
 }: SettingsViewProps): React.JSX.Element {
   const credentialsStored =
     modelConfigStatus?.modelApiKeyStored === true && modelConfigStatus.asrApiKeyStored === true
+  const screenBarrageEnabled = overlaySettings?.displayModes.includes('overlay') ?? false
+  const floatingChatEnabled = overlaySettings?.displayModes.includes('floating') ?? false
+  const onlyDisplayModeEnabled = overlaySettings?.displayModes.length === 1
+
+  const updateDisplayMode = (displayMode: BarrageDisplayMode, enabled: boolean): void => {
+    if (!overlaySettings) return
+
+    const displayModes = BARRAGE_DISPLAY_MODES.filter((mode) =>
+      mode === displayMode ? enabled : overlaySettings.displayModes.includes(mode)
+    )
+    if (displayModes.length === 0) return
+
+    onOverlaySettingsChange({ ...overlaySettings, displayModes })
+  }
 
   return (
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
@@ -354,47 +374,33 @@ export function SettingsView({
               <legend className="mb-2 text-xs font-semibold text-[var(--text-dim)]">
                 显示方式
               </legend>
-              <div className="grid grid-cols-2 gap-2" role="group" aria-label="弹幕显示方式">
-                <button
-                  type="button"
-                  className={`${displayModeButtonClassName} ${
-                    overlaySettings.displayMode === 'overlay'
-                      ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
-                      : 'border-[var(--border-strong)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--text)]'
-                  }`}
-                  aria-pressed={overlaySettings.displayMode === 'overlay'}
-                  onClick={() =>
-                    onOverlaySettingsChange({
-                      ...overlaySettings,
-                      displayMode: 'overlay'
-                    })
+              <div className="grid gap-1" role="group" aria-label="弹幕显示方式">
+                <ToggleField
+                  label="屏幕弹幕"
+                  checked={screenBarrageEnabled}
+                  disabled={screenBarrageEnabled && onlyDisplayModeEnabled}
+                  notice={
+                    screenBarrageEnabled && onlyDisplayModeEnabled
+                      ? '至少保留一种显示方式'
+                      : null
                   }
-                >
-                  <MonitorUp size={16} aria-hidden="true" />
-                  屏幕弹幕
-                </button>
-                <button
-                  type="button"
-                  className={`${displayModeButtonClassName} ${
-                    overlaySettings.displayMode === 'floating'
-                      ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
-                      : 'border-[var(--border-strong)] text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--text)]'
-                  }`}
-                  aria-pressed={overlaySettings.displayMode === 'floating'}
-                  onClick={() =>
-                    onOverlaySettingsChange({
-                      ...overlaySettings,
-                      displayMode: 'floating'
-                    })
+                  onChange={(enabled) => updateDisplayMode('overlay', enabled)}
+                />
+                <ToggleField
+                  label="互动悬浮窗"
+                  checked={floatingChatEnabled}
+                  disabled={floatingChatEnabled && onlyDisplayModeEnabled}
+                  notice={
+                    floatingChatEnabled && onlyDisplayModeEnabled
+                      ? '至少保留一种显示方式'
+                      : null
                   }
-                >
-                  <MessageSquareText size={16} aria-hidden="true" />
-                  互动悬浮窗
-                </button>
+                  onChange={(enabled) => updateDisplayMode('floating', enabled)}
+                />
               </div>
             </fieldset>
 
-            {overlaySettings.displayMode === 'overlay' ? (
+            {screenBarrageEnabled && (
               <>
                 <div className={labelClassName}>
                   弹幕目标
@@ -556,7 +562,9 @@ export function SettingsView({
                   }
                 />
               </>
-            ) : (
+            )}
+
+            {floatingChatEnabled && (
               <div className="flex min-h-11 items-center justify-between gap-3 border-y border-[var(--border)] py-3">
                 <span className="text-xs font-semibold text-[var(--text-dim)]">
                   互动窗预览

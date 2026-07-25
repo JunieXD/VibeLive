@@ -16,7 +16,7 @@ const BARRAGE_DISPLAY_MODES: readonly BarrageDisplayMode[] = [
 
 export function createDefaultOverlaySettings(primaryDisplayId: number): OverlaySettings {
   return {
-    displayMode: "overlay",
+    displayModes: ["overlay"],
     targetDisplayId: primaryDisplayId,
     fontSizePx: 25,
     fontFamily: "bilibili",
@@ -44,6 +44,19 @@ function isBarrageDisplayMode(value: unknown): value is BarrageDisplayMode {
   return BARRAGE_DISPLAY_MODES.includes(value as BarrageDisplayMode);
 }
 
+function normalizeBarrageDisplayModes(value: unknown): BarrageDisplayMode[] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    !value.every(isBarrageDisplayMode) ||
+    new Set(value).size !== value.length
+  ) {
+    return null;
+  }
+
+  return BARRAGE_DISPLAY_MODES.filter((mode) => value.includes(mode));
+}
+
 export function normalizeOverlaySettings(
   value: unknown,
   primaryDisplayId: number,
@@ -51,15 +64,17 @@ export function normalizeOverlaySettings(
 ): OverlaySettings | null {
   if (!value || typeof value !== "object") return null;
 
-  const settings = value as Partial<OverlaySettings>;
+  const settings = value as Partial<OverlaySettings> & { displayMode?: unknown };
   const defaults = createDefaultOverlaySettings(primaryDisplayId);
   const region = settings.region;
-  const displayMode = settings.displayMode ?? defaults.displayMode;
+  const displayModes = normalizeBarrageDisplayModes(
+    settings.displayModes ?? [settings.displayMode ?? defaults.displayModes[0]]
+  );
   const fontFamily = settings.fontFamily ?? defaults.fontFamily;
   const bold = settings.bold ?? defaults.bold;
   const outlineWidthPx = settings.outlineWidthPx ?? defaults.outlineWidthPx;
   if (
-    !isBarrageDisplayMode(displayMode) ||
+    !displayModes ||
     !Number.isInteger(settings.targetDisplayId) ||
     !isNumberInRange(settings.fontSizePx, 14, 36) ||
     !isOverlayFontFamily(fontFamily) ||
@@ -77,7 +92,7 @@ export function normalizeOverlaySettings(
   }
 
   return {
-    displayMode,
+    displayModes,
     targetDisplayId: displayIds.includes(settings.targetDisplayId as number)
       ? (settings.targetDisplayId as number)
       : primaryDisplayId,
