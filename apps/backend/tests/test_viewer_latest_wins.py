@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -271,7 +272,95 @@ async def test_screen_trigger_does_not_interrupt_system_audio_work() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ambient_history_does_not_inherit_old_user_priority() -> None:
+async def test_equal_priority_system_audio_waits_as_latest_pending_work() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Executor:
+        observations: list[str] = []
+
+        async def react(self, observation: Observation) -> ReactionResult:
+            self.observations.append(observation.observation_id)
+            if observation.observation_id == "system-1":
+                started.set()
+                await release.wait()
+            return ReactionResult(published_events=(), validations=())
+
+    executor = Executor()
+    scheduler = LatestWinsReactionScheduler(
+        executor=executor,
+        session_tasks=_SessionTasks(),
+        clock=_Clock(),
+    )
+    first = await scheduler.submit(_system_audio_observation("system-1"))
+    await started.wait()
+    latest = await scheduler.submit(_system_audio_observation("system-2"))
+    await asyncio.sleep(0)
+
+    assert not first.done()
+    assert not latest.done()
+    assert executor.observations == ["system-1"]
+    release.set()
+    assert await first is not None
+    assert await latest is not None
+    assert executor.observations == ["system-1", "system-2"]
+
+
+@pytest.mark.asyncio
+async def test_equal_priority_system_audio_replaces_pending_after_merge_deadline() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    merge_calls = 0
+
+    async def merge_window(_session_id: str) -> int:
+        nonlocal merge_calls
+        merge_calls += 1
+        return 0 if merge_calls == 1 else 1_000
+
+    class Executor:
+        observations: list[str] = []
+
+        async def react(self, observation: Observation) -> ReactionResult:
+            self.observations.append(observation.observation_id)
+            if observation.observation_id == "system-1":
+                started.set()
+                await release.wait()
+            return ReactionResult(published_events=(), validations=())
+
+    clock = _Clock()
+    executor = Executor()
+    scheduler = LatestWinsReactionScheduler(
+        executor=executor,
+        session_tasks=_SessionTasks(),
+        clock=clock,
+        merge_window_provider=merge_window,
+    )
+    first = await scheduler.submit(_system_audio_observation("system-1"))
+    await started.wait()
+    clock.value = 200
+    second = await scheduler.submit(
+        replace(_system_audio_observation("system-2"), created_at_ms=200)
+    )
+    clock.value = 5_000
+    latest = await scheduler.submit(
+        replace(_system_audio_observation("system-3"), created_at_ms=5_000)
+    )
+
+    assert await second is None
+    pending = scheduler._sessions["session-1"].pending
+    assert pending is not None
+    assert pending.observation.observation_id == "system-3"
+    assert pending.observation.created_at_ms == 5_000
+    assert pending.observation.trigger_event_ids == ("event-system-3",)
+    clock.value = 6_000
+    release.set()
+    assert await first is not None
+    assert await latest is not None
+    assert executor.observations == ["system-1", "system-3"]
+
+
+@pytest.mark.asyncio
+async def test_ambient_waits_behind_user_without_inheriting_old_priority() -> None:
     started = asyncio.Event()
     release = asyncio.Event()
 
@@ -284,8 +373,9 @@ async def test_ambient_history_does_not_inherit_old_user_priority() -> None:
             await release.wait()
             return ReactionResult(published_events=(), validations=())
 
+    executor = Executor()
     scheduler = LatestWinsReactionScheduler(
-        executor=Executor(),
+        executor=executor,
         session_tasks=_SessionTasks(),
         clock=_Clock(),
     )
@@ -309,9 +399,87 @@ async def test_ambient_history_does_not_inherit_old_user_priority() -> None:
 
     ambient = await scheduler.submit(ambient_observation)
 
-    assert await ambient is None
+    assert not ambient.done()
     release.set()
     assert await user is not None
+    assert await ambient is not None
+    assert executor.observations == ["user", "ambient"]
+
+
+@pytest.mark.asyncio
+async def test_higher_priority_input_replaces_pending_ambient_behind_user() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Executor:
+        observations: list[str] = []
+
+        async def react(self, observation: Observation) -> ReactionResult:
+            self.observations.append(observation.observation_id)
+            if observation.observation_id == "user":
+                started.set()
+                await release.wait()
+            return ReactionResult(published_events=(), validations=())
+
+    executor = Executor()
+    scheduler = LatestWinsReactionScheduler(
+        executor=executor,
+        session_tasks=_SessionTasks(),
+        clock=_Clock(),
+    )
+    user = await scheduler.submit(_observation("user", source=RoomEventSource.USER_TEXT))
+    await started.wait()
+    ambient = await scheduler.submit(_observation("ambient", ambient=True))
+    system = await scheduler.submit(_system_audio_observation("system"))
+
+    assert await ambient is None
+    assert not system.done()
+    release.set()
+    assert await user is not None
+    assert await system is not None
+    assert executor.observations == ["user", "system"]
+
+
+@pytest.mark.asyncio
+async def test_user_replaces_pending_ambient_instead_of_merging_it() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    merge_calls = 0
+
+    async def merge_window(_session_id: str) -> int:
+        nonlocal merge_calls
+        merge_calls += 1
+        return 0 if merge_calls == 1 else 1_000
+
+    class Executor:
+        async def react(self, observation: Observation) -> ReactionResult:
+            if observation.observation_id == "running-user":
+                started.set()
+                await release.wait()
+            return ReactionResult(published_events=(), validations=())
+
+    scheduler = LatestWinsReactionScheduler(
+        executor=Executor(),
+        session_tasks=_SessionTasks(),
+        clock=_Clock(),
+        merge_window_provider=merge_window,
+    )
+    running = await scheduler.submit(
+        _observation("running-user", source=RoomEventSource.USER_TEXT)
+    )
+    await started.wait()
+    ambient = await scheduler.submit(_observation("ambient", ambient=True))
+    latest = await scheduler.submit(
+        _observation("latest-user", source=RoomEventSource.USER_TEXT)
+    )
+
+    pending = scheduler._sessions["session-1"].pending
+    assert pending is not None
+    assert pending.observation.observation_id == "latest-user"
+    assert pending.observation.user_context.get("ambient") is None
+    assert await ambient is None
+    release.set()
+    await asyncio.gather(running, latest)
 
 
 @pytest.mark.asyncio
@@ -761,6 +929,20 @@ class _BatchBehaviorSink:
         del request
 
 
+class _ReleaseableGatedSequenceClaimer:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.second_started = asyncio.Event()
+        self.release_second = asyncio.Event()
+
+    async def claim_viewer_sequence(self, **scope: object) -> bool:
+        self.calls.append(str(scope["viewer_instance_id"]))
+        if len(self.calls) == 2:
+            self.second_started.set()
+            await self.release_second.wait()
+        return True
+
+
 def _runtime(
     provider: object,
     *,
@@ -796,6 +978,24 @@ def _runtime(
         **runtime_args,
     )
     return runtime, publisher, room
+
+
+def _gate_old_after_fence(
+    runtime: ViewerRuntime,
+) -> tuple[asyncio.Event, asyncio.Event]:
+    original = runtime._advance_wave_fence
+    old_advanced = asyncio.Event()
+    release_old = asyncio.Event()
+
+    async def gated(wave: ObservationWave) -> int | None:
+        generation = await original(wave)
+        if wave.observation_id == "old":
+            old_advanced.set()
+            await release_old.wait()
+        return generation
+
+    runtime._advance_wave_fence = gated
+    return old_advanced, release_old
 
 
 @pytest.mark.asyncio
@@ -1035,6 +1235,70 @@ async def test_window_batch_calls_provider_once_and_reuses_trusted_publish_pipel
 
 
 @pytest.mark.asyncio
+async def test_equal_priority_automatic_wave_does_not_cancel_inflight_result() -> None:
+    provider = _GatedProvider()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer(),))
+    first = asyncio.create_task(
+        runtime.dispatch(
+            wave=_wave("wave-1", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("wave-1", "viewer-1"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await provider.started.wait()
+
+    newer = await runtime.dispatch(
+        wave=_wave("wave-2", ObservationTrigger.SYSTEM_AUDIO),
+        decision=_decision("wave-2"),
+        pool=pool,
+        runtime=_runtime_context(),
+    )
+    provider.release_old.set()
+    old = await first
+
+    assert newer.selected == 0
+    assert old.published == 1
+    assert len(publisher.events) == 1
+    assert len(room.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_user_fence_rejects_pre_enqueue_old_per_viewer_work() -> None:
+    provider = _GatedProvider()
+    provider.release_old.set()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+    old_advanced, release_old = _gate_old_after_fence(runtime)
+    pool = SimpleNamespace(viewers=(_viewer(),))
+
+    old = asyncio.create_task(
+        runtime.dispatch(
+            wave=_wave("old", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("old", "viewer-1"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await old_advanced.wait()
+    new = await runtime.dispatch(
+        wave=_wave("new", ObservationTrigger.USER_TEXT),
+        decision=_decision("new"),
+        pool=pool,
+        runtime=_runtime_context(),
+    )
+    release_old.set()
+    old_summary = await old
+
+    assert new.selected == 0
+    assert old_summary.superseded == 1
+    assert publisher.events == []
+    assert room.events == []
+
+
+@pytest.mark.asyncio
 async def test_window_batch_rejects_mismatched_batch_response_id() -> None:
     provider = _BatchProvider(response_batch_id="wrong-batch")
     runtime, publisher, room = _runtime(provider)
@@ -1223,8 +1487,8 @@ async def test_window_batch_cancellation_traces_viewers_not_yet_sequence_claimed
 
     assert summary.selected == 2
     assert summary.superseded == 2
-    assert summary.dispatched == 1
-    assert summary.completed == 1
+    assert summary.dispatched == 0
+    assert summary.completed == 0
     assert provider.requests == []
     assert publisher.events == []
     assert room.events == []
@@ -1242,8 +1506,8 @@ async def test_window_batch_cancellation_traces_viewers_not_yet_sequence_claimed
         for trace in request_traces
     )
     by_viewer = {trace.viewer_instance_id: trace for trace in request_traces}
-    assert by_viewer["viewer-1"].provider.dispatched_at_ms == 100
-    assert by_viewer["viewer-1"].provider.completed_at_ms == 100
+    assert by_viewer["viewer-1"].provider.dispatched_at_ms is None
+    assert by_viewer["viewer-1"].provider.completed_at_ms is None
     assert by_viewer["viewer-2"].provider.dispatched_at_ms is None
     assert by_viewer["viewer-2"].provider.completed_at_ms is None
 
@@ -1370,6 +1634,112 @@ async def test_newer_window_batch_cancels_old_provider_with_zero_side_effects() 
 
 
 @pytest.mark.asyncio
+async def test_equal_priority_automatic_window_batch_finishes_before_latest() -> None:
+    provider = _CancellationResistantBatchProvider()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2")))
+
+    first = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("old", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("old", "viewer-1", "viewer-2"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await provider.first_started.wait()
+    second = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("new", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("new", "viewer-1", "viewer-2"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await asyncio.sleep(0.01)
+
+    assert not provider.first_cancelled.is_set()
+    assert not first.done()
+    assert not second.done()
+    provider.release_first.set()
+    first_summary, second_summary = await asyncio.wait_for(
+        asyncio.gather(first, second),
+        timeout=0.2,
+    )
+
+    assert first_summary.published == 1
+    assert first_summary.silenced == 1
+    assert second_summary.published == 1
+    assert second_summary.silenced == 1
+    assert [event.text for event in publisher.events] == ["old", "new"]
+    assert [event.text for event in room.events] == ["old", "new"]
+
+
+@pytest.mark.asyncio
+async def test_user_fence_rejects_pre_admission_old_window_batch() -> None:
+    provider = _BatchProvider()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+    old_advanced, release_old = _gate_old_after_fence(runtime)
+    pool = SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2")))
+
+    old = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("old", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("old", "viewer-1", "viewer-2"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await old_advanced.wait()
+    new = await runtime.dispatch_window_batch(
+        wave=_wave("new", ObservationTrigger.USER_TEXT),
+        decision=_decision("new"),
+        pool=pool,
+        runtime=_runtime_context(),
+    )
+    release_old.set()
+    old_summary = await old
+
+    assert new.selected == 0
+    assert old_summary.superseded == 2
+    assert publisher.events == []
+    assert room.events == []
+
+
+@pytest.mark.asyncio
+async def test_equal_auto_supersedes_window_batch_not_yet_sent_to_provider() -> None:
+    provider = _BatchProvider()
+    claimer = _ReleaseableGatedSequenceClaimer()
+    runtime, _, _ = _runtime(provider, sequence_claimer=claimer)
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2")))
+
+    old = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("old", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("old", "viewer-1", "viewer-2"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await claimer.second_started.wait()
+    assert provider.requests == []
+    await runtime._advance_wave_fence(
+        _wave("new", ObservationTrigger.SYSTEM_AUDIO)
+    )
+    work = next(iter(runtime._window_batches.values()))
+
+    assert work.superseded_reason == "superseded_by_newer_equal_priority_wave"
+    claimer.release_second.set()
+    summary = await old
+
+    assert summary.superseded == 2
+    assert provider.requests == []
+
+
+@pytest.mark.asyncio
 async def test_stop_session_cancels_window_batch_without_waiting_for_provider() -> None:
     provider = _CancellationResistantBatchProvider()
     runtime, publisher, room = _runtime(provider)
@@ -1399,7 +1769,61 @@ async def test_stop_session_cancels_window_batch_without_waiting_for_provider() 
 
 
 @pytest.mark.asyncio
-async def test_newer_unselected_wave_fences_old_inflight_result_with_zero_side_effects() -> None:
+async def test_mailbox_keeps_only_latest_pending_equal_priority_item() -> None:
+    provider = _GatedProvider()
+    runtime, _, _ = _runtime(provider)
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer(),))
+    context = _runtime_context()
+    first = asyncio.create_task(
+        runtime.dispatch(
+            wave=_wave("wave-1", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("wave-1", "viewer-1"),
+            pool=pool,
+            runtime=context,
+        )
+    )
+    await provider.started.wait()
+    second = asyncio.create_task(
+        runtime.dispatch(
+            wave=_wave("wave-2", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("wave-2", "viewer-1"),
+            pool=pool,
+            runtime=context,
+        )
+    )
+    await asyncio.sleep(0)
+    latest = asyncio.create_task(
+        runtime.dispatch(
+            wave=_wave("wave-3", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("wave-3", "viewer-1"),
+            pool=pool,
+            runtime=context,
+        )
+    )
+    await asyncio.sleep(0)
+
+    mailbox = runtime._mailboxes["viewer-1"]
+    assert mailbox.pending is not None
+    assert mailbox.pending.request.observation_id == "wave-3"
+    provider.release_old.set()
+    first_summary, second_summary, latest_summary = await asyncio.gather(
+        first,
+        second,
+        latest,
+    )
+
+    assert first_summary.published == 1
+    assert second_summary.superseded == 1
+    assert latest_summary.published == 1
+    assert [request.observation_id for request in provider.requests] == [
+        "wave-1",
+        "wave-3",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_equal_priority_user_wave_still_cancels_inflight_result() -> None:
     provider = _GatedProvider()
     runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
@@ -1430,57 +1854,34 @@ async def test_newer_unselected_wave_fences_old_inflight_result_with_zero_side_e
 
 
 @pytest.mark.asyncio
-async def test_mailbox_keeps_only_latest_pending_equal_priority_item() -> None:
+async def test_higher_priority_wave_still_cancels_inflight_result() -> None:
     provider = _GatedProvider()
-    runtime, _, _ = _runtime(provider)
+    runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
     pool = SimpleNamespace(viewers=(_viewer(),))
-    context = _runtime_context()
     first = asyncio.create_task(
         runtime.dispatch(
-            wave=_wave("wave-1"),
+            wave=_wave("wave-1", ObservationTrigger.SYSTEM_AUDIO),
             decision=_decision("wave-1", "viewer-1"),
             pool=pool,
-            runtime=context,
+            runtime=_runtime_context(),
         )
     )
     await provider.started.wait()
-    second = asyncio.create_task(
-        runtime.dispatch(
-            wave=_wave("wave-2"),
-            decision=_decision("wave-2", "viewer-1"),
-            pool=pool,
-            runtime=context,
-        )
-    )
-    await asyncio.sleep(0)
-    latest = asyncio.create_task(
-        runtime.dispatch(
-            wave=_wave("wave-3"),
-            decision=_decision("wave-3", "viewer-1"),
-            pool=pool,
-            runtime=context,
-        )
-    )
-    await asyncio.sleep(0)
 
-    mailbox = runtime._mailboxes["viewer-1"]
-    assert mailbox.pending is not None
-    assert mailbox.pending.request.observation_id == "wave-3"
+    newer = await runtime.dispatch(
+        wave=_wave("wave-2", ObservationTrigger.USER_TEXT),
+        decision=_decision("wave-2"),
+        pool=pool,
+        runtime=_runtime_context(),
+    )
     provider.release_old.set()
-    first_summary, second_summary, latest_summary = await asyncio.gather(
-        first,
-        second,
-        latest,
-    )
+    old = await first
 
-    assert first_summary.superseded == 1
-    assert second_summary.superseded == 1
-    assert latest_summary.published == 1
-    assert [request.observation_id for request in provider.requests] == [
-        "wave-1",
-        "wave-3",
-    ]
+    assert newer.selected == 0
+    assert old.superseded == 1
+    assert publisher.events == []
+    assert room.events == []
 
 
 @pytest.mark.asyncio

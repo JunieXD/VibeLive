@@ -146,7 +146,9 @@ class _WindowBatchWork:
     slot_reserved: bool = False
     queued: bool = False
     was_queued: bool = False
+    admitted: bool = False
     superseded_reason: str | None = None
+    provider_dispatched_at_ms: int | None = None
     provider_task: asyncio.Task[object] | None = None
     ready: asyncio.Event = field(default_factory=asyncio.Event)
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
@@ -557,7 +559,6 @@ class ViewerRuntime:
                     ):
                         self._sequences[viewer_id] = item.request.viewer_sequence
                         self._sequence_epochs[viewer_id] = item.request.audience_epoch
-                item.dispatched_at_ms = self._clock.now_ms()
                 claimed.append(item)
             else:
                 self._record_trace(
@@ -722,7 +723,11 @@ class ViewerRuntime:
         )
         async with self._lock:
             if not self._window_batch_is_current_locked(work):
-                work.superseded_reason = "window_batch_wave_superseded"
+                work.superseded_reason = self._wave_fence_rejection_reason(
+                    session_id=work.session_id,
+                    audience_epoch=work.audience_epoch,
+                    priority=work.priority,
+                )
                 return False
             work.generation = self._generation
             lane = self._lanes.setdefault(
@@ -745,6 +750,7 @@ class ViewerRuntime:
                 work.queued = True
                 work.was_queued = True
                 lane.eligible.append(work)
+            work.admitted = True
             self._window_batches[id(work)] = work
         try:
             await work.ready.wait()
@@ -922,12 +928,28 @@ class ViewerRuntime:
     ) -> WindowBatchGenerationResponse:
         if timeout_seconds <= 0:
             raise _ViewerRequestExpired("Window batch request TTL expired")
-        attempt = asyncio.create_task(
-            self._provider.generate_window_batch(request),
-            name=f"viewer-window-batch:{request.batch_generation_request_id}",
-        )
+        async with self._lock:
+            if not self._window_batch_is_current_locked(work):
+                raise _WindowBatchSuperseded
+            attempt = asyncio.create_task(
+                self._provider.generate_window_batch(request),
+                name=f"viewer-window-batch:{request.batch_generation_request_id}",
+            )
+            dispatched_at_ms = self._clock.now_ms()
+            if work.provider_dispatched_at_ms is None:
+                work.provider_dispatched_at_ms = dispatched_at_ms
+            request_ids = {
+                item.generation_request_id
+                for item in request.requests
+            }
+            for item in work.items:
+                if (
+                    item.request.generation_request_id in request_ids
+                    and item.dispatched_at_ms is None
+                ):
+                    item.dispatched_at_ms = dispatched_at_ms
+            work.provider_task = attempt
         cancelled = asyncio.create_task(work.cancelled.wait())
-        work.provider_task = attempt
         try:
             done, _ = await asyncio.wait(
                 {attempt, cancelled},
@@ -959,15 +981,23 @@ class ViewerRuntime:
         raise _ViewerRequestExpired("Window batch provider attempt exceeded remaining TTL")
 
     def _window_batch_is_current_locked(self, work: _WindowBatchWork) -> bool:
-        wave_fence = self._wave_fences.get((work.session_id, work.audience_epoch))
         return (
             not work.finished
             and work.superseded_reason is None
             and work.generation in (0, self._generation)
             and self._active_session_id == work.session_id
-            and wave_fence is not None
-            and wave_fence[0] == work.wave_generation
-            and wave_fence[2] == work.observation_id
+            and (
+                self._wave_matches_current_fence(
+                    session_id=work.session_id,
+                    audience_epoch=work.audience_epoch,
+                    wave_generation=work.wave_generation,
+                    observation_id=work.observation_id,
+                )
+                or (
+                    work.admitted
+                    and work.provider_dispatched_at_ms is not None
+                )
+            )
         )
 
     async def _accept_window_batch_candidate(
@@ -1068,6 +1098,21 @@ class ViewerRuntime:
                 future=future,
                 queued_at_ms=self._clock.now_ms(),
             )
+            if not self._wave_matches_current_fence(
+                session_id=wave.session_id,
+                audience_epoch=wave.audience_epoch,
+                wave_generation=wave_generation,
+                observation_id=wave.observation_id,
+            ):
+                self._record_superseded(
+                    item,
+                    reason=self._wave_fence_rejection_reason(
+                        session_id=wave.session_id,
+                        audience_epoch=wave.audience_epoch,
+                        priority=item.priority,
+                    ),
+                )
+                return future
             lane_key, max_in_flight, queue_capacity = self._runtime_limits(
                 runtime=runtime,
                 session_id=wave.session_id,
@@ -1182,6 +1227,11 @@ class ViewerRuntime:
                     and active.request.audience_epoch == wave.audience_epoch
                     and active.priority <= priority
                     and active.wave_generation != generation
+                    and (
+                        active.priority < priority
+                        or active.dispatched_at_ms is None
+                        or self._has_user_trigger(wave)
+                    )
                 ):
                     active.superseded_reason = self._supersede_reason(
                         priority,
@@ -1198,6 +1248,11 @@ class ViewerRuntime:
                     and work.audience_epoch == wave.audience_epoch
                     and work.priority <= priority
                     and work.wave_generation != generation
+                    and (
+                        work.priority < priority
+                        or work.provider_dispatched_at_ms is None
+                        or self._has_user_trigger(wave)
+                    )
                 ):
                     work.superseded_reason = self._supersede_reason(
                         priority,
@@ -1299,7 +1354,8 @@ class ViewerRuntime:
                     validation_codes=("viewer_sequence_claim_rejected",),
                 )
                 return "stale"
-            item.dispatched_at_ms = self._clock.now_ms()
+            if not self._is_current(item) or self._expired(request):
+                return self._finalize_pre_dispatch(item)
             response = await self._generate_with_retry(item)
             item.completed_at_ms = self._clock.now_ms()
         except asyncio.CancelledError:
@@ -1726,6 +1782,8 @@ class ViewerRuntime:
         if timeout_seconds <= 0:
             raise _ViewerRequestExpired("Viewer request TTL expired")
         attempt = asyncio.create_task(self._provider.generate(item.request))
+        if item.dispatched_at_ms is None:
+            item.dispatched_at_ms = self._clock.now_ms()
         item.provider_task = attempt
         try:
             done, _ = await asyncio.wait({attempt}, timeout=timeout_seconds)
@@ -1818,6 +1876,13 @@ class ViewerRuntime:
         ):
             return 2
         return 1
+
+    @staticmethod
+    def _has_user_trigger(wave: ObservationWave) -> bool:
+        return any(
+            trigger in {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
+            for trigger in wave.triggers
+        )
 
     def _finalize_after_provider(self, item: _WorkItem, *, phase: str) -> str:
         if item.superseded_reason is not None:
@@ -2145,20 +2210,51 @@ class ViewerRuntime:
         )
 
     def _is_current(self, item: _WorkItem) -> bool:
-        wave_fence = self._wave_fences.get(
-            (item.request.session_id, item.request.audience_epoch)
-        )
         return (
             item.generation == self._generation
             and self._active_session_id == item.request.session_id
-            and wave_fence is not None
-            and wave_fence[0] == item.wave_generation
-            and wave_fence[2] == item.request.observation_id
+            and item.superseded_reason is None
             and item.viewer.lifecycle_state is ViewerLifecycleState.ACTIVE
             and item.viewer.room_id == item.request.room_id
             and item.viewer.session_id == item.request.session_id
             and item.viewer.audience_epoch == item.request.audience_epoch
+            and (
+                item.dispatched_at_ms is not None
+                or self._wave_matches_current_fence(
+                    session_id=item.request.session_id,
+                    audience_epoch=item.request.audience_epoch,
+                    wave_generation=item.wave_generation,
+                    observation_id=item.request.observation_id,
+                )
+            )
         )
+
+    def _wave_matches_current_fence(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        wave_generation: int,
+        observation_id: str,
+    ) -> bool:
+        wave_fence = self._wave_fences.get((session_id, audience_epoch))
+        return (
+            wave_fence is not None
+            and wave_fence[0] == wave_generation
+            and wave_fence[2] == observation_id
+        )
+
+    def _wave_fence_rejection_reason(
+        self,
+        *,
+        session_id: str,
+        audience_epoch: int,
+        priority: int,
+    ) -> str:
+        wave_fence = self._wave_fences.get((session_id, audience_epoch))
+        if wave_fence is None:
+            return "wave_fence_rejected"
+        return self._supersede_reason(wave_fence[1], priority)
 
     def _expired(self, request: ViewerGenerationRequest) -> bool:
         return self._clock.now_ms() >= request.deadline_at_ms

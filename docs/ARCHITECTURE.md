@@ -291,9 +291,13 @@ Viewer 的输入。已公开观众弹幕只在后续波的独立 reply context �
 当前触发帧例外。`shared_summary` 只复用视觉摘要，不合并 Viewer 请求。
 
 正式触发源包括用户文字、麦克风最终语音、独立系统声音最终转写、超过阈值且满足冷却的画面变化，以及连续模式下的
-有界 ambient tick。相近输入在 1 秒窗口内合并成一波；新同优先级或更高优先级波取代旧波，
-低优先级画面或 ambient 不打断正在处理的用户输入。ASR 部分结果只用于 UI 和调试，最终
-转写以稳定 utterance ID 幂等入房间事件。AI 弹幕不能直接递归触发新波。
+有界 ambient tick。相近输入在 1 秒窗口内合并成一波；更高优先级波和新的用户输入波取代
+旧波。连续系统声音、画面和 ambient 的同优先级新波只覆盖尚未发给 Provider 的等待项，
+已经发出的请求保留完成机会，避免输入频率高于 Provider 延迟时永久饥饿；若配置了非零
+Viewer deadline，请求仍受原 deadline 约束。
+低优先级画面或 ambient 不打断正在处理的用户输入；ambient tick 可保留为唯一最新等待项，
+在高优先级工作完成后立即补位，后续真实输入会替换它。ASR 部分结果只用于 UI 和调试，
+最终转写以稳定 utterance ID 幂等入房间事件。AI 弹幕不能直接递归触发新波。
 
 ### 4.6 Audience Engine
 
@@ -313,9 +317,11 @@ Audience Engine 先由本地预算器根据事件类型、模式响应范围和 
 - 每个 Viewer 每波只返回 `action=barrage|silence`；`barrage` 最多一条，沉默是合法结果。
 - 默认 Viewer 请求并发上限为 6、队列容量为 64；用户、画面和 ambient 波的候选预算分别
   为 6、4、2，直接点名只选择目标 Viewer 或对应 Persona 中的一位。
-- TTL 默认 30 秒并从波创建时开始；Observation 与每个 Viewer 都使用 latest-wins。即使
-  更新波没有选择任何 Viewer，也必须让旧 observation、旧 epoch、旧 sequence、过期、
-  取消和非法结果零副作用。
+- 实时 Viewer deadline 默认关闭；配置非零 TTL 时从波创建时开始计算。Observation 与每个
+  Viewer 都使用有界 latest-wins。
+  更高优先级波和新的用户输入波会让旧 observation 零副作用；连续自动触发的同优先级
+  新波只替换未执行项，已经发给 Provider 的请求仍须通过 session、epoch、sequence 和
+  deadline 围栏。
 - 瞬时网络错误、429 或 5xx 仅在 TTL 允许时重试同一 Viewer 一次，不换人补位。
 - 模型结构错误只在剩余截止时间不少于 6 秒时修复一次；调度重试与协议修复共享最多两次
   Provider 请求预算。

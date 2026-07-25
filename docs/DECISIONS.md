@@ -293,20 +293,26 @@
 - 决定：音频来源固定为 `microphone` 和 `system_audio`。Windows 系统声音使用 Electron loopback，首次默认开启并标记为推荐；两路音频使用独立缓冲、提交顺序和 StepFun Provider，不混音。partial 只用于控制台状态；麦克风 final 以 `user_voice`、系统声音 final 以带 `system_audio_transcript` 标记的 `system_event` 进入 Room。与麦克风共享 `turn_id` 的系统声音按协调轮次触发；没有 `turn_id` 的独立系统声音 final 使用 `system_audio` 触发器直接开启观察。
 - 影响：主播麦克风使用 `source_id=host`，系统声音使用 `source_id=system-audio`；模型和界面都能区分来源。非 Windows 平台明确显示不支持，系统声音失败只降级该通道，不结束麦克风、画面或 Session。
 
-### D-042：实时生成采用新鲜上下文和 Observation 级 latest-wins
+### D-042：实时生成采用新鲜上下文和有界 latest-wins
 
 - 状态：`Accepted`
 - 日期：2026-07-25
-- 决定：相近输入使用 1 秒合并窗口；同优先级或更高优先级的新 Observation 取代旧工作，
-  即使新波没有选中 Viewer 也必须推进发布围栏。Viewer TTL 默认 30 秒，并发默认 6，
-  用户/画面/ambient 候选预算分别为 6/4/2，直接点名预算为 1。普通公开上下文只读取最近
-  60 秒，用户、系统声音、画面各最多 16 条；观众弹幕只进入最近 30 秒、最多 8 条的回复
-  上下文，不使用旧历史摘要。
-- 理由：直播中的旧反应比沉默更破坏体验；开播早期话题、积压队列和不可取消 Provider
-  返回都不能覆盖当前画面和用户话语。
-- 影响：旧 Observation、Viewer sequence、TTL、取消或协议非法结果不得显示、写 Room、
-  更新 Viewer 状态或进入记忆。模型结构非法只允许一次有截止时间的修复，单个生成请求
-  总 Provider 调用不超过两次。
+- 决定：相近输入使用 1 秒合并窗口；更高优先级的新 Observation 和新的用户文字/最终
+  语音 Observation 取代旧工作，即使新波没有选中 Viewer 也推进发布围栏。连续系统声音、
+  画面和 ambient 的同优先级新 Observation 只替换尚未 dispatch 的等待项；已经 dispatch
+  的请求保留完成机会，per-viewer mailbox 与 window batch lane 都只保留一个最新
+  等待项。高优先级工作运行期间到达的 ambient tick 不打断当前工作，但可作为唯一最新
+  等待项在其完成后立即补位。实时 Viewer deadline 默认关闭，配置非零 TTL 时才从波创建
+  时开始计算；并发默认 6，用户/画面/ambient
+  候选预算分别为 6/4/2，直接点名预算为 1。普通公开上下文只读取最近 60 秒，用户、
+  系统声音、画面各最多 16 条；观众弹幕只进入最近 30 秒、最多 8 条的回复上下文，不使用
+  旧历史摘要。
+- 理由：旧反应不能覆盖当前用户话语，但对连续自动触发也不能反复取消已经发出的请求；
+  否则当输入频率高于 Provider 延迟时会形成永久取消饥饿和长时间弹幕真空。
+- 影响：被高优先级或新用户输入取代的 Observation、Viewer sequence、TTL、取消或协议
+  非法结果不得显示、写 Room、更新 Viewer 状态或进入记忆。同优先级自动波的已 dispatch
+  请求仍必须通过 Session、epoch、Viewer、sequence 和 deadline 围栏。模型结构非法只
+  允许一次有截止时间的修复，单个生成请求总 Provider 调用不超过两次。
 
 ### D-043：实时输入升级到 v4 原子音频提交
 

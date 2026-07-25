@@ -91,6 +91,7 @@ class _ScheduledObservation:
     observation: Observation
     completions: list[asyncio.Future[ReactionResult | None]]
     merge_window_ms: int
+    merge_deadline_ms: int
     superseded: bool = False
     execution_task: asyncio.Task[ReactionResult | None] | None = None
 
@@ -150,6 +151,19 @@ class LatestWinsReactionScheduler:
                 self._sessions.move_to_end(observation.session_id)
 
             priority = self._priority(observation)
+            queue_behind_running = False
+            running_priority = (
+                None
+                if schedule.running is None
+                else self._priority(schedule.running.observation)
+            )
+            running_yields_to_observation = (
+                schedule.running is not None
+                and self._screen_trigger_yields_to(
+                    schedule.running.observation,
+                    observation,
+                )
+            )
             if (
                 schedule.running is not None
                 and self._screen_trigger_yields_to(
@@ -161,15 +175,31 @@ class LatestWinsReactionScheduler:
                 return completion
             if (
                 schedule.running is not None
-                and not self._screen_trigger_yields_to(
-                    schedule.running.observation,
-                    observation,
-                )
-                and priority < self._priority(schedule.running.observation)
+                and not running_yields_to_observation
+                and running_priority is not None
+                and priority < running_priority
             ):
-                completion.set_result(None)
-                return completion
-            if schedule.running is not None:
+                pending_priority = (
+                    None
+                    if schedule.pending is None
+                    else self._priority(schedule.pending.observation)
+                )
+                if self._is_ambient_trigger(observation) or (
+                    pending_priority is not None and priority > pending_priority
+                ):
+                    queue_behind_running = True
+                else:
+                    completion.set_result(None)
+                    return completion
+            elif (
+                schedule.running is not None
+                and not running_yields_to_observation
+                and running_priority is not None
+                and priority == running_priority
+                and priority < 3
+            ):
+                queue_behind_running = True
+            if schedule.running is not None and not queue_behind_running:
                 schedule.running.superseded = True
                 if schedule.running.execution_task is not None:
                     schedule.running.execution_task.cancel()
@@ -180,7 +210,22 @@ class LatestWinsReactionScheduler:
                     return completion
                 if self._screen_trigger_yields_to(schedule.pending.observation, observation):
                     self._resolve_all(schedule.pending.completions, None)
-                elif schedule.pending.merge_window_ms:
+                elif priority < pending_priority:
+                    completion.set_result(None)
+                    return completion
+                elif priority > pending_priority:
+                    self._resolve_all(schedule.pending.completions, None)
+                elif (
+                    schedule.pending.merge_window_ms
+                    and self._within_merge_window(
+                        schedule.pending,
+                        observation,
+                    )
+                    and self._can_merge_pending(
+                        schedule.pending.observation,
+                        observation,
+                    )
+                ):
                     if (
                         len(schedule.pending.completions)
                         >= self._config.max_pending_observations_per_session
@@ -192,15 +237,13 @@ class LatestWinsReactionScheduler:
                     )
                     schedule.pending.completions.append(completion)
                     return completion
-                elif priority < pending_priority:
-                    completion.set_result(None)
-                    return completion
                 else:
                     self._resolve_all(schedule.pending.completions, None)
             scheduled = _ScheduledObservation(
                 observation=observation,
                 completions=[completion],
                 merge_window_ms=merge_window_ms,
+                merge_deadline_ms=self._clock.now_ms() + merge_window_ms,
             )
             schedule.pending = scheduled
             if schedule.worker is None:
@@ -314,8 +357,9 @@ class LatestWinsReactionScheduler:
                         schedule.worker = None
                         self._remove_if_idle(session_id, schedule)
                         return
-                if scheduled.merge_window_ms:
-                    await asyncio.sleep(scheduled.merge_window_ms / 1_000)
+                remaining_merge_ms = scheduled.merge_deadline_ms - self._clock.now_ms()
+                if remaining_merge_ms > 0:
+                    await asyncio.sleep(remaining_merge_ms / 1_000)
                 async with self._lock:
                     if self._sessions.get(session_id) is not schedule:
                         return
@@ -489,6 +533,36 @@ class LatestWinsReactionScheduler:
             or RoomEventSource.SCREEN_OBSERVATION in trigger_sources
         ) and not trigger_sources - {RoomEventSource.SCREEN_OBSERVATION} and (
             observation.user_context.get("ambient") != "true"
+        )
+
+    @staticmethod
+    def _is_ambient_trigger(observation: Observation) -> bool:
+        return observation.user_context.get("ambient") == "true"
+
+    @classmethod
+    def _can_merge_pending(
+        cls,
+        first: Observation,
+        latest: Observation,
+    ) -> bool:
+        if cls._priority(first) != cls._priority(latest):
+            return False
+        if cls._priority(first) == 3:
+            return True
+        return (
+            cls._is_ambient_trigger(first) == cls._is_ambient_trigger(latest)
+            and cls._is_screen_only_trigger(first) == cls._is_screen_only_trigger(latest)
+        )
+
+    def _within_merge_window(
+        self,
+        pending: _ScheduledObservation,
+        latest: Observation,
+    ) -> bool:
+        return (
+            self._clock.now_ms() < pending.merge_deadline_ms
+            and latest.created_at_ms
+            < pending.observation.created_at_ms + pending.merge_window_ms
         )
 
     @staticmethod
