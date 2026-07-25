@@ -560,12 +560,6 @@
   font-size: 11px;
 }
 
-.provider-disclosure {
-  margin: -4px 12px 8px;
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
 .provider-capability {
   position: relative;
   color: var(--text-faint);

@@ -17,6 +17,13 @@ describe("overlay settings validation", () => {
     expect(normalizeOverlaySettings(settings, 1, [1, 2])?.targetDisplayId).toBe(1);
   });
 
+  it("accepts density through 100", () => {
+    const settings = { ...createDefaultOverlaySettings(1), density: 100 };
+
+    expect(normalizeOverlaySettings(settings, 1, [1])).toEqual(settings);
+    expect(normalizeOverlaySettings({ ...settings, density: 101 }, 1, [1])).toBeNull();
+  });
+
   it("migrates legacy settings with the new Bilibili-style text defaults", () => {
     const settings = createDefaultOverlaySettings(1);
     const legacySettings = { ...settings } as Partial<typeof settings>;

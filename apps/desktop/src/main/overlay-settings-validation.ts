@@ -67,7 +67,7 @@ export function normalizeOverlaySettings(
     !isNumberInRange(outlineWidthPx, 0, 3) ||
     !isNumberInRange(settings.speed, 20, 100) ||
     !isNumberInRange(settings.opacity, 30, 100) ||
-    !isNumberInRange(settings.density, 1, 10) ||
+    !isNumberInRange(settings.density, 1, 100) ||
     !region ||
     !isNumberInRange(region.topPercent, 0, 100) ||
     !isNumberInRange(region.bottomPercent, 0, 100) ||

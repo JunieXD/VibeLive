@@ -17,6 +17,7 @@ import {
   laneFor,
   laneBottomPercent,
   laneTopPercent,
+  normalizeOverlaySettings,
   remainingDisplayMs,
   remainingTravelMs,
   travelDurationMs,
@@ -55,6 +56,11 @@ describe('overlay state helpers', () => {
     expect(displayDurationMs('bottom', 20)).toBe(FIXED_BARRAGE_DURATION_MS)
     expect(remainingDisplayMs(1_000, 'top', 100, 3_500)).toBe(1_500)
     expect(remainingDisplayMs(1_000, 'bottom', 100, 5_500)).toBe(0)
+  })
+
+  it('allows density through 100 while clamping larger values', () => {
+    expect(normalizeOverlaySettings(settings({ density: 100 })).density).toBe(100)
+    expect(normalizeOverlaySettings(settings({ density: 101 })).density).toBe(100)
   })
 
   it('keeps deterministic lanes and their positions inside the configured region', () => {

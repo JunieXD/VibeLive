@@ -480,7 +480,7 @@ export function SettingsView({
                     label="密度"
                     value={overlaySettings.density}
                     min={1}
-                    max={10}
+                    max={100}
                     onChange={(density) =>
                       onOverlaySettingsChange({ ...overlaySettings, density })
                     }

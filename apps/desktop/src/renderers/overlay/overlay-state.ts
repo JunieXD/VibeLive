@@ -60,7 +60,7 @@ export function normalizeOverlaySettings(settings: OverlaySettings): OverlaySett
         : 1,
     speed: clamp(settings.speed, 20, 100),
     opacity: clamp(settings.opacity, 30, 100),
-    density: Math.round(clamp(settings.density, 1, 10)),
+    density: Math.round(clamp(settings.density, 1, 100)),
     region: {
       topPercent,
       bottomPercent

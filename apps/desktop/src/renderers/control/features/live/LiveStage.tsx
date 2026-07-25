@@ -462,11 +462,6 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           </div>
         )}
       </div>
-      {audienceSessionActive && (
-        <p className="provider-disclosure">
-          屏幕帧、用户文字、最终转写和必要房间上下文会发送给已配置的模型供应商；麦克风与系统原始音频仅发送给 StepFun ASR、不会持久化，生成模型只接收最终转写。连续帧默认不持久化，Persona、房间长期记忆和 ModeMeme 保存在本机。
-        </p>
-      )}
     </section>
   )
 }
