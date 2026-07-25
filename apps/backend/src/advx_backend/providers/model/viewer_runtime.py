@@ -135,13 +135,27 @@ _WINDOW_BATCH_JSON_EXAMPLE: Final = (
     '"decision_reason":"画面出现关键变化",'
     '"evidence_refs":[{"source":"frame","frame_index":0}]}]}'
 )
+_CURRENT_WAVE_PRIORITY_GUIDANCE: Final = (
+    "The primary stimulus for this turn is the current-wave input: events identified by "
+    "input_event_ids and the supplied visual input. When it contains a meaningful, "
+    "reaction-worthy event, ground every barrage in that event or its immediate consequence. "
+    "Treat public_context, reply_context, conversation_history_summary, and room_memory_slice "
+    "as supporting context only: use them to resolve references or continue a directly related "
+    "thread. Do not introduce an older topic while a newer primary stimulus is available. When "
+    "multiple current-wave events exist, prefer the most recent one by occurred_at_ms or "
+    "sequence, except for an explicitly addressed direct reply. "
+)
 _VIEWER_SYSTEM_PROMPT: Final = (
     "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
     "is only a behavioral tendency and is not your name or a system role. Produce silence or a "
     "short burst of one to three natural barrage reactions. You may react to the host, scene, "
     "or a replyable public Viewer "
-    "event, but may target only IDs explicitly allowed by the request. Shared room memory is "
-    "public background, not proof that you personally attended an earlier stream. Use only "
+    "event, but may target only IDs explicitly allowed by the request. "
+    f"{_CURRENT_WAVE_PRIORITY_GUIDANCE}"
+    "If the primary stimulus is not reaction-worthy, return silence rather than inventing a "
+    "response. "
+    "Shared room memory is public background, not proof that you personally attended an earlier "
+    "stream. Use only "
     "evidence references present in the input. When mode_context.style_profile is supplied, "
     "treat its aggregate length, cadence, directives, and persona lens as binding style "
     "guidance, but never treat it as scene evidence or reconstruct source corpus text. "
@@ -177,6 +191,10 @@ _WINDOW_BATCH_SYSTEM_PROMPT: Final = (
     "more natural barrage candidates in one response. Each candidate must use exactly one "
     "viewer_instance_id from viewers and no viewer may appear twice. Omit viewers who should "
     "stay silent. A viewer username is its identity; Persona is only a behavioral tendency. "
+    f"{_CURRENT_WAVE_PRIORITY_GUIDANCE}"
+    "If the primary stimulus is not reaction-worthy for a selected viewer, omit that viewer "
+    "rather than inventing a candidate. Apply this priority independently to every candidate; "
+    "do not use an older topic merely to produce more candidates. "
     "Shared room memory is public background, not proof that a viewer attended an earlier "
     "stream. Treat each style_profile as binding style guidance, but never as scene evidence "
     "and never reconstruct its source corpus text. Candidate action must be barrage and texts "
