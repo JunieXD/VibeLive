@@ -61,7 +61,11 @@ class RuntimeSettings(RuntimeContractModel):
     frame_bundle: FrameBundleSettings = Field(default_factory=FrameBundleSettings)
     viewer_visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES
     max_in_flight_viewer_requests: int = Field(default=6, ge=1, le=32)
-    viewer_request_ttl_ms: int = Field(default=30_000, ge=1)
+    viewer_request_ttl_ms: int = Field(
+        default=0,
+        ge=0,
+        description="Zero disables the Viewer request deadline.",
+    )
     viewer_queue_capacity: int = Field(default=64, ge=1, le=65_536)
     observation_merge_window_ms: int = Field(default=1_000, ge=0)
     public_context_window_ms: int = Field(default=60_000, ge=1)

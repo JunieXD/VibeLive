@@ -1601,7 +1601,7 @@
         "window_batch_max_frames": 5,
         "viewer_visual_input_mode": "direct_frames",
         "max_in_flight_viewer_requests": 6,
-        "viewer_request_ttl_ms": 30000,
+        "viewer_request_ttl_ms": 0,
         "viewer_queue_capacity": 64,
         "observation_merge_window_ms": 1000,
         "public_context_window_ms": 60000,
@@ -1618,7 +1618,7 @@
         "max_consecutive_ambient_waves": 1
       }
     },
-    "config_hash": "76c292ae0669dbc256e78f74c10d37a823d3ac56620cfb7b90ecc4f823359106",
+    "config_hash": "baa4fe6f1a40cc8d6121589bce644b6ef8b5eb370e7d8af93d6338eeaf50ad81",
     "created_at_ms": 2000,
     "events": [
       {
@@ -3392,7 +3392,7 @@
       "window_batch_max_frames": 5,
       "viewer_visual_input_mode": "direct_frames",
       "max_in_flight_viewer_requests": 6,
-      "viewer_request_ttl_ms": 30000,
+      "viewer_request_ttl_ms": 0,
       "viewer_queue_capacity": 64,
       "observation_merge_window_ms": 1000,
       "public_context_window_ms": 60000,

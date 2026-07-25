@@ -3,6 +3,7 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 MAX_FRAME_BUNDLE_SIZE = 15
+UNBOUNDED_DEADLINE_AT_MS = 253_402_300_799_999
 
 
 class ObservationDomainModel(BaseModel):

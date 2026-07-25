@@ -29,6 +29,7 @@ from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemorySlice, RoomWorkingMemory
 from advx_backend.domain.observation import FrameRef, Observation
 from advx_backend.domain.observation_wave import (
+    UNBOUNDED_DEADLINE_AT_MS,
     FrameBundle,
     FrameBundleItem,
     ObservationTrigger,
@@ -377,7 +378,10 @@ class ViewerRuntimeCoordinator:
             audience_epoch=committed.audience_epoch,
             observation_id=observation.observation_id,
             created_at_ms=observation.created_at_ms,
-            deadline_at_ms=observation.created_at_ms + settings.viewer_request_ttl_ms,
+            deadline_at_ms=ViewerRuntimeCoordinator._viewer_request_deadline_at_ms(
+                created_at_ms=observation.created_at_ms,
+                ttl_ms=settings.viewer_request_ttl_ms,
+            ),
             triggers=triggers,
             event_ids=event_ids,
             trigger_event_ids=trigger_event_ids,
@@ -751,7 +755,10 @@ class ViewerRuntimeCoordinator:
             audience_epoch=committed.audience_epoch,
             observation_id=observation.observation_id,
             created_at_ms=observation.created_at_ms,
-            deadline_at_ms=(observation.created_at_ms + settings.viewer_request_ttl_ms),
+            deadline_at_ms=self._viewer_request_deadline_at_ms(
+                created_at_ms=observation.created_at_ms,
+                ttl_ms=settings.viewer_request_ttl_ms,
+            ),
             triggers=self._triggers(observation),
             event_ids=event_ids,
             trigger_event_ids=trigger_event_ids,
@@ -1571,6 +1578,12 @@ class ViewerRuntimeCoordinator:
 
     def _wave_expired(self, wave: ObservationWave) -> bool:
         return self._clock is not None and self._clock.now_ms() >= wave.deadline_at_ms
+
+    @staticmethod
+    def _viewer_request_deadline_at_ms(*, created_at_ms: int, ttl_ms: int) -> int:
+        if ttl_ms == 0:
+            return UNBOUNDED_DEADLINE_AT_MS
+        return created_at_ms + ttl_ms
 
     @staticmethod
     def _bundle_id(observation_id: str) -> str:

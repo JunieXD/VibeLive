@@ -2101,7 +2101,8 @@ export interface components {
             max_in_flight_viewer_requests: number;
             /**
              * Viewer Request Ttl Ms
-             * @default 30000
+             * @description Zero disables the Viewer request deadline.
+             * @default 0
              */
             viewer_request_ttl_ms: number;
             /**

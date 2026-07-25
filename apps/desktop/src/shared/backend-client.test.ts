@@ -40,7 +40,7 @@ describe('canonical desktop runtime spec', () => {
         },
         viewer_visual_input_mode: 'direct_frames',
         max_in_flight_viewer_requests: 6,
-        viewer_request_ttl_ms: 30_000,
+        viewer_request_ttl_ms: 0,
         viewer_queue_capacity: 64,
         observation_merge_window_ms: 1_000,
         public_context_window_ms: 60_000,

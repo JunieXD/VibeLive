@@ -10,10 +10,12 @@ from advx_backend.application.reaction_scheduler import (
 from advx_backend.application.reaction_service import ReactionResult
 from advx_backend.application.viewer_barrage_pipeline import ViewerBarragePipeline
 from advx_backend.application.viewer_runtime import ViewerRuntime
+from advx_backend.application.viewer_runtime_coordinator import ViewerRuntimeCoordinator
 from advx_backend.contracts.debug import TraceResponseStatus
 from advx_backend.contracts.viewer_runtime import (
     EvidenceRef,
     EvidenceSource,
+    RuntimeSettings,
     ViewerAction,
     ViewerGenerationResponse,
     WindowBatchGenerationResponse,
@@ -21,6 +23,7 @@ from advx_backend.contracts.viewer_runtime import (
 from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.observation import FrameRef, Observation
 from advx_backend.domain.observation_wave import (
+    UNBOUNDED_DEADLINE_AT_MS,
     ObservationTrigger,
     ObservationWave,
     ViewerVisualInputMode,
@@ -455,6 +458,22 @@ def _runtime_context() -> object:
             expires_at_ms=10_000,
         ),
     )
+
+
+def test_zero_viewer_request_ttl_disables_the_viewer_deadline() -> None:
+    assert RuntimeSettings().viewer_request_ttl_ms == 0
+
+    runtime = _runtime_context()
+    runtime.canonical_runtime_spec.settings.viewer_request_ttl_ms = 0
+
+    assert (
+        ViewerRuntimeCoordinator._viewer_request_deadline_at_ms(
+            created_at_ms=100,
+            ttl_ms=0,
+        )
+        == UNBOUNDED_DEADLINE_AT_MS
+    )
+    assert ViewerRuntime._deadline(_wave("unbounded"), runtime) == UNBOUNDED_DEADLINE_AT_MS
 
 
 class _Fence:
@@ -906,6 +925,34 @@ async def test_system_audio_wave_calls_viewer_provider_and_publishes() -> None:
     assert [request.observation_id for request in provider.requests] == [
         "system-wave"
     ]
+    assert len(publisher.events) == 1
+    assert len(room.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_unbounded_viewer_deadline_allows_late_results() -> None:
+    clock = _Clock(value=30_001)
+    provider = _GatedProvider()
+    runtime, publisher, room = _runtime(provider, clock=clock)
+    await runtime.start_session("session-1")
+    context = _runtime_context()
+    context.canonical_runtime_spec.settings.viewer_request_ttl_ms = 0
+    wave = _wave("late-result").model_copy(
+        update={"deadline_at_ms": UNBOUNDED_DEADLINE_AT_MS}
+    )
+    decision = _decision("late-result", "viewer-1").model_copy(
+        update={"expires_at_ms": UNBOUNDED_DEADLINE_AT_MS}
+    )
+
+    summary = await runtime.dispatch(
+        wave=wave,
+        decision=decision,
+        pool=SimpleNamespace(viewers=(_viewer(),)),
+        runtime=context,
+    )
+
+    assert summary.published == 1
+    assert provider.requests[0].deadline_at_ms == UNBOUNDED_DEADLINE_AT_MS
     assert len(publisher.events) == 1
     assert len(room.events) == 1
 

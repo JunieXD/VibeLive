@@ -33,6 +33,7 @@ from advx_backend.contracts.viewer_runtime import (
 from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation_wave import (
+    UNBOUNDED_DEADLINE_AT_MS,
     ObservationTrigger,
     ObservationWave,
     ViewerVisualInputMode,
@@ -2041,7 +2042,7 @@ class ViewerRuntime:
         ttl_ms = getattr(settings, "viewer_request_ttl_ms", None)
         if isinstance(ttl_ms, int) and ttl_ms > 0:
             return min(wave.deadline_at_ms, wave.created_at_ms + ttl_ms)
-        return wave.deadline_at_ms
+        return UNBOUNDED_DEADLINE_AT_MS
 
     def _runtime_limits(
         self,

@@ -180,7 +180,7 @@ export function compileCanonicalRuntimeSpec(
       window_batch_max_frames: 5,
       viewer_visual_input_mode: windowBatch ? 'direct_frames' : visual.viewerVisualInputMode,
       max_in_flight_viewer_requests: Math.min(6, totalViewerCount(activeMode)),
-      viewer_request_ttl_ms: 30_000,
+      viewer_request_ttl_ms: 0,
       viewer_queue_capacity: 64,
       observation_merge_window_ms: 1_000,
       public_context_window_ms: windowBatch ? 30_000 : 60_000,
