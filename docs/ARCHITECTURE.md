@@ -316,7 +316,7 @@ Audience Engine 先由本地预算器根据事件类型、模式响应范围和 
 
 - 不把多个 Viewer 合并为一个 prompt，也不使用多 Viewer batching。
 - 每个 Viewer 每波只返回 `action=barrage|silence`；`barrage` 最多一条，沉默是合法结果。
-- 默认 Viewer 请求并发上限为 6、队列容量为 64；用户、画面和 ambient 波的候选预算分别
+- 默认 Viewer 请求并发上限为 12、队列容量为 64；用户、画面和 ambient 波的候选预算分别
   为 6、4、2，直接点名只选择目标 Viewer 或对应 Persona 中的一位。
 - 实时 Viewer deadline 默认关闭；配置非零 TTL 时从波创建时开始计算。Observation 与每个
   Viewer 都使用有界 latest-wins。

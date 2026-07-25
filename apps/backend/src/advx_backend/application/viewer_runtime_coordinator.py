@@ -558,14 +558,16 @@ class ViewerRuntimeCoordinator:
                 None,
             ) or RuntimeSettings()
             if any(
-                trigger in {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
+                trigger
+                in {
+                    ObservationTrigger.USER_TEXT,
+                    ObservationTrigger.FINAL_VOICE,
+                    ObservationTrigger.SYSTEM_AUDIO,
+                }
                 for trigger in wave.triggers
             ):
                 budget = settings.viewer_user_speaker_budget
-            elif (
-                ObservationTrigger.SYSTEM_AUDIO in wave.triggers
-                or ObservationTrigger.AMBIENT_TICK in wave.triggers
-            ):
+            elif ObservationTrigger.AMBIENT_TICK in wave.triggers:
                 budget = settings.viewer_ambient_speaker_budget
             else:
                 budget = settings.viewer_screen_speaker_budget

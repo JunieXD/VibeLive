@@ -606,7 +606,7 @@ def test_waves_honor_configured_speaker_budgets() -> None:
     assert screen.selected_viewer_ids == repeated_screen.selected_viewer_ids
     assert screen.selected_viewer_ids != alternative_screen.selected_viewer_ids
     assert single_viewer_screen.selected_viewer_ids == ["viewer-00"]
-    assert len(system_audio.selected_viewer_ids) == 8
+    assert len(system_audio.selected_viewer_ids) == 9
     assert len(ambient.selected_viewer_ids) == 8
     assert len(mixed_window.selected_viewer_ids) == 9
     assert len(dual_asr_window.selected_viewer_ids) == 9

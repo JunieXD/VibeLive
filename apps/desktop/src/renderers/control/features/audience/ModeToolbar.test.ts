@@ -68,7 +68,7 @@ describe('ModeToolbar barrage generation mode', () => {
         onDeleteMode: () => undefined
       }))
 
-      expect(markup).toContain('30 秒窗口聚合')
+      expect(markup).toContain('Real（30 秒窗口）')
       expect(markup).toMatch(/aria-label="视觉输入"[^>]*disabled/)
       expect(markup).toMatch(/aria-label="帧选择策略"[^>]*disabled/)
       expect(markup).toContain('type="number" min="1" max="5" disabled="" value="4"')

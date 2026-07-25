@@ -61,7 +61,7 @@ class RuntimeSettings(RuntimeContractModel):
     barrage_generation_mode: BarrageGenerationMode = BarrageGenerationMode.PER_VIEWER
     frame_bundle: FrameBundleSettings = Field(default_factory=FrameBundleSettings)
     viewer_visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES
-    max_in_flight_viewer_requests: int = Field(default=6, ge=1, le=32)
+    max_in_flight_viewer_requests: int = Field(default=12, ge=1, le=32)
     viewer_request_ttl_ms: int = Field(
         default=0,
         ge=0,

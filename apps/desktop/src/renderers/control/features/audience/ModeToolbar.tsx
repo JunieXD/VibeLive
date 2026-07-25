@@ -230,8 +230,8 @@ export function ModeToolbar({
                 compact
                 value={activeMode.visualSettings.barrageGenerationMode}
                 options={[
-                  { value: 'per_viewer', label: '逐观众生成' },
-                  { value: 'window_batch', label: '30 秒窗口聚合' }
+                  { value: 'per_viewer', label: '朋友原版（逐观众）' },
+                  { value: 'window_batch', label: 'Real（30 秒窗口）' }
                 ]}
                 onChange={(barrageGenerationMode) =>
                   onPatchMode({

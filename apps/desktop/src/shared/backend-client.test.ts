@@ -41,7 +41,7 @@ describe('canonical desktop runtime spec', () => {
           frame_quality: 82
         },
         viewer_visual_input_mode: 'direct_frames',
-        max_in_flight_viewer_requests: 6,
+        max_in_flight_viewer_requests: 12,
         viewer_request_ttl_ms: 0,
         viewer_queue_capacity: 64,
         observation_merge_window_ms: 1_000,
