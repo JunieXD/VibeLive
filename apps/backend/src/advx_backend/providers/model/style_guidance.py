@@ -154,8 +154,8 @@ def _load_generation_skill() -> dict[str, Any]:
     _require_string_list(skill, "directives")
     _require_optional_string_list(skill, "learned_directives")
     persona_lenses = _require_string_dict(skill, "persona_lenses")
-    if len(persona_lenses) != 13:
-        raise StyleProfileError("bundled 6657 generation skill must define 13 Persona lenses")
+    if len(persona_lenses) != 14:
+        raise StyleProfileError("bundled 6657 generation skill must define 14 Persona lenses")
     return skill
 
 

@@ -92,10 +92,10 @@ class RuntimeSettings(RuntimeContractModel):
         if (
             self.window_batch_interval_ms != 5_000
             or self.window_batch_context_window_ms != 30_000
-            or self.window_batch_max_frames != 5
+            or self.window_batch_max_frames not in {4, 5}
         ):
             raise ValueError(
-                "window_batch requires a 5000 ms interval, 30000 ms context, and 5 frames"
+                "window_batch requires a 5000 ms interval, 30000 ms context, and 4 or 5 frames"
             )
         return self
 

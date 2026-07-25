@@ -160,7 +160,7 @@ def test_window_batch_context_uses_recent_text_and_both_final_asr_sources() -> N
     [
         {"window_batch_interval_ms": 4_000},
         {"window_batch_context_window_ms": 20_000},
-        {"window_batch_max_frames": 4},
+        {"window_batch_max_frames": 3},
     ],
 )
 def test_window_batch_runtime_settings_enforce_the_fixed_preset(
@@ -174,7 +174,7 @@ def test_window_batch_runtime_settings_enforce_the_fixed_preset(
 
 
 @pytest.mark.asyncio
-async def test_window_batch_frame_bundle_is_30_seconds_max_five_and_keeps_trigger() -> None:
+async def test_window_batch_frame_bundle_is_30_seconds_max_four_and_keeps_trigger() -> None:
     class Metadata:
         async def resolve(self, *, session_id: str, frame: FrameRef) -> FrameMetadata:
             del session_id
@@ -208,7 +208,8 @@ async def test_window_batch_frame_bundle_is_30_seconds_max_five_and_keeps_trigge
         spec=SimpleNamespace(
             room=SimpleNamespace(room_id="room"),
             settings=RuntimeSettings(
-                barrage_generation_mode=BarrageGenerationMode.WINDOW_BATCH
+                barrage_generation_mode=BarrageGenerationMode.WINDOW_BATCH,
+                window_batch_max_frames=4,
             ),
         ),
     )
@@ -221,7 +222,7 @@ async def test_window_batch_frame_bundle_is_30_seconds_max_five_and_keeps_trigge
     wave = await coordinator._build_wave(observation, committed)
 
     assert wave.frame_bundle is not None
-    assert len(wave.frame_bundle.frames) == 5
+    assert len(wave.frame_bundle.frames) == 4
     assert wave.frame_bundle.settings.frame_window_ms == 30_000
     assert all(frame.captured_at_ms >= 70_000 for frame in wave.frame_bundle.frames)
     assert "3" in [frame.frame_id for frame in wave.frame_bundle.frames]

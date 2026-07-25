@@ -359,14 +359,21 @@ async def test_window_batch_provider_uses_one_logged_strict_json_call() -> None:
         calls += 1
         payload = json.loads(request.content)
         assert payload["response_format"] == {"type": "json_object"}
+        assert payload["max_tokens"] == 1_536
         assert '"candidates"' in payload["messages"][0]["content"]
         context = json.loads(payload["messages"][1]["content"])
         assert "requests" not in context
         assert "trigger_context" not in context
+        assert "active_viewer_ids" not in context
+        assert "batch_generation_request_id" not in context
+        assert context["selected_viewer_ids"] == ["viewer-1", "viewer-2"]
+        assert context["allowed_event_ids"] == ["event-1"]
         assert [viewer["viewer_instance_id"] for viewer in context["viewers"]] == [
             "viewer-1",
             "viewer-2",
         ]
+        assert "viewer_private_state" not in context["viewers"][0]
+        assert "content_hash" not in context["viewers"][0]["persona"]
         return httpx.Response(
             200,
             request=request,
@@ -378,6 +385,16 @@ async def test_window_batch_provider_uses_one_logged_strict_json_call() -> None:
                             "content": json.dumps(
                                 {
                                     "candidates": [
+                                        {
+                                            "viewer_instance_id": "unselected-viewer",
+                                            "action": "barrage",
+                                            "intent": "react_to_scene",
+                                            "target": None,
+                                            "texts": ["不该整批失败"],
+                                            "reaction_type": "comment",
+                                            "decision_reason": "错误选择了未入选观众",
+                                            "evidence_refs": [],
+                                        },
                                         {
                                             "viewer_instance_id": "viewer-2",
                                             "action": "barrage",

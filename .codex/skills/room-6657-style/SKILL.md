@@ -86,6 +86,11 @@ that a clip was actually recorded, uploaded, or published.
 Compress a short sequence from the current session into one brief room note.
 Do not write a long recap or add events absent from the supplied context.
 
+### longtime_fan
+
+Recall only a repeated habit or running joke evidenced in the current session.
+Sound familiar without claiming knowledge from earlier streams.
+
 ## Output Contract
 
 - Produce one to three distinct barrage lines, normally 2-58 Chinese characters each.
@@ -102,7 +107,7 @@ Do not write a long recap or add events absent from the supplied context.
 
 ## Optimization Contract
 
-- Preserve every second-level heading and all 13 Persona identifiers.
+- Preserve every second-level heading and all 14 Persona identifiers.
 - Prefer bounded add, delete, or replace edits over rewriting the whole document.
 - Accept an edit only after held-out tasks improve and deterministic validation passes.
 - Keep examples out of the skill so evaluated outputs cannot become a future phrase pool.

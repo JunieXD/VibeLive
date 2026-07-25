@@ -17,9 +17,11 @@ describe('ModeToolbar barrage generation mode', () => {
     ).toMatchObject({
       barrageGenerationMode: 'window_batch',
       viewerVisualInputMode: 'direct_frames',
-      frameBundleSize: 5,
+      frameBundleSize: 4,
       frameWindowMs: 30_000,
-      frameSelectionStrategy: 'change_peaks'
+      frameSelectionStrategy: 'change_peaks',
+      frameMaxDimension: 768,
+      frameQuality: 0.7
     })
   })
 
@@ -69,7 +71,7 @@ describe('ModeToolbar barrage generation mode', () => {
       expect(markup).toContain('30 秒窗口聚合')
       expect(markup).toMatch(/aria-label="视觉输入"[^>]*disabled/)
       expect(markup).toMatch(/aria-label="帧选择策略"[^>]*disabled/)
-      expect(markup).toContain('type="number" min="1" max="5" disabled="" value="5"')
+      expect(markup).toContain('type="number" min="1" max="5" disabled="" value="4"')
       expect(markup).toContain(
         'type="number" min="1" max="30000" step="500" disabled="" value="30000"'
       )

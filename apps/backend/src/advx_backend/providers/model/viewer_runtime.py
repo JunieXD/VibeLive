@@ -187,32 +187,24 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE}"
 )
 _WINDOW_BATCH_SYSTEM_PROMPT: Final = (
-    "Act as the locally selected viewer instances supplied in the request. Produce zero or "
-    "more natural barrage candidates in one response. Each candidate must use exactly one "
-    "viewer_instance_id from viewers and no viewer may appear twice. Omit viewers who should "
-    "stay silent. A viewer username is its identity; Persona is only a behavioral tendency. "
+    "Generate a small batch of natural Chinese live-stream barrages from the supplied 30-second "
+    "context and ordered frames. Use only viewer_instance_id values in selected_viewer_ids, at "
+    "most once each, and omit silent viewers. Produce at most max_candidates candidates. A "
+    "username is identity; Persona and persona_lens are only style guidance, never scene "
+    "evidence. "
     f"{_CURRENT_WAVE_PRIORITY_GUIDANCE}"
     "If the primary stimulus is not reaction-worthy for a selected viewer, omit that viewer "
-    "rather than inventing a candidate. Apply this priority independently to every candidate; "
-    "do not use an older topic merely to produce more candidates. "
-    "Shared room memory is public background, not proof that a viewer attended an earlier "
-    "stream. Treat each style_profile as binding style guidance, but never as scene evidence "
-    "and never reconstruct its source corpus text. Candidate action must be barrage and texts "
-    "must be a JSON array containing one to three distinct complete barrage messages. Do not "
-    "split one sentence or repeat the same point across entries. Each message should be 20 "
-    "Chinese characters or fewer unless its style_profile requires otherwise. Legal intent values "
-    "are exactly: react_to_host, react_to_scene, reply_to_viewer, ask_question, agree, disagree, "
-    "encourage, joke, continue_thread, room_meta. target must be null or an object with kind "
-    "host, scene, room, viewer, or event. Host, scene, and room targets must set both "
-    "viewer_instance_id and event_id to null. A viewer target must set viewer_instance_id to "
-    "an active_viewer_ids value and event_id to null. An event target must set event_id to a "
-    "scene_assessment.replyable_event_ids value and viewer_instance_id to null. No other target "
-    "fields are allowed. evidence_refs must be an array "
-    'of {"source":"event","event_id":"allowed-event-id"} or '
-    '{"source":"frame","frame_index":0} objects using only IDs and zero-based frame indexes in '
-    "the request. Include one concise Chinese decision_reason of 40 characters or fewer. Do not "
-    "return generation_request_id or viewer_sequence; the server owns them. Do not expose hidden "
-    "reasoning. Return exactly one JSON object with no Markdown or prose. Use this shape: "
+    "rather than inventing a candidate. Each candidate must use action=barrage and exactly one "
+    "complete text of at most "
+    "20 Chinese characters. Legal intent values are: react_to_host, react_to_scene, "
+    "reply_to_viewer, ask_question, agree, disagree, encourage, joke, continue_thread, "
+    "room_meta. target is null or has kind host, scene, room, viewer, or event. Host, scene, "
+    "and room targets set viewer_instance_id and event_id to null. Viewer targets may use only "
+    "reply_target_viewer_ids. Event targets may use only scene.replyable_event_ids. "
+    "evidence_refs may cite only allowed_event_ids or zero-based frame indexes from frames. "
+    "Include a concise decision_reason of at most 40 Chinese characters. Never expose hidden "
+    "reasoning, invent earlier attendance, or reconstruct source-corpus wording. Return exactly "
+    "one JSON object with no Markdown or prose. Use this shape: "
     f"{_WINDOW_BATCH_JSON_EXAMPLE}"
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
@@ -227,6 +219,7 @@ _HISTORY_SUMMARY_SYSTEM_PROMPT: Final = (
     f"exactly one JSON object, with no Markdown or prose. Use this shape: {_SUMMARY_JSON_EXAMPLE}"
 )
 _ROLE_OUTPUT_TOKEN_BUDGET: Final = 4_096
+_WINDOW_BATCH_OUTPUT_TOKEN_BUDGET: Final = 1_536
 _REPAIR_TIMEOUT_SECONDS: Final = 6.0
 _MIN_REPAIR_REMAINING_SECONDS: Final = 6.0
 _CALL_STATE_CAPACITY: Final = 4_096
@@ -423,13 +416,14 @@ class OpenAICompatibleViewerRuntimeProvider:
                 model_id=self.config.provider.viewer_model,
                 system_prompt=_WINDOW_BATCH_SYSTEM_PROMPT,
                 content=content,
+                max_tokens=_WINDOW_BATCH_OUTPUT_TOKEN_BUDGET,
             )
             response = await self._send_rate_limited(
                 self._viewer,
                 payload,
                 lifecycle=lifecycle,
                 viewer_request=request.requests[0],
-                allow_json_mode_fallback=False,
+                allow_json_mode_fallback=True,
             )
             lifecycle.received(build_http_response_summary(response))
             output = self._structured_output(response)
@@ -447,9 +441,7 @@ class OpenAICompatibleViewerRuntimeProvider:
             for candidate in model_output.candidates:
                 viewer_request = request_by_viewer.get(candidate.viewer_instance_id)
                 if viewer_request is None:
-                    raise ViewerRuntimeProtocolError(
-                        "Window batch response used an unselected viewer ID"
-                    )
+                    continue
                 candidates.append(
                     ViewerGenerationResponse.model_validate(
                         {
@@ -780,10 +772,9 @@ class OpenAICompatibleViewerRuntimeProvider:
         request: WindowBatchGenerationRequest,
     ) -> str | list[dict[str, object]]:
         first = request.requests[0]
-        mode_context = dict(first.mode_context)
-        mode_context.pop("style_profile", None)
-        mode_context.pop("_viewer_persona_id", None)
-        mode_context.pop("_viewer_display_name", None)
+        selected_viewer_ids = [
+            viewer_request.viewer_instance_id for viewer_request in request.requests
+        ]
         viewers: list[dict[str, object]] = []
         for viewer_request in request.requests:
             style_guidance = style_guidance_for(
@@ -794,45 +785,117 @@ class OpenAICompatibleViewerRuntimeProvider:
                 "viewer_instance_id": viewer_request.viewer_instance_id,
                 "username": viewer_request.username,
                 "display_name": viewer_request.display_name,
-                "persona": viewer_request.persona.model_dump(mode="json"),
-                "instance_variant": viewer_request.instance_variant.model_dump(mode="json"),
-                "viewer_private_state": viewer_request.viewer_private_state.model_dump(mode="json"),
+                "persona": {
+                    "persona_id": viewer_request.persona.persona_id,
+                    "display_name": viewer_request.persona.display_name,
+                    "role": viewer_request.persona.role,
+                    "traits": viewer_request.persona.traits[:6],
+                    "speech_style": viewer_request.persona.speech_style,
+                    "behavior": viewer_request.persona.behavior,
+                    "trigger_preferences": viewer_request.persona.trigger_preferences[:6],
+                    "avoid_patterns": viewer_request.persona.avoid_patterns[:6],
+                },
+                "variant": {
+                    "expression_length": viewer_request.instance_variant.expression_length,
+                    "skepticism": viewer_request.instance_variant.skepticism,
+                    "encouragement": viewer_request.instance_variant.encouragement,
+                    "meme_affinity": viewer_request.instance_variant.meme_affinity,
+                    "focus": viewer_request.instance_variant.focus,
+                },
             }
             if style_guidance is not None:
-                viewer_context["style_profile"] = style_guidance
+                viewer_context["persona_lens"] = style_guidance["persona_lens"]
             viewers.append(viewer_context)
+
+        event_by_id = {
+            event.event_id: event
+            for event in [*first.public_context, *first.reply_context]
+        }
+        recent_events = sorted(
+            event_by_id.values(),
+            key=lambda event: (event.occurred_at_ms, event.sequence),
+        )[-48:]
+        events = [
+            {
+                "event_id": event.event_id,
+                "at_ms": event.occurred_at_ms,
+                "source": event.source_type,
+                "speaker": event.display_name,
+                "viewer_instance_id": event.viewer_instance_id,
+                "text": self._truncate_text(event.text, 320),
+            }
+            for event in recent_events
+        ]
+        allowed_event_ids = list(
+            dict.fromkeys(
+                [
+                    *first.input_event_ids[-32:],
+                    *(event.event_id for event in recent_events),
+                ]
+            )
+        )
+        allowed_event_id_set = set(allowed_event_ids)
+        active_viewer_ids = set(first.active_viewer_ids)
+        reply_target_viewer_ids = list(
+            dict.fromkeys(
+                event.viewer_instance_id
+                for event in first.reply_context
+                if event.viewer_instance_id in active_viewer_ids
+            )
+        )
+        scene = first.scene_assessment
+        bundle = first.frame_bundle
         context: dict[str, object] = {
-            "batch_generation_request_id": request.batch_generation_request_id,
-            "room_id": request.room_id,
-            "session_id": request.session_id,
-            "audience_epoch": request.audience_epoch,
-            "observation_id": request.observation_id,
-            "deadline_at_ms": request.deadline_at_ms,
-            "scene_assessment": first.scene_assessment.model_dump(mode="json"),
-            "active_viewer_ids": first.active_viewer_ids,
-            "mode_context": mode_context,
-            "visual_input_mode": first.visual_input_mode.value,
-            "frame_bundle": (
-                None
-                if first.frame_bundle is None
-                else first.frame_bundle.model_dump(mode="json")
+            "selected_viewer_ids": selected_viewer_ids,
+            "reply_target_viewer_ids": reply_target_viewer_ids,
+            "max_candidates": len(selected_viewer_ids),
+            "mode": {
+                "mode_id": first.mode_context.get("mode_id"),
+                "ambience": first.mode_context.get("ambience"),
+            },
+            "scene": {
+                "salience": scene.salience,
+                "novelty": scene.novelty,
+                "emotional_intensity": scene.emotional_intensity,
+                "topics": scene.topics[:8],
+                "emotional_tone": scene.emotional_tone[:6],
+                "replyable_event_ids": [
+                    event_id
+                    for event_id in scene.replyable_event_ids
+                    if event_id in allowed_event_id_set
+                ],
+                "suggested_reaction_types": scene.suggested_reaction_types[:8],
+            },
+            "allowed_event_ids": allowed_event_ids,
+            "events": events,
+            "frames": (
+                []
+                if bundle is None
+                else [
+                    {
+                        "frame_index": frame.frame_index,
+                        "captured_at_ms": frame.captured_at_ms,
+                        "change_score": frame.change_score,
+                    }
+                    for frame in bundle.frames
+                ]
             ),
-            "shared_visual_summary": first.shared_visual_summary,
-            "input_event_ids": first.input_event_ids,
-            "public_context_event_ids": first.public_context_event_ids,
-            "public_context": [
-                event.model_dump(mode="json") for event in first.public_context
+            "visual_summary": self._truncate_text(first.shared_visual_summary, 800),
+            "history_summary": self._truncate_text(
+                first.conversation_history_summary,
+                1_000,
+                keep_tail=True,
+            ),
+            "room_memory": [
+                {
+                    "type": item.memory_type.value,
+                    "content": self._truncate_text(item.content, 240),
+                }
+                for item in first.room_memory_slice.items[-6:]
             ],
-            "reply_context_event_ids": first.reply_context_event_ids,
-            "reply_context": [
-                event.model_dump(mode="json") for event in first.reply_context
-            ],
-            "conversation_history_summary": first.conversation_history_summary,
-            "room_memory_slice": first.room_memory_slice.model_dump(mode="json"),
             "viewers": viewers,
         }
-        self._remove_data_refs(context)
-        content = await self._content(context, request.session_id, first.frame_bundle)
+        content = await self._content(context, request.session_id, bundle)
         if (
             first.visual_input_mode is ViewerVisualInputMode.DIRECT_FRAMES
             and not isinstance(content, list)
@@ -904,6 +967,7 @@ class OpenAICompatibleViewerRuntimeProvider:
         model_id: str,
         system_prompt: str,
         content: str | list[dict[str, object]],
+        max_tokens: int = _ROLE_OUTPUT_TOKEN_BUDGET,
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "model": model_id,
@@ -913,11 +977,22 @@ class OpenAICompatibleViewerRuntimeProvider:
             ],
             "stream": False,
             "n": 1,
-            "max_tokens": _ROLE_OUTPUT_TOKEN_BUDGET,
+            "max_tokens": max_tokens,
             "response_format": JSON_MODE_RESPONSE_FORMAT,
         }
         payload.update(default_reasoning_options(self.config.base_url, model_id))
         return payload
+
+    @staticmethod
+    def _truncate_text(
+        value: str | None,
+        maximum: int,
+        *,
+        keep_tail: bool = False,
+    ) -> str | None:
+        if value is None or len(value) <= maximum:
+            return value
+        return value[-maximum:] if keep_tail else value[:maximum]
 
     async def _begin_viewer_invocation(self, request: ViewerGenerationRequest) -> int:
         async with self._viewer_call_state_lock:

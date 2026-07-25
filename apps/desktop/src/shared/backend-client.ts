@@ -168,7 +168,7 @@ export function compileCanonicalRuntimeSpec(
     },
     settings: {
       frame_bundle: {
-        frame_bundle_size: windowBatch ? 5 : visual.frameBundleSize,
+        frame_bundle_size: windowBatch ? 4 : visual.frameBundleSize,
         frame_window_ms: windowBatch ? 30_000 : visual.frameWindowMs,
         frame_selection_strategy: windowBatch
           ? 'change_peaks'
@@ -181,7 +181,7 @@ export function compileCanonicalRuntimeSpec(
       barrage_generation_mode: visual.barrageGenerationMode,
       window_batch_interval_ms: 5_000,
       window_batch_context_window_ms: 30_000,
-      window_batch_max_frames: 5,
+      window_batch_max_frames: 4,
       viewer_visual_input_mode: windowBatch ? 'direct_frames' : visual.viewerVisualInputMode,
       max_in_flight_viewer_requests: dispatch.maxInFlightViewerRequests,
       viewer_request_ttl_ms: 0,

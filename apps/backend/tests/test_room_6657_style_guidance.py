@@ -30,6 +30,16 @@ def test_style_guidance_does_not_leak_into_other_modes() -> None:
     )
 
 
+def test_style_guidance_supports_longtime_fan_in_6657_mode() -> None:
+    guidance = style_guidance_for(
+        {"mode_id": "room-6657"},
+        persona_id="longtime_fan",
+    )
+
+    assert guidance is not None
+    assert "current session" in guidance["persona_lens"]
+
+
 @pytest.mark.asyncio
 async def test_viewer_provider_strips_untrusted_style_profile_from_other_modes() -> None:
     provider = OpenAICompatibleViewerRuntimeProvider(

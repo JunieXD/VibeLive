@@ -205,6 +205,7 @@ function createMode(
   options: {
     readonly revision?: number
     readonly personaOverrides?: Readonly<Record<string, PersonaOverride>>
+    readonly visualSettings?: Partial<AudienceVisualSettings>
   } = {}
 ): AudienceMode {
   const personaCounts = presetPersonaCounts(high, medium, burstLimit[1])
@@ -222,7 +223,10 @@ function createMode(
     normalResponseRange,
     highlightResponseRange,
     ambience,
-    visualSettings: DEFAULT_VISUAL_SETTINGS,
+    visualSettings: {
+      ...DEFAULT_VISUAL_SETTINGS,
+      ...options.visualSettings
+    },
     dispatchSettings: { ...DEFAULT_DISPATCH_SETTINGS },
     baseActivity: normalResponseRange,
     burstLimit: highlightResponseRange
@@ -283,8 +287,17 @@ export const BUILT_IN_MODES: readonly AudienceMode[] = [
   createMode('room-6657', 'CSGO：6657 玩机器风格', '抽象梗、反串、问号、句内复读和贴画面的中短句。',
     ['reaction_qmark', 'hardmouth_antifan', 'instigator', 'fun_seeker', 'meme_archivist', 'abstract_radio', 'parrot_unit', 'jinx_machine', 'grudge_keeper'],
     ['cheat_suspector', 'praise_then_bite', 'clip_alarm', 'room_historian'], [6, 10], [20, 28], 'continuous', {
-      revision: 2,
-      personaOverrides: ROOM_6657_PERSONA_OVERRIDES
+      revision: 3,
+      personaOverrides: ROOM_6657_PERSONA_OVERRIDES,
+      visualSettings: {
+        barrageGenerationMode: 'window_batch',
+        viewerVisualInputMode: 'direct_frames',
+        frameBundleSize: 4,
+        frameWindowMs: 30_000,
+        frameSelectionStrategy: 'change_peaks',
+        frameMaxDimension: 768,
+        frameQuality: 0.7
+      }
     }),
   createMode('newcomer-friendly', 'CSGO：新人友好', '愿意解释、提问和鼓励。',
     ['newcomer', 'newbie_host', 'rule_explainer', 'comfort_voice', 'calm_realist', 'question_catcher', 'curious_ten', 'streamer_defender'],

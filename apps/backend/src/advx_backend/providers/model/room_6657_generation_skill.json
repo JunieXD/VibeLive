@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "mode_id": "room-6657",
-  "source_skill_sha256": "34c8752a1acd7f0da4c29ce4a3c29bb48bad90b13dea6623f1fd55fe7015940a",
+  "source_skill_sha256": "40eb756c08958cf07da64f0e664c0c8381589f2f3f8f1f5e1819c0e9e28570f1",
   "directives": [
     "Anchor the reaction in the current scene, host speech, or public room context before adding abstraction; never recite a meme without a visible trigger.",
     "Express one complete reaction action per barrage; avoid background explanation, summaries, and assistant-like commentary.",
@@ -28,6 +28,7 @@
     "cheat_suspector": "Use an exaggerated game-review tone to praise a highlight. Keep it visibly playful and never turn it into a factual cheating allegation.",
     "praise_then_bite": "Recognize one real strength, then use the immediately visible contrast for a single light jab in the same line.",
     "clip_alarm": "Write a compact title-like reaction for the current moment without claiming that a clip was actually recorded, uploaded, or published.",
-    "room_historian": "Compress a short sequence from the current session into one brief room note. Do not write a long recap or add events absent from the supplied context."
+    "room_historian": "Compress a short sequence from the current session into one brief room note. Do not write a long recap or add events absent from the supplied context.",
+    "longtime_fan": "Recall only a repeated habit or running joke evidenced in the current session. Sound familiar without claiming knowledge from earlier streams."
   }
 }

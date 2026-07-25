@@ -41,9 +41,11 @@ export function visualSettingsForBarrageGenerationMode(
     ...current,
     barrageGenerationMode,
     viewerVisualInputMode: 'direct_frames',
-    frameBundleSize: 5,
+    frameBundleSize: 4,
     frameWindowMs: 30_000,
-    frameSelectionStrategy: 'change_peaks'
+    frameSelectionStrategy: 'change_peaks',
+    frameMaxDimension: 768,
+    frameQuality: 0.7
   }
 }
 

@@ -32,7 +32,7 @@ describe('canonical desktop runtime spec', () => {
         barrage_generation_mode: 'per_viewer',
         window_batch_interval_ms: 5_000,
         window_batch_context_window_ms: 30_000,
-        window_batch_max_frames: 5,
+        window_batch_max_frames: 4,
         frame_bundle: {
           frame_bundle_size: 5,
           frame_window_ms: 30_000,
@@ -69,7 +69,7 @@ describe('canonical desktop runtime spec', () => {
     expect(generatedContract.settings?.frame_bundle?.frame_quality).toBe(82)
   })
 
-  it('compiles window generation with a five-frame thirty-second ceiling', () => {
+  it('compiles window generation with a four-frame thirty-second ceiling', () => {
     const workspace = createInitialAudienceWorkspace()
     const activeMode = workspace.modeState.modes[0]
     const windowWorkspace = {
@@ -108,11 +108,11 @@ describe('canonical desktop runtime spec', () => {
       barrage_generation_mode: 'window_batch',
       window_batch_interval_ms: 5_000,
       window_batch_context_window_ms: 30_000,
-      window_batch_max_frames: 5,
+      window_batch_max_frames: 4,
       viewer_visual_input_mode: 'direct_frames',
       public_context_window_ms: 30_000,
       frame_bundle: {
-        frame_bundle_size: 5,
+        frame_bundle_size: 4,
         frame_window_ms: 30_000,
         frame_selection_strategy: 'change_peaks'
       }

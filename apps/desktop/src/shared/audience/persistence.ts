@@ -20,14 +20,17 @@ const MODE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const MAX_FRAME_BUNDLE_SIZE = 5
 const MAX_FRAME_WINDOW_MS = 30_000
 type AudienceWorkspaceSourceVersion = 1 | 2 | 3 | 4 | 5
-const BUILT_IN_MODE_MIGRATIONS = new Map([
-  ['room-6657', { fromRevision: 1, toRevision: 2 }],
-  ['music-live-room', { fromRevision: 1, toRevision: 2 }],
-  ['chat-story-room', { fromRevision: 1, toRevision: 2 }],
-  ['creative-studio', { fromRevision: 1, toRevision: 2 }],
-  ['food-life-room', { fromRevision: 1, toRevision: 2 }],
-  ['travel-outdoor-room', { fromRevision: 1, toRevision: 2 }],
-  ['sports-watch-party', { fromRevision: 1, toRevision: 2 }]
+const BUILT_IN_MODE_MIGRATIONS = new Map<
+  string,
+  { readonly fromRevisions: readonly number[]; readonly toRevision: number }
+>([
+  ['room-6657', { fromRevisions: [1, 2], toRevision: 3 }],
+  ['music-live-room', { fromRevisions: [1], toRevision: 2 }],
+  ['chat-story-room', { fromRevisions: [1], toRevision: 2 }],
+  ['creative-studio', { fromRevisions: [1], toRevision: 2 }],
+  ['food-life-room', { fromRevisions: [1], toRevision: 2 }],
+  ['travel-outdoor-room', { fromRevisions: [1], toRevision: 2 }],
+  ['sports-watch-party', { fromRevisions: [1], toRevision: 2 }]
 ])
 const BUILT_IN_MODE_LEGACY_NAMES = new Map([
   ['lively-game-room', '热闹游戏房'],
@@ -302,7 +305,7 @@ function upgradeBuiltInModes(modes: readonly AudienceMode[]): AudienceMode[] {
       mode.builtIn &&
       current &&
       migration &&
-      mode.revision === migration.fromRevision &&
+      migration.fromRevisions.includes(mode.revision) &&
       current.revision === migration.toRevision
     ) {
       return cloneAudienceMode(current)
@@ -496,13 +499,17 @@ function parseVisualSettings(
     viewerVisualInputMode: barrageGenerationMode === 'window_batch'
       ? 'direct_frames'
       : value.viewerVisualInputMode as AudienceVisualSettings['viewerVisualInputMode'],
-    frameBundleSize: barrageGenerationMode === 'window_batch' ? 5 : frameBundleSize,
+    frameBundleSize: barrageGenerationMode === 'window_batch' ? 4 : frameBundleSize,
     frameWindowMs: barrageGenerationMode === 'window_batch' ? 30_000 : frameWindowMs,
     frameSelectionStrategy: barrageGenerationMode === 'window_batch'
       ? 'change_peaks'
       : frameSelectionStrategy,
-    frameMaxDimension,
-    frameQuality: value.frameQuality as number
+    frameMaxDimension: barrageGenerationMode === 'window_batch'
+      ? Math.min(frameMaxDimension, 768)
+      : frameMaxDimension,
+    frameQuality: barrageGenerationMode === 'window_batch'
+      ? Math.min(value.frameQuality as number, 0.7)
+      : value.frameQuality as number
   }
 }
 
