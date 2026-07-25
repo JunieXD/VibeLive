@@ -136,6 +136,7 @@ class _WorkItem:
     provider_task: asyncio.Task[object] | None = None
     output_scheduled: bool = False
     ready: asyncio.Event = field(default_factory=asyncio.Event)
+    invalidated: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(slots=True)
@@ -204,6 +205,8 @@ class _OutputPaceState:
 @dataclass(slots=True)
 class _RequestPaceState:
     next_start_at_ms: int | None = None
+    turn: asyncio.Lock = field(default_factory=asyncio.Lock)
+    stopped: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(slots=True)
@@ -359,7 +362,9 @@ class ViewerRuntime:
             self._mailboxes.clear()
             self._window_batches.clear()
             self._output_states.clear()
-            self._request_pace_states.pop(session_id, None)
+            request_pace_state = self._request_pace_states.pop(session_id, None)
+            if request_pace_state is not None:
+                request_pace_state.stopped.set()
             self._lanes.clear()
             self._sequences.clear()
             self._sequence_epochs.clear()
@@ -391,6 +396,7 @@ class ViewerRuntime:
                 )
             )
             for item in items:
+                item.invalidated.set()
                 if not item.output_scheduled:
                     self._record_trace(
                         item,
@@ -624,17 +630,7 @@ class ViewerRuntime:
                     selected=selected,
                     unmatched_stale=unmatched_stale,
                 )
-            if await self._claim_sequence(item.request):
-                async with self._lock:
-                    viewer_id = item.request.viewer_instance_id
-                    current_epoch = self._sequence_epochs.get(viewer_id)
-                    current_sequence = self._sequences.get(viewer_id, 0)
-                    if (
-                        current_epoch != item.request.audience_epoch
-                        or item.request.viewer_sequence > current_sequence
-                    ):
-                        self._sequences[viewer_id] = item.request.viewer_sequence
-                        self._sequence_epochs[viewer_id] = item.request.audience_epoch
+            if await self._claim_item_sequence(item):
                 claimed.append(item)
             else:
                 self._record_trace(
@@ -1375,6 +1371,7 @@ class ViewerRuntime:
                         priority,
                         active.priority,
                     )
+                    active.invalidated.set()
                     if active.dispatched_at_ms is not None:
                         # Let the provider call finish, but prevent stale output from publishing.
                         continue
@@ -2233,40 +2230,84 @@ class ViewerRuntime:
         raise _ViewerRequestExpired("Viewer provider attempt exceeded remaining TTL")
 
     async def _wait_for_request_turn(self, item: _WorkItem) -> bool:
-        interval_ms = self._request_start_interval_ms(item.runtime)
-        async with self._lock:
-            if not self._is_current(item) or self._expired(item.request):
-                return False
-            delay_ms = self._reserve_request_start_locked(
-                session_id=item.request.session_id,
-                interval_ms=interval_ms,
-            )
-        if delay_ms:
-            await self._sleep(delay_ms / 1_000)
-        async with self._lock:
-            return self._is_current(item) and not self._expired(item.request)
+        return await self._wait_for_request_pace(
+            session_id=item.request.session_id,
+            interval_ms=self._request_start_interval_ms(item.runtime),
+            deadline_at_ms=item.request.deadline_at_ms,
+            invalidated=item.invalidated,
+            is_current=lambda: self._is_current(item),
+        )
 
     async def _wait_for_window_batch_request_turn(self, work: _WindowBatchWork) -> bool:
         runtime = work.items[0].runtime if work.items else None
-        interval_ms = self._request_start_interval_ms(runtime)
-        async with self._lock:
-            if not self._window_batch_is_current_locked(work):
-                return False
-            delay_ms = self._reserve_request_start_locked(
-                session_id=work.session_id,
-                interval_ms=interval_ms,
-            )
-        if delay_ms:
-            await self._sleep(delay_ms / 1_000)
-        async with self._lock:
-            return self._window_batch_is_current_locked(work)
+        deadline_at_ms = min(
+            (item.request.deadline_at_ms for item in work.items),
+            default=UNBOUNDED_DEADLINE_AT_MS,
+        )
+        return await self._wait_for_request_pace(
+            session_id=work.session_id,
+            interval_ms=self._request_start_interval_ms(runtime),
+            deadline_at_ms=deadline_at_ms,
+            invalidated=work.cancelled,
+            is_current=lambda: self._window_batch_is_current_locked(work),
+        )
 
-    def _reserve_request_start_locked(self, *, session_id: str, interval_ms: int) -> int:
-        state = self._request_pace_states.setdefault(session_id, _RequestPaceState())
-        now_ms = self._clock.now_ms()
-        start_at_ms = max(now_ms, state.next_start_at_ms or now_ms)
-        state.next_start_at_ms = start_at_ms + interval_ms
-        return start_at_ms - now_ms
+    async def _wait_for_request_pace(
+        self,
+        *,
+        session_id: str,
+        interval_ms: int,
+        deadline_at_ms: int,
+        invalidated: asyncio.Event,
+        is_current: Callable[[], bool],
+    ) -> bool:
+        async with self._lock:
+            if not is_current() or self._clock.now_ms() >= deadline_at_ms:
+                return False
+            state = self._request_pace_states.setdefault(
+                session_id,
+                _RequestPaceState(),
+            )
+        async with state.turn:
+            while True:
+                async with self._lock:
+                    now_ms = self._clock.now_ms()
+                    if (
+                        self._request_pace_states.get(session_id) is not state
+                        or state.stopped.is_set()
+                        or invalidated.is_set()
+                        or not is_current()
+                        or now_ms >= deadline_at_ms
+                    ):
+                        return False
+                    delay_ms = max(0, (state.next_start_at_ms or now_ms) - now_ms)
+                    delay_ms = min(delay_ms, deadline_at_ms - now_ms)
+                    if delay_ms == 0:
+                        state.next_start_at_ms = now_ms + interval_ms
+                        return True
+                if not await self._sleep_while_request_is_current(
+                    delay_ms / 1_000,
+                    invalidated,
+                    state.stopped,
+                ):
+                    return False
+
+    async def _sleep_while_request_is_current(
+        self,
+        delay_seconds: float,
+        *invalidations: asyncio.Event,
+    ) -> bool:
+        sleep = asyncio.create_task(self._sleep(delay_seconds))
+        watchers = [asyncio.create_task(event.wait()) for event in invalidations]
+        tasks = [sleep, *watchers]
+        try:
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            return sleep in done and not any(event.is_set() for event in invalidations)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     @staticmethod
     def _request_start_interval_ms(runtime: object | None) -> int:
@@ -2323,6 +2364,7 @@ class ViewerRuntime:
 
     def _record_superseded(self, item: _WorkItem, *, reason: str) -> None:
         item.superseded_reason = reason
+        item.invalidated.set()
         self._record_trace(
             item,
             status=TraceResponseStatus.CANCELLED,
