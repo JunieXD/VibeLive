@@ -52,6 +52,8 @@ type UseMediaDevicesOptions = {
   onRequestSourcePicker: () => void
 }
 
+const METER_UI_UPDATE_INTERVAL_MS = 1_000 / 30
+
 export function useMediaDevices({
   sessionStatusRef,
   fatalMediaRef,
@@ -375,6 +377,7 @@ export function useMediaDevices({
     }
     if (channel.meterFrame !== null) cancelAnimationFrame(channel.meterFrame)
     channel.meterFrame = null
+    channel.level = 0
     const processor = channel.processor
     channel.processor = null
     if (processor) {
@@ -401,6 +404,7 @@ export function useMediaDevices({
     channel.stream = null
     if (channel.meterFrame !== null) cancelAnimationFrame(channel.meterFrame)
     channel.meterFrame = null
+    channel.level = 0
     const processor = channel.processor
     channel.processor = null
     if (processor) {
@@ -697,15 +701,30 @@ export function useMediaDevices({
         clearSystemAudioBuffer(channel)
       }
       const meterSamples = new Float32Array(analyser.fftSize)
-      const measure = (): void => {
+      let previousMeasureAt: number | null = null
+      let previousPublishAt: number | null = null
+      let previousPublishedLevel: number | null = null
+      const measure = (now: number): void => {
         if (channel.stream !== stream) return
         analyser.getFloatTimeDomainData(meterSamples)
         const targetLevel = calculateMicrophoneLevel(meterSamples)
-        channel.level = smoothMicrophoneLevel(channel.level, targetLevel)
-        setLevel(Math.round(channel.level))
+        const elapsedMs = previousMeasureAt === null ? 1_000 / 60 : now - previousMeasureAt
+        previousMeasureAt = now
+        channel.level = smoothMicrophoneLevel(channel.level, targetLevel, elapsedMs)
+        if (
+          previousPublishAt === null ||
+          now - previousPublishAt >= METER_UI_UPDATE_INTERVAL_MS
+        ) {
+          previousPublishAt = now
+          const displayLevel = Math.round(channel.level)
+          if (displayLevel !== previousPublishedLevel) {
+            previousPublishedLevel = displayLevel
+            setLevel(displayLevel)
+          }
+        }
         channel.meterFrame = requestAnimationFrame(measure)
       }
-      measure()
+      channel.meterFrame = requestAnimationFrame(measure)
     } catch (error) {
       if (context.state !== 'closed') await context.close().catch(() => undefined)
       throw error

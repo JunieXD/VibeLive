@@ -526,10 +526,12 @@
 
 .mini-meter span {
   display: block;
+  width: 100%;
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #2fd68f 0%, #d5ff55 60%, #ffb340 85%, #ff5f52 100%);
-  transition: width 80ms linear;
+  transform-origin: left center;
+  will-change: transform;
 }
 
 .composer {
@@ -1150,9 +1152,11 @@
 
 .mixer-meter span {
   display: block;
+  width: 100%;
   height: 100%;
   background: linear-gradient(90deg, #2fd68f 0%, #d5ff55 55%, #ffb340 80%, #ff5f52 100%);
-  transition: width 80ms linear;
+  transform-origin: left center;
+  will-change: transform;
 }
 
 .mixer-channel {

@@ -14,11 +14,16 @@ describe('microphone meter', () => {
 
   it('keeps silence at zero and caps loud input', () => {
     expect(calculateMicrophoneLevel(new Float32Array(512))).toBe(0)
-    expect(calculateMicrophoneLevel(new Float32Array(512).fill(0.25))).toBe(100)
+    expect(calculateMicrophoneLevel(new Float32Array(512).fill(0.5))).toBe(100)
   })
 
   it('rises quickly and decays gradually', () => {
-    expect(smoothMicrophoneLevel(0, 100)).toBe(65)
-    expect(smoothMicrophoneLevel(100, 0)).toBeCloseTo(82)
+    expect(smoothMicrophoneLevel(0, 100, 50)).toBeCloseTo(63.2, 1)
+    expect(smoothMicrophoneLevel(100, 0, 250)).toBeCloseTo(36.8, 1)
+  })
+
+  it('uses elapsed time instead of a fixed step per rendered frame', () => {
+    expect(smoothMicrophoneLevel(0, 100, 0)).toBe(0)
+    expect(smoothMicrophoneLevel(0, 100, 100)).toBeGreaterThan(80)
   })
 })

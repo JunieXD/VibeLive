@@ -428,7 +428,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
             {microphoneEnabled ? '麦克风已开启' : '麦克风已关闭'}
           </span>
           <div className="mini-meter" aria-hidden="true">
-            <span style={{ width: `${microphoneLevel}%` }} />
+            <span style={{ transform: `scaleX(${microphoneLevel / 100})` }} />
           </div>
         </div>
       </div>

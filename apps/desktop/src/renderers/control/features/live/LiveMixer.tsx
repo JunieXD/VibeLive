@@ -53,7 +53,7 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
           </span>
           <div className="mixer-channel">
             <div className="mixer-meter" aria-label={`麦克风音量 ${microphoneLevel}%`}>
-              <span style={{ width: `${microphoneLevel}%` }} />
+              <span style={{ transform: `scaleX(${microphoneLevel / 100})` }} />
             </div>
             <small className={microphoneStatus === '正常' ? 'ok' : ''}>
               {microphoneStatus === '传输异常'
@@ -69,7 +69,7 @@ export function LiveMixer(props: LiveMixerProps): React.JSX.Element {
           </span>
           <div className="mixer-channel">
             <div className="mixer-meter" aria-label={`系统声音音量 ${systemAudioLevel}%`}>
-              <span style={{ width: `${systemAudioLevel}%` }} />
+              <span style={{ transform: `scaleX(${systemAudioLevel / 100})` }} />
             </div>
             <small className={systemAudioReady && systemAudioStatus === '正常' ? 'ok' : ''}>
               {systemAudioStatus === '传输异常'

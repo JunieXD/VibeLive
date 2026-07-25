@@ -28,8 +28,8 @@ export function bindMediaStreamToVideo(
 
 const METER_FLOOR_DBFS = -60
 const METER_CEILING_DBFS = -12
-const METER_ATTACK = 0.65
-const METER_RELEASE = 0.18
+const METER_ATTACK_MS = 50
+const METER_RELEASE_MS = 250
 
 export function calculateMicrophoneLevel(samples: Float32Array): number {
   if (samples.length === 0) return 0
@@ -45,13 +45,19 @@ export function calculateMicrophoneLevel(samples: Float32Array): number {
   const decibels = 20 * Math.log10(rootMeanSquare)
   const normalized =
     (decibels - METER_FLOOR_DBFS) / (METER_CEILING_DBFS - METER_FLOOR_DBFS)
-  return Math.round(Math.min(1, Math.max(0, normalized)) * 100)
+  return Math.min(1, Math.max(0, normalized)) * 100
 }
 
-export function smoothMicrophoneLevel(previousLevel: number, targetLevel: number): number {
+export function smoothMicrophoneLevel(
+  previousLevel: number,
+  targetLevel: number,
+  elapsedMs: number
+): number {
   const previous = Math.min(100, Math.max(0, previousLevel))
   const target = Math.min(100, Math.max(0, targetLevel))
-  const rate = target > previous ? METER_ATTACK : METER_RELEASE
+  const duration = target > previous ? METER_ATTACK_MS : METER_RELEASE_MS
+  const elapsed = Math.max(0, elapsedMs)
+  const rate = 1 - Math.exp(-elapsed / duration)
   const smoothed = previous + (target - previous) * rate
   return smoothed < 0.5 ? 0 : smoothed
 }
