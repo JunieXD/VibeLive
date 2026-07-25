@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from advx_backend.application.ports.session import Clock, IdGenerator
 from advx_backend.contracts.viewer_runtime import (
+    MAX_VIEWER_BARRAGE_TEXT_LENGTH,
     EvidenceRef,
     EvidenceSource,
     ViewerAction,
@@ -24,8 +25,14 @@ class ViewerBarrageRejection(StrEnum):
 @dataclass(frozen=True, slots=True)
 class ViewerBarrageValidation:
     accepted: bool
-    event: ViewerBarrageEvent | None = None
+    events: tuple[ViewerBarrageEvent, ...] = ()
     rejection_reason: ViewerBarrageRejection | None = None
+
+    @property
+    def event(self) -> ViewerBarrageEvent | None:
+        """Compatibility accessor for callers that only need the first barrage."""
+
+        return self.events[0] if self.events else None
 
 
 class ViewerBarragePipeline:
@@ -67,29 +74,34 @@ class ViewerBarragePipeline:
             persona_id = request.viewer_instance_id
         if not isinstance(display_name, str) or not display_name:
             display_name = request.viewer_instance_id
-        text = (response.text or "").strip()[:160]
-        if not text:
+        texts = tuple(
+            text.strip()[:MAX_VIEWER_BARRAGE_TEXT_LENGTH] for text in response.texts or ()
+        )
+        if not texts:
             return ViewerBarrageValidation(accepted=True)
         return ViewerBarrageValidation(
             accepted=True,
-            event=ViewerBarrageEvent(
-                barrage_id=self._id_generator.new_id(),
-                room_id=request.room_id,
-                session_id=request.session_id,
-                audience_epoch=request.audience_epoch,
-                observation_id=request.observation_id,
-                generation_request_id=request.generation_request_id,
-                viewer_instance_id=request.viewer_instance_id,
-                persona_id=persona_id,
-                display_name=display_name,
-                viewer_sequence=request.viewer_sequence,
-                reaction_type=response.reaction_type,
-                intent=response.intent,
-                target=response.target,
-                evidence_refs=response.evidence_refs,
-                text=text,
-                created_at_ms=now_ms,
-                expires_at_ms=request.deadline_at_ms,
+            events=tuple(
+                ViewerBarrageEvent(
+                    barrage_id=self._id_generator.new_id(),
+                    room_id=request.room_id,
+                    session_id=request.session_id,
+                    audience_epoch=request.audience_epoch,
+                    observation_id=request.observation_id,
+                    generation_request_id=request.generation_request_id,
+                    viewer_instance_id=request.viewer_instance_id,
+                    persona_id=persona_id,
+                    display_name=display_name,
+                    viewer_sequence=request.viewer_sequence,
+                    reaction_type=response.reaction_type,
+                    intent=response.intent,
+                    target=response.target,
+                    evidence_refs=response.evidence_refs,
+                    text=text,
+                    created_at_ms=now_ms,
+                    expires_at_ms=request.deadline_at_ms,
+                )
+                for text in texts
             ),
         )
 

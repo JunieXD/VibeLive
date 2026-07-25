@@ -188,11 +188,18 @@ class _RecordedViewerProvider:
             runtime_request_id=request.generation_request_id,
         )
         action = ViewerAction(viewer.get("action", ViewerAction.BARRAGE))
-        text = viewer.get("text")
-        if action is ViewerAction.BARRAGE and not isinstance(text, str):
-            text = "recorded viewer response"
+        raw_texts = viewer.get("texts")
+        legacy_text = viewer.get("text")
+        if action is ViewerAction.BARRAGE and isinstance(raw_texts, list):
+            texts = raw_texts
+        elif action is ViewerAction.BARRAGE and isinstance(legacy_text, str):
+            texts = [legacy_text]
+        elif action is ViewerAction.BARRAGE:
+            texts = ["recorded viewer response"]
+        else:
+            texts = None
         if action is ViewerAction.SILENCE:
-            text = None
+            texts = None
         evidence: list[EvidenceRef] = []
         if request.input_event_ids:
             evidence.append(
@@ -208,7 +215,7 @@ class _RecordedViewerProvider:
             viewer_instance_id=request.viewer_instance_id,
             viewer_sequence=request.viewer_sequence,
             action=action,
-            text=text,
+            texts=texts,
             reaction_type=str(viewer.get("reaction_type", "recorded")),
             evidence_refs=evidence,
         )

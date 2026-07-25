@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 from advx_backend.application.ingest_service import IngestService
 from advx_backend.application.ports.asr import TranscriptSegment
@@ -459,7 +460,7 @@ def test_viewer_reply_can_cite_the_bounded_reply_context() -> None:
             kind=ViewerTargetKind.EVENT,
             event_id=reply_event_id,
         ),
-        text="我也觉得",
+        texts=["我也觉得"],
         reaction_type="reply",
         evidence_refs=[
             EvidenceRef(source=EvidenceSource.EVENT, event_id=reply_event_id)
@@ -474,3 +475,42 @@ def test_viewer_reply_can_cite_the_bounded_reply_context() -> None:
     assert result.accepted
     assert result.event is not None
     assert result.event.target == response.target
+
+
+def test_viewer_barrage_batch_creates_one_event_per_text() -> None:
+    request = _request()
+    response = ViewerGenerationResponse(
+        generation_request_id=request.generation_request_id,
+        viewer_instance_id=request.viewer_instance_id,
+        viewer_sequence=request.viewer_sequence,
+        action=ViewerAction.BARRAGE,
+        texts=["第一条", "第二条", "第三条"],
+        reaction_type="comment",
+    )
+
+    result = ViewerBarragePipeline(clock=_Clock(), id_generator=_Ids()).validate(
+        request=request,
+        response=response,
+    )
+
+    assert result.accepted
+    assert [event.text for event in result.events] == ["第一条", "第二条", "第三条"]
+    assert len({event.barrage_id for event in result.events}) == 3
+    assert {event.generation_request_id for event in result.events} == {
+        request.generation_request_id
+    }
+
+
+def test_viewer_barrage_batch_rejects_texts_that_collide_after_truncation() -> None:
+    request = _request()
+    prefix = "字" * 160
+
+    with pytest.raises(ValidationError, match="display truncation"):
+        ViewerGenerationResponse(
+            generation_request_id=request.generation_request_id,
+            viewer_instance_id=request.viewer_instance_id,
+            viewer_sequence=request.viewer_sequence,
+            action=ViewerAction.BARRAGE,
+            texts=[f"{prefix}甲", f"{prefix}乙"],
+            reaction_type="comment",
+        )

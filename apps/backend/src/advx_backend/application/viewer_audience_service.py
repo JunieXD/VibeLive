@@ -343,17 +343,29 @@ class ViewerAudienceService:
         request: ViewerGenerationRequest,
         event: object,
     ) -> None:
-        if not isinstance(event, ViewerBarrageEvent):
+        if isinstance(event, ViewerBarrageEvent):
+            events = (event,)
+        elif isinstance(event, tuple) and event and all(
+            isinstance(item, ViewerBarrageEvent) for item in event
+        ):
+            events = event
+        else:
             return
+        latest_event = events[-1]
 
         def transform(value: object) -> ViewerInstance:
             viewer = self._viewer(value)
             if not viewer.is_active():
                 return viewer
             state = viewer.private_state
-            published = [*state.published_event_ids, event.barrage_id][-64:]
+            published = [
+                *state.published_event_ids,
+                *(item.barrage_id for item in events),
+            ][-64:]
             target_viewer_id = (
-                None if event.target is None else event.target.viewer_instance_id
+                None
+                if latest_event.target is None
+                else latest_event.target.viewer_instance_id
             )
             affinities = dict(state.peer_affinities)
             if target_viewer_id is not None:
@@ -365,10 +377,10 @@ class ViewerAudienceService:
                 update={
                     "revision": state.revision + 1,
                     "published_event_ids": published,
-                    "cooldown_until_ms": event.created_at_ms
+                    "cooldown_until_ms": latest_event.created_at_ms
                     + max(15_000, request.persona.cooldown_ms),
-                    "last_spoke_at_ms": event.created_at_ms,
-                    "last_reacted_at_ms": event.created_at_ms,
+                    "last_spoke_at_ms": latest_event.created_at_ms,
+                    "last_reacted_at_ms": latest_event.created_at_ms,
                     "fatigue": min(1.0, state.fatigue + 0.08),
                     "engagement": min(1.0, state.engagement + 0.04),
                     "current_target_viewer_id": target_viewer_id,

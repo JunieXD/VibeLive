@@ -87,7 +87,7 @@ async def test_live_provider_payload_applies_6657_profile_without_raw_examples()
                                         "viewer_instance_id": None,
                                         "event_id": None,
                                     },
-                                    "text": "刚夸完就送是吧",
+                                    "texts": ["刚夸完就送是吧"],
                                     "reaction_type": "room_6657",
                                     "evidence_refs": [],
                                 },
@@ -118,7 +118,7 @@ async def test_live_provider_payload_applies_6657_profile_without_raw_examples()
         finally:
             await provider.aclose()
 
-    assert response.text == "刚夸完就送是吧"
+    assert response.texts == ["刚夸完就送是吧"]
     messages = captured["messages"]
     assert isinstance(messages, list)
     assert "mode_context.style_profile" in messages[0]["content"]

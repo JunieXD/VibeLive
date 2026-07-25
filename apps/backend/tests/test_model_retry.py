@@ -126,7 +126,7 @@ def _viewer_completion(target: dict[str, object]) -> dict[str, object]:
                             "action": "barrage",
                             "intent": "react_to_scene",
                             "target": target,
-                            "text": "看到了",
+                            "texts": ["看到了"],
                             "reaction_type": "reaction",
                             "evidence_refs": [],
                         }
@@ -186,12 +186,20 @@ async def test_viewer_429_updates_the_shared_provider_rate_gate() -> None:
             "action": "barrage",
             "intent": "follow_consensus",
             "target": None,
-            "text": "确实",
+            "texts": ["确实"],
+            "reaction_type": "comment",
+            "evidence_refs": [],
+        },
+        {
+            "action": "barrage",
+            "intent": "react_to_scene",
+            "target": None,
+            "texts": ["一", "二", "三", "四"],
             "reaction_type": "comment",
             "evidence_refs": [],
         },
     ],
-    ids=["invalid-intent"],
+    ids=["invalid-intent", "too-many-texts"],
 )
 @pytest.mark.asyncio
 async def test_viewer_protocol_violation_repairs_once(
@@ -228,10 +236,44 @@ async def test_viewer_protocol_violation_repairs_once(
         result = await provider.generate(_viewer_request())
         await provider.aclose()
 
-    assert result.text == "看到了"
+    assert result.texts == ["看到了"]
     assert len(requests) == 2
     assert "Validation codes:" in requests[1]["messages"][-1]["content"]
     assert json.dumps(invalid_output) not in requests[1]["messages"][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_viewer_accepts_a_bounded_barrage_batch() -> None:
+    captured: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json=_viewer_completion_with_output(
+                {
+                    "action": "barrage",
+                    "intent": "react_to_scene",
+                    "target": None,
+                    "texts": ["第一句", "第二句"],
+                    "reaction_type": "comment",
+                    "evidence_refs": [],
+                }
+            ),
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            _runtime_config(),
+            client=client,
+            rate_gate=_RecordingRateGate(),
+        )
+        result = await provider.generate(_viewer_request())
+        await provider.aclose()
+
+    assert result.texts == ["第一句", "第二句"]
+    assert "texts must be a JSON array" in captured[0]["messages"][0]["content"]
 
 
 @pytest.mark.asyncio
@@ -241,7 +283,7 @@ async def test_viewer_protocol_violation_rejects_after_one_failed_repair() -> No
         "action": "barrage",
         "intent": "follow_consensus",
         "target": None,
-        "text": "确实",
+        "texts": ["确实"],
         "reaction_type": "comment",
         "evidence_refs": [],
     }
@@ -282,7 +324,7 @@ async def test_viewer_protocol_violation_skips_repair_when_deadline_is_too_short
                     "action": "barrage",
                     "intent": "follow_consensus",
                     "target": None,
-                    "text": "确实",
+                    "texts": ["确实"],
                     "reaction_type": "comment",
                     "evidence_refs": [],
                 }
@@ -320,7 +362,7 @@ async def test_viewer_transport_retry_and_repair_share_two_call_budget() -> None
                     "action": "barrage",
                     "intent": "follow_consensus",
                     "target": None,
-                    "text": "确实",
+                    "texts": ["确实"],
                     "reaction_type": "comment",
                     "evidence_refs": [],
                 }

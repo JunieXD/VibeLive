@@ -66,6 +66,7 @@ class ValidationTrace(DebugContractModel):
 
 class SideEffectTrace(DebugContractModel):
     published_barrage_id: str | None = None
+    published_barrage_ids: list[str] = Field(default_factory=list, max_length=3)
     memory_candidate_ids: list[str] = Field(default_factory=list, max_length=128)
     meme_candidate: MemeCandidate | None = None
 

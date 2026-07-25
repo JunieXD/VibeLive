@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from advx_backend.application.viewer_barrage_pipeline import ViewerBarragePipeline
 from advx_backend.application.viewer_pool_service import ViewerPoolService
 from advx_backend.application.viewer_runtime import ViewerRuntime
 from advx_backend.contracts.viewer_runtime import (
@@ -46,18 +47,12 @@ class FakeViewer:
             viewer_instance_id=request.viewer_instance_id,
             viewer_sequence=request.viewer_sequence,
             action=action,
-            text="clean synthetic highlight" if action is ViewerAction.BARRAGE else None,
+            texts=["clean synthetic highlight"] if action is ViewerAction.BARRAGE else None,
             reaction_type="highlight" if action is ViewerAction.BARRAGE else "silence",
             evidence_refs=[
                 EvidenceRef(source=EvidenceSource.EVENT, event_id="cs2-event-1")
             ],
         )
-
-
-class AcceptingPipeline:
-    def validate(self, *, request: object, response: object) -> object:
-        del request
-        return SimpleNamespace(accepted=True, event=response, rejection_reason=None)
 
 
 class AcceptingFence:
@@ -139,13 +134,14 @@ async def collect_evidence(
     )
     viewer_provider = FakeViewer()
     sink = RecordingSink()
+    clock = FixedClock()
     runtime = ViewerRuntime(
         provider=viewer_provider,
-        barrage_pipeline=AcceptingPipeline(),
+        barrage_pipeline=ViewerBarragePipeline(clock=clock, id_generator=SequenceIds()),
         session_fence=AcceptingFence(),
         publisher=sink,
         room_service=sink,
-        clock=FixedClock(),
+        clock=clock,
         id_generator=SequenceIds(),
         max_in_flight=len(updated_pool.viewers),
     )

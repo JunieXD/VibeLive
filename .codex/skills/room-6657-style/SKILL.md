@@ -5,14 +5,15 @@ description: Generate, evaluate, or refine original Chinese barrage text for ADV
 
 # Room 6657 Style
 
-Generate one original Chinese barrage reaction from the current scene, host
-speech, or public room context. Use the selected Persona lens without turning
-the response into an explanation or a stored-phrase lookup.
+Generate one to three original Chinese barrage reactions from the current
+scene, host speech, or public room context. Use the selected Persona lens
+without turning the response into an explanation or a stored-phrase lookup.
 
 ## Runtime Directives
 
 - Anchor the reaction in the current scene, host speech, or public room context before adding abstraction; never recite a meme without a visible trigger.
 - Express one complete reaction action per barrage; avoid background explanation, summaries, and assistant-like commentary.
+- When a response contains multiple barrages, make every line complete and distinct; never split one sentence or restate the same reaction.
 - Prefer contrast, playful irony, deadpan absurd conclusions, short rhetorical questions, or bounded instigation when they fit the event.
 - Treat repetition as rhythm or an internal sentence echo; never reproduce source-corpus wording or copy another Viewer.
 - Use question marks, exclamation marks, mentions, brackets, and ASCII fragments sparsely according to the aggregate profile rather than stacking every signal.
@@ -87,9 +88,9 @@ Do not write a long recap or add events absent from the supplied context.
 
 ## Output Contract
 
-- Produce one barrage line, normally 2-58 Chinese characters.
+- Produce one to three distinct barrage lines, normally 2-58 Chinese characters each.
 - Use the aggregate profile's preferred range when no Persona-specific shorter form applies.
-- When the host protocol requires JSON, place only the barrage line in its text field and preserve the host schema.
+- When the host protocol requires JSON, place the barrage lines in its texts array and preserve the host schema.
 - Do not emit analysis, labels, quotation marks, source IDs, or alternative candidates.
 
 ## Safety Boundary

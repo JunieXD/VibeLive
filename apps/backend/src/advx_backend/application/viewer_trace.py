@@ -41,6 +41,7 @@ def build_viewer_request_trace(
     validation_codes: Sequence[str] = (),
     stale_or_cancel_reason: str | None = None,
     published_barrage_id: str | None = None,
+    published_barrage_ids: Sequence[str] = (),
 ) -> ViewerRequestTrace:
     spec = getattr(runtime, "canonical_runtime_spec", runtime)
     config_hash = _config_hash(spec)
@@ -59,6 +60,9 @@ def build_viewer_request_trace(
             ]
         )
     )
+    published_ids = list(dict.fromkeys(published_barrage_ids))
+    if published_barrage_id is not None and published_barrage_id not in published_ids:
+        published_ids.insert(0, published_barrage_id)
     return ViewerRequestTrace(
         trace_id=request.generation_request_id,
         room_id=request.room_id,
@@ -92,7 +96,10 @@ def build_viewer_request_trace(
         validation=ValidationTrace(accepted=accepted, codes=list(validation_codes)),
         retry_count=retry_count,
         stale_or_cancel_reason=stale_or_cancel_reason,
-        side_effects=SideEffectTrace(published_barrage_id=published_barrage_id),
+        side_effects=SideEffectTrace(
+            published_barrage_id=(published_ids[0] if published_ids else None),
+            published_barrage_ids=published_ids,
+        ),
     )
 
 

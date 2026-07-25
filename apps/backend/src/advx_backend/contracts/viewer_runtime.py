@@ -2,9 +2,16 @@ import hashlib
 import json
 import math
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from advx_backend.contracts.configuration import RuntimeModelProviderCandidate
 from advx_backend.contracts.protocol import AUDIENCE_CONTRACT_VERSION, PROTOCOL_VERSION
@@ -413,6 +420,23 @@ class ViewerAction(StrEnum):
     SILENCE = "silence"
 
 
+MAX_VIEWER_BARRAGE_BATCH_SIZE = 3
+MAX_VIEWER_BARRAGE_TEXT_LENGTH = 160
+ViewerBarrageText = Annotated[str, Field(min_length=1, max_length=4_000)]
+
+
+def normalize_viewer_barrage_texts(value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return None
+    normalized = [text.strip() for text in value]
+    if any(not text for text in normalized):
+        raise ValueError("barrage texts cannot contain blank strings")
+    displayed = [text[:MAX_VIEWER_BARRAGE_TEXT_LENGTH].casefold() for text in normalized]
+    if len(set(displayed)) != len(displayed):
+        raise ValueError("barrage texts must remain distinct after display truncation")
+    return normalized
+
+
 class ViewerGenerationResponse(RuntimeContractModel):
     generation_request_id: str = Field(min_length=1, max_length=128)
     viewer_instance_id: str = Field(min_length=1, max_length=128)
@@ -420,17 +444,26 @@ class ViewerGenerationResponse(RuntimeContractModel):
     action: ViewerAction
     intent: ViewerReactionIntent = ViewerReactionIntent.REACT_TO_SCENE
     target: ViewerReactionTarget | None = None
-    text: str | None = Field(default=None, min_length=1, max_length=4_000)
+    texts: list[ViewerBarrageText] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_VIEWER_BARRAGE_BATCH_SIZE,
+    )
     reaction_type: str = Field(min_length=1, max_length=64)
     decision_reason: str | None = Field(default=None, min_length=1, max_length=160)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
 
+    @field_validator("texts")
+    @classmethod
+    def normalize_texts(cls, value: list[str] | None) -> list[str] | None:
+        return normalize_viewer_barrage_texts(value)
+
     @model_validator(mode="after")
     def validate_action(self) -> "ViewerGenerationResponse":
-        if self.action is ViewerAction.BARRAGE and self.text is None:
-            raise ValueError("barrage requires text")
-        if self.action is ViewerAction.SILENCE and self.text is not None:
-            raise ValueError("silence cannot include text")
+        if self.action is ViewerAction.BARRAGE and self.texts is None:
+            raise ValueError("barrage requires texts")
+        if self.action is ViewerAction.SILENCE and self.texts is not None:
+            raise ValueError("silence cannot include texts")
         if self.action is ViewerAction.SILENCE and self.target is not None:
             raise ValueError("silence cannot include target")
         return self
@@ -494,7 +527,7 @@ class ViewerBarrageEvent(RuntimeContractModel):
     intent: ViewerReactionIntent
     target: ViewerReactionTarget | None = None
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
-    text: str = Field(min_length=1, max_length=160)
+    text: str = Field(min_length=1, max_length=MAX_VIEWER_BARRAGE_TEXT_LENGTH)
     created_at_ms: int = Field(ge=0)
     expires_at_ms: int = Field(gt=0)
 

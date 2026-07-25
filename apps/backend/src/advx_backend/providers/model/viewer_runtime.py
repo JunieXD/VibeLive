@@ -11,7 +11,14 @@ from enum import Enum
 from typing import Final, Protocol, cast
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from advx_backend.application.ai_call_logging import (
     AiCallLifecycle,
@@ -23,15 +30,18 @@ from advx_backend.application.ai_call_logging import (
 from advx_backend.application.ports.ingest import FrameResolver
 from advx_backend.contracts.debug import AiCallRole
 from advx_backend.contracts.viewer_runtime import (
+    MAX_VIEWER_BARRAGE_BATCH_SIZE,
     EvidenceRef,
     ProviderRuntimeSpec,
     ViewerAction,
+    ViewerBarrageText,
     ViewerGenerationRequest,
     ViewerGenerationResponse,
     ViewerReactionIntent,
     ViewerReactionTarget,
     WindowBatchGenerationRequest,
     WindowBatchGenerationResponse,
+    normalize_viewer_barrage_texts,
 )
 from advx_backend.domain.observation import FrameRef
 from advx_backend.domain.observation_wave import (
@@ -108,27 +118,28 @@ class OpenAICompatibleViewerRuntimeConfig:
 
 _VIEWER_BARRAGE_JSON_EXAMPLE: Final = (
     '{"action":"barrage","intent":"react_to_host",'
-    '"target":null,"text":"这波漂亮","reaction_type":"comment",'
+    '"target":null,"texts":["这波漂亮"],"reaction_type":"comment",'
     '"decision_reason":"主播的提问符合当前人设",'
     '"evidence_refs":[{"source":"event","event_id":"event-id"}]}'
 )
 _VIEWER_SILENCE_JSON_EXAMPLE: Final = (
     '{"action":"silence","intent":"silence",'
-    '"target":null,"text":null,"reaction_type":"silence",'
+    '"target":null,"texts":null,"reaction_type":"silence",'
     '"decision_reason":"普通问候未触发当前人设","evidence_refs":[]}'
 )
 _SUMMARY_JSON_EXAMPLE: Final = '{"summary":"画面中的关键变化"}'
 _WINDOW_BATCH_JSON_EXAMPLE: Final = (
     '{"candidates":[{"viewer_instance_id":"allowed-viewer-id",'
     '"action":"barrage","intent":"react_to_scene","target":null,'
-    '"text":"这波看懂了","reaction_type":"comment",'
+    '"texts":["这波看懂了"],"reaction_type":"comment",'
     '"decision_reason":"画面出现关键变化",'
     '"evidence_refs":[{"source":"frame","frame_index":0}]}]}'
 )
 _VIEWER_SYSTEM_PROMPT: Final = (
     "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
-    "is only a behavioral tendency and is not your name or a system role. Produce zero or one "
-    "natural barrage reaction. You may react to the host, scene, or a replyable public Viewer "
+    "is only a behavioral tendency and is not your name or a system role. Produce silence or a "
+    "short burst of one to three natural barrage reactions. You may react to the host, scene, "
+    "or a replyable public Viewer "
     "event, but may target only IDs explicitly allowed by the request. Shared room memory is "
     "public background, not proof that you personally attended an earlier stream. Use only "
     "evidence references present in the input. When mode_context.style_profile is supplied, "
@@ -149,9 +160,12 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "For a host, scene, or room target, viewer_instance_id and event_id must both be null. "
     "For a viewer target, provide viewer_instance_id only; for an event target, provide event_id "
     "only. No other target fields are allowed. Use null, never an empty string, for every absent "
-    "target ID. For action=barrage, text must be non-empty. For action=silence, intent must be "
-    "silence, target and text must be null, and reaction_type must be silence. Never use an empty "
-    "string for text. Do not return generation_request_id, viewer_instance_id, or viewer_sequence; "
+    "target ID. For action=barrage, texts must be a JSON array containing one to three distinct, "
+    "non-empty strings. Each entry must be a complete standalone barrage. Do not split one "
+    "sentence or repeat the same point across entries. For action=silence, intent must be silence, "
+    "target and texts must be null, and reaction_type must be silence. Do not return "
+    "generation_request_id, "
+    "viewer_instance_id, or viewer_sequence; "
     "the server owns those fields. Unless a supplied style profile overrides this default, "
     "prefer a natural Chinese message of 20 characters or fewer. Return "
     "exactly one JSON object, with no Markdown or prose. "
@@ -165,9 +179,10 @@ _WINDOW_BATCH_SYSTEM_PROMPT: Final = (
     "stay silent. A viewer username is its identity; Persona is only a behavioral tendency. "
     "Shared room memory is public background, not proof that a viewer attended an earlier "
     "stream. Treat each style_profile as binding style guidance, but never as scene evidence "
-    "and never reconstruct its source corpus text. Candidate action must be barrage and text "
-    "must be a natural Chinese message of 20 characters or fewer unless its style_profile "
-    "requires otherwise. Legal intent values "
+    "and never reconstruct its source corpus text. Candidate action must be barrage and texts "
+    "must be a JSON array containing one to three distinct complete barrage messages. Do not "
+    "split one sentence or repeat the same point across entries. Each message should be 20 "
+    "Chinese characters or fewer unless its style_profile requires otherwise. Legal intent values "
     "are exactly: react_to_host, react_to_scene, reply_to_viewer, ask_question, agree, disagree, "
     "encourage, joke, continue_thread, room_meta. target must be null or an object with kind "
     "host, scene, room, viewer, or event. Host, scene, and room targets must set both "
@@ -206,20 +221,29 @@ class _ViewerModelOutput(BaseModel):
     action: ViewerAction
     intent: ViewerReactionIntent = ViewerReactionIntent.REACT_TO_SCENE
     target: ViewerReactionTarget | None = None
-    text: str | None = Field(default=None, min_length=1, max_length=4_000)
+    texts: list[ViewerBarrageText] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_VIEWER_BARRAGE_BATCH_SIZE,
+    )
     reaction_type: str = Field(min_length=1, max_length=64)
     decision_reason: str | None = Field(default=None, min_length=1, max_length=160)
     evidence_refs: list[EvidenceRef] = Field(default_factory=list, max_length=128)
 
+    @field_validator("texts")
+    @classmethod
+    def normalize_texts(cls, value: list[str] | None) -> list[str] | None:
+        return normalize_viewer_barrage_texts(value)
+
     @model_validator(mode="after")
     def validate_action(self) -> "_ViewerModelOutput":
-        if self.action is ViewerAction.BARRAGE and self.text is None:
-            raise ValueError("barrage requires text")
+        if self.action is ViewerAction.BARRAGE and self.texts is None:
+            raise ValueError("barrage requires texts")
         if self.action is ViewerAction.SILENCE:
             if self.intent is not ViewerReactionIntent.SILENCE:
                 raise ValueError("silence action requires silence intent")
-            if self.target is not None or self.text is not None:
-                raise ValueError("silence cannot include target or text")
+            if self.target is not None or self.texts is not None:
+                raise ValueError("silence cannot include target or texts")
             if self.reaction_type != "silence":
                 raise ValueError("silence action requires silence reaction_type")
         return self

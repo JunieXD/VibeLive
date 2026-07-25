@@ -312,7 +312,7 @@ async def test_window_batch_provider_uses_one_logged_strict_json_call() -> None:
                                             "action": "barrage",
                                             "intent": "react_to_host",
                                             "target": None,
-                                            "text": "窗口命中",
+                                            "texts": ["窗口命中"],
                                             "reaction_type": "comment",
                                             "decision_reason": "回应最近用户文字",
                                             "evidence_refs": [
@@ -374,6 +374,7 @@ async def test_window_batch_provider_uses_one_logged_strict_json_call() -> None:
         "viewer-2"
     ]
     assert result.candidates[0].generation_request_id == "generation-2"
+    assert result.candidates[0].texts == ["窗口命中"]
     assert [trace.status for trace in sink.traces] == [
         AiCallStatus.PREPARING,
         AiCallStatus.SENT,
@@ -390,7 +391,7 @@ async def test_viewer_failure_does_not_record_unparsed_model_output() -> None:
             "action": "barrage",
             "intent": "react_to_host",
             "target": None,
-            "text": "哈喽",
+            "texts": ["哈喽"],
             "reaction_type": "comment",
             "evidence_refs": ["event-1"],
         },

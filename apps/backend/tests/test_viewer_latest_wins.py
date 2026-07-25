@@ -497,12 +497,6 @@ class _TaskOwnedFence:
         await self.release_cross_task_update.wait()
 
 
-class _Pipeline:
-    def validate(self, *, request: object, response: object) -> object:
-        del request
-        return SimpleNamespace(accepted=True, event=response, rejection_reason=None)
-
-
 class _Sink:
     def __init__(self) -> None:
         self.events: list[object] = []
@@ -555,7 +549,7 @@ class _GatedProvider:
             viewer_instance_id=request.viewer_instance_id,
             viewer_sequence=request.viewer_sequence,
             action=ViewerAction.BARRAGE,
-            text=request.observation_id,
+            texts=[request.observation_id],
             reaction_type="reply",
             evidence_refs=[
                 EvidenceRef(
@@ -587,7 +581,7 @@ class _BatchProvider:
                 viewer_instance_id=item.viewer_instance_id,
                 viewer_sequence=item.viewer_sequence,
                 action=ViewerAction.BARRAGE,
-                text=("same text" if index < 2 else f"text-{index}"),
+                texts=["same text" if index < 2 else f"text-{index}"],
                 reaction_type="reply",
                 evidence_refs=[
                     EvidenceRef(
@@ -626,7 +620,7 @@ class _LaneBatchProvider(_BatchProvider):
                     viewer_instance_id=item.viewer_instance_id,
                     viewer_sequence=item.viewer_sequence,
                     action=ViewerAction.BARRAGE,
-                    text=f"batch-{index}-{item.viewer_instance_id}",
+                    texts=[f"batch-{index}-{item.viewer_instance_id}"],
                     reaction_type="reply",
                     evidence_refs=[
                         EvidenceRef(
@@ -664,7 +658,7 @@ class _CancellationResistantBatchProvider(_BatchProvider):
                     viewer_instance_id=item.viewer_instance_id,
                     viewer_sequence=item.viewer_sequence,
                     action=ViewerAction.BARRAGE,
-                    text=request.observation_id,
+                    texts=[request.observation_id],
                     reaction_type="reply",
                     evidence_refs=[
                         EvidenceRef(
@@ -705,6 +699,49 @@ class _RejectThenGateSequenceClaimer:
         return True
 
 
+class _BurstProvider:
+    async def generate(self, request: object) -> ViewerGenerationResponse:
+        return ViewerGenerationResponse(
+            generation_request_id=request.generation_request_id,
+            viewer_instance_id=request.viewer_instance_id,
+            viewer_sequence=request.viewer_sequence,
+            action=ViewerAction.BARRAGE,
+            texts=["第一条", "第二条", "第三条"],
+            reaction_type="comment",
+        )
+
+
+class _WindowBurstProvider:
+    async def generate_window_batch(self, request: object) -> WindowBatchGenerationResponse:
+        return WindowBatchGenerationResponse(
+            batch_generation_request_id=request.batch_generation_request_id,
+            candidates=[
+                ViewerGenerationResponse(
+                    generation_request_id=item.generation_request_id,
+                    viewer_instance_id=item.viewer_instance_id,
+                    viewer_sequence=item.viewer_sequence,
+                    action=ViewerAction.BARRAGE,
+                    texts=["第一条", "第二条"],
+                    reaction_type="comment",
+                )
+                for item in request.requests
+            ],
+        )
+
+
+class _BatchBehaviorSink:
+    def __init__(self) -> None:
+        self.batches: list[tuple[object, ...]] = []
+
+    async def record_published(self, request: object, event: object) -> None:
+        del request
+        assert isinstance(event, tuple)
+        self.batches.append(event)
+
+    async def record_silence(self, request: object) -> None:
+        del request
+
+
 def _runtime(
     provider: object,
     *,
@@ -712,23 +749,144 @@ def _runtime(
     behavior_state_sink: object | None = None,
     trace_recorder: object | None = None,
     sequence_claimer: object | None = None,
+    barrage_pipeline: object | None = None,
+    clock: object | None = None,
+    sleeper: object | None = None,
 ) -> tuple[ViewerRuntime, _Sink, _Sink]:
     publisher = _Sink()
     room = _Sink()
+    runtime_clock = _Clock() if clock is None else clock
+    ids = _Ids()
+    runtime_args = {} if sleeper is None else {"sleeper": sleeper}
     runtime = ViewerRuntime(
         provider=provider,
-        barrage_pipeline=_Pipeline(),
+        barrage_pipeline=(
+            ViewerBarragePipeline(clock=runtime_clock, id_generator=ids)
+            if barrage_pipeline is None
+            else barrage_pipeline
+        ),
         session_fence=_Fence() if fence is None else fence,
         publisher=publisher,
         room_service=room,
-        clock=_Clock(),
-        id_generator=_Ids(),
+        clock=runtime_clock,
+        id_generator=ids,
         max_in_flight=1,
         behavior_state_sink=behavior_state_sink,
         trace_recorder=trace_recorder,
         sequence_claimer=sequence_claimer,
+        **runtime_args,
     )
     return runtime, publisher, room
+
+
+@pytest.mark.asyncio
+async def test_barrage_batch_publishes_each_text_after_the_configured_interval() -> None:
+    clock = _Clock()
+    sleeps: list[float] = []
+
+    async def advance_clock(delay: float) -> None:
+        sleeps.append(delay)
+        clock.value += int(delay * 1_000)
+
+    behavior = _BatchBehaviorSink()
+    runtime, publisher, room = _runtime(
+        _BurstProvider(),
+        barrage_pipeline=ViewerBarragePipeline(clock=clock, id_generator=_Ids()),
+        clock=clock,
+        sleeper=advance_clock,
+        behavior_state_sink=behavior,
+    )
+    await runtime.start_session("session-1")
+
+    summary = await runtime.dispatch(
+        wave=_wave("batch-wave"),
+        decision=_decision("batch-wave", "viewer-1"),
+        pool=SimpleNamespace(viewers=(_viewer(),)),
+        runtime=_runtime_context(),
+    )
+
+    assert summary.published == 1
+    assert sleeps == [0.2, 0.2]
+    assert [event.text for event in publisher.events] == ["第一条", "第二条", "第三条"]
+    assert [event.text for event in room.events] == ["第一条", "第二条", "第三条"]
+    assert [event.created_at_ms for event in publisher.events] == [100, 300, 500]
+    assert len(behavior.batches) == 1
+    assert [event.text for event in behavior.batches[0]] == ["第一条", "第二条", "第三条"]
+
+
+@pytest.mark.asyncio
+async def test_window_batch_candidate_publishes_a_barrage_burst() -> None:
+    clock = _Clock()
+    sleeps: list[float] = []
+
+    async def advance_clock(delay: float) -> None:
+        sleeps.append(delay)
+        clock.value += int(delay * 1_000)
+
+    runtime, publisher, room = _runtime(
+        _WindowBurstProvider(),
+        barrage_pipeline=ViewerBarragePipeline(clock=clock, id_generator=_Ids()),
+        clock=clock,
+        sleeper=advance_clock,
+    )
+    await runtime.start_session("session-1")
+
+    summary = await runtime.dispatch_window_batch(
+        wave=_wave("window-burst"),
+        decision=_decision("window-burst", "viewer-1"),
+        pool=SimpleNamespace(viewers=(_viewer(),)),
+        runtime=_runtime_context(),
+    )
+
+    assert summary.published == 1
+    assert sleeps == [0.2]
+    assert [event.text for event in publisher.events] == ["第一条", "第二条"]
+    assert [event.text for event in room.events] == ["第一条", "第二条"]
+    assert [event.created_at_ms for event in publisher.events] == [100, 300]
+
+
+@pytest.mark.asyncio
+async def test_superseding_wave_drops_unpublished_barrage_batch_remainder() -> None:
+    clock = _Clock()
+    sleep_started = asyncio.Event()
+    release_sleep = asyncio.Event()
+
+    async def blocked_sleep(delay: float) -> None:
+        assert delay == 0.2
+        sleep_started.set()
+        await release_sleep.wait()
+
+    runtime, publisher, room = _runtime(
+        _BurstProvider(),
+        barrage_pipeline=ViewerBarragePipeline(clock=clock, id_generator=_Ids()),
+        clock=clock,
+        sleeper=blocked_sleep,
+    )
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer(),))
+    dispatch = asyncio.create_task(
+        runtime.dispatch(
+            wave=_wave("batch-wave"),
+            decision=_decision("batch-wave", "viewer-1"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await sleep_started.wait()
+
+    newer = await runtime.dispatch(
+        wave=_wave("newer-wave"),
+        decision=_decision("newer-wave"),
+        pool=pool,
+        runtime=_runtime_context(),
+    )
+    release_sleep.set()
+    summary = await dispatch
+
+    assert newer.selected == 0
+    assert summary.published == 1
+    assert [event.text for event in publisher.events] == ["第一条"]
+    assert [event.text for event in room.events] == ["第一条"]
 
 
 @pytest.mark.asyncio

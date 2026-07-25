@@ -1699,7 +1699,9 @@
             "cs2-event-1"
           ],
           "reaction_type": "highlight",
-          "text": "clean synthetic highlight"
+          "texts": [
+            "clean synthetic highlight"
+          ]
         },
         "provider_role": "viewer"
       },

@@ -83,7 +83,7 @@ def _bundle() -> ReplayBundle:
     outputs = {
         "viewer": {
             "action": "barrage",
-            "text": BARRAGE_TEXT,
+            "texts": [BARRAGE_TEXT],
             "reaction_type": "runtime_smoke",
         },
         "memory": {"candidates": []},

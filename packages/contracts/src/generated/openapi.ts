@@ -2228,6 +2228,8 @@ export interface components {
         SideEffectTrace: {
             /** Published Barrage Id */
             published_barrage_id?: string | null;
+            /** Published Barrage Ids */
+            published_barrage_ids?: string[];
             /** Memory Candidate Ids */
             memory_candidate_ids?: string[];
             meme_candidate?: components["schemas"]["MemeCandidate"] | null;
@@ -3350,10 +3352,10 @@ export interface components {
             /** @default null */
             target: components["schemas"]["ViewerReactionTarget"] | null;
             /**
-             * Text
+             * Texts
              * @default null
              */
-            text: string | null;
+            texts: string[] | null;
             /** Reaction Type */
             reaction_type: string;
             /**
