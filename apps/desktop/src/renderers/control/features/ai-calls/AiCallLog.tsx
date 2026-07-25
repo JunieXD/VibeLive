@@ -166,9 +166,11 @@ function ViewerTriggerContext({ trace }: { trace: AiCallTrace }): React.JSX.Elem
   const triggerReasons = formatViewerTriggerReasons(context)
   const selectionReasons = formatViewerSelectionReasons(context)
   const hasScreenChangeScore = context.screen_change_score !== null && context.screen_change_score !== undefined
+  const triggerEventIds = context.trigger_event_ids ?? []
+  const triggerFrameIds = context.trigger_frame_ids ?? []
   const references = [
-    { label: '触发事件', ids: context.trigger_event_ids },
-    { label: '触发画面', ids: context.trigger_frame_ids }
+    { label: '触发事件', ids: triggerEventIds },
+    { label: '触发画面', ids: triggerFrameIds }
   ].filter(({ ids }) => ids.length > 0)
 
   return (
@@ -184,7 +186,7 @@ function ViewerTriggerContext({ trace }: { trace: AiCallTrace }): React.JSX.Elem
           label={hasScreenChangeScore ? '画面变化' : '触发事件'}
           value={hasScreenChangeScore
             ? formatScreenChangeScore(context.screen_change_score)
-            : context.trigger_event_ids.length > 0 ? `${context.trigger_event_ids.length} 条` : '无'}
+            : triggerEventIds.length > 0 ? `${triggerEventIds.length} 条` : '无'}
         />
       </div>
       <div className="grid grid-cols-2 border-b border-[var(--border)] max-[980px]:grid-cols-1">

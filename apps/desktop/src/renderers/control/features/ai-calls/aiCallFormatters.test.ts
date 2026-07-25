@@ -34,4 +34,11 @@ describe('AI call trigger context formatters', () => {
       target_viewer_id: 'viewer-42'
     })).toEqual(['定向观众：viewer-42', '独立观众调度'])
   })
+
+  it('falls back for legacy trigger context without selection reasons', () => {
+    expect(formatViewerSelectionReasons({
+      ...triggerContext,
+      selection_reason_codes: undefined
+    })).toEqual(['本波触发后由观众调度器选中'])
+  })
 })

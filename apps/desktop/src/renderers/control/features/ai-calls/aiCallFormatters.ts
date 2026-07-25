@@ -79,7 +79,7 @@ export function formatViewerTriggerReasons(context: ViewerTriggerContext): strin
 }
 
 export function formatViewerSelectionReasons(context: ViewerTriggerContext): string[] {
-  const reasons = context.selection_reason_codes.map(
+  const reasons = (context.selection_reason_codes ?? []).map(
     (code) => viewerSelectionReasonLabels[code] ?? code
   )
   if (context.target_viewer_id) {
