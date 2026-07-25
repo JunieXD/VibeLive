@@ -179,6 +179,40 @@ async def test_viewer_429_updates_the_shared_provider_rate_gate() -> None:
     assert gate.deferred == [1.25]
 
 
+@pytest.mark.asyncio
+async def test_viewer_uses_configured_timeout_without_a_primary_hard_cap() -> None:
+    observed_timeouts: list[dict[str, float | None]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        observed_timeouts.append(request.extensions["timeout"])
+        return httpx.Response(
+            200,
+            json=_viewer_completion(
+                {
+                    "kind": "scene",
+                    "viewer_instance_id": None,
+                    "event_id": None,
+                }
+            ),
+            request=request,
+        )
+
+    request = _viewer_request().model_copy(update={"deadline_at_ms": 60_000})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            _runtime_config(),
+            client=client,
+            rate_gate=_RecordingRateGate(),
+            clock_ms=lambda: 0,
+        )
+        await provider.generate(request)
+        await provider.aclose()
+
+    assert observed_timeouts == [
+        {"connect": 30.0, "read": 30.0, "write": 30.0, "pool": 30.0}
+    ]
+
+
 @pytest.mark.parametrize(
     "invalid_output",
     [

@@ -209,7 +209,6 @@ _HISTORY_SUMMARY_SYSTEM_PROMPT: Final = (
     f"exactly one JSON object, with no Markdown or prose. Use this shape: {_SUMMARY_JSON_EXAMPLE}"
 )
 _ROLE_OUTPUT_TOKEN_BUDGET: Final = 4_096
-_PRIMARY_TIMEOUT_SECONDS: Final = 12.0
 _REPAIR_TIMEOUT_SECONDS: Final = 6.0
 _MIN_REPAIR_REMAINING_SECONDS: Final = 6.0
 _CALL_STATE_CAPACITY: Final = 4_096
@@ -335,7 +334,6 @@ class OpenAICompatibleViewerRuntimeProvider:
                 payload,
                 lifecycle=lifecycle,
                 viewer_request=request,
-                maximum_timeout_seconds=_PRIMARY_TIMEOUT_SECONDS,
                 allow_json_mode_fallback=False,
             )
             lifecycle.received(build_http_response_summary(response))
@@ -411,7 +409,6 @@ class OpenAICompatibleViewerRuntimeProvider:
                 payload,
                 lifecycle=lifecycle,
                 viewer_request=request.requests[0],
-                maximum_timeout_seconds=_PRIMARY_TIMEOUT_SECONDS,
                 allow_json_mode_fallback=False,
             )
             lifecycle.received(build_http_response_summary(response))
@@ -635,10 +632,6 @@ class OpenAICompatibleViewerRuntimeProvider:
     ) -> httpx.Response:
         async with self._rate_gate.lease() as rate_limit_generation:
             if viewer_request is not None:
-                if maximum_timeout_seconds is None:
-                    raise ViewerRuntimeProtocolError(
-                        "Viewer request timeout maximum was missing"
-                    )
                 request_timeout_seconds = self._effective_timeout(
                     viewer_request,
                     maximum_seconds=maximum_timeout_seconds,
@@ -946,16 +939,18 @@ class OpenAICompatibleViewerRuntimeProvider:
         self,
         request: ViewerGenerationRequest,
         *,
-        maximum_seconds: float,
+        maximum_seconds: float | None,
     ) -> float:
         remaining_seconds = self._remaining_seconds(request)
         if remaining_seconds <= 0:
             raise ViewerRuntimeProtocolError("Viewer request deadline expired")
-        return min(
+        timeout_seconds = min(
             float(self.config.request_timeout_seconds),
-            maximum_seconds,
             remaining_seconds,
         )
+        if maximum_seconds is not None:
+            timeout_seconds = min(timeout_seconds, maximum_seconds)
+        return timeout_seconds
 
     def _can_repair(self, request: ViewerGenerationRequest) -> bool:
         return self._remaining_seconds(request) >= _MIN_REPAIR_REMAINING_SECONDS
