@@ -145,7 +145,6 @@ python scripts/sync_room_6657_skill.py
 
 ```powershell
 python scripts/run_room_6657_skillopt.py validate
-uv run --project apps/backend pytest apps/backend/tests/test_room_6657_style_guidance.py
-pnpm --filter @advx/desktop test -- src/shared/audience/audience.test.ts
+pnpm test
 uv run --project apps/backend ruff check apps/backend scripts
 ```
