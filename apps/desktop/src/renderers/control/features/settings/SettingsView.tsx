@@ -174,6 +174,7 @@ export function SettingsView({
   overlaySettings,
   overlayTargets,
   overlaySettingsNotice,
+  activeAudienceMode,
   onModelBaseUrlChange,
   onProviderProfileIdChange,
   onModelNameChange,
