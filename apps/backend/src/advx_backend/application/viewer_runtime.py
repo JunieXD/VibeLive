@@ -27,6 +27,7 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerGenerationRequest,
     ViewerGenerationResponse,
     ViewerPublicEvent,
+    ViewerRequestTriggerContext,
     WindowBatchGenerationRequest,
     WindowBatchGenerationResponse,
 )
@@ -519,6 +520,7 @@ class ViewerRuntime:
                         request=self._build_request(
                             viewer=viewer,
                             wave=wave,
+                            decision=decision,
                             runtime=runtime,
                             sequence=sequence,
                             active_viewer_ids=available_viewer_ids,
@@ -813,6 +815,7 @@ class ViewerRuntime:
                         request=self._build_request(
                             viewer=viewer,
                             wave=wave,
+                            decision=decision,
                             runtime=runtime,
                             sequence=previous_sequence + 1,
                             active_viewer_ids=available_viewer_ids,
@@ -1081,6 +1084,7 @@ class ViewerRuntime:
             request = self._build_request(
                 viewer=viewer,
                 wave=wave,
+                decision=decision,
                 runtime=runtime,
                 sequence=sequence,
                 active_viewer_ids=available_viewer_ids,
@@ -1944,6 +1948,7 @@ class ViewerRuntime:
         *,
         viewer: ViewerInstance,
         wave: ObservationWave,
+        decision: CrowdDecision,
         runtime: object,
         sequence: int,
         active_viewer_ids: tuple[str, ...],
@@ -2000,6 +2005,20 @@ class ViewerRuntime:
             viewer_private_state=viewer.private_state,
             room_memory_slice=memory,
             deadline_at_ms=self._deadline(wave, runtime),
+            trigger_context=ViewerRequestTriggerContext(
+                triggers=list(wave.triggers),
+                trigger_event_ids=list(wave.trigger_event_ids[-128:]),
+                trigger_frame_ids=list(wave.trigger_frame_ids[-32:]),
+                screen_change_score=(
+                    wave.trigger_screen_change_score
+                    if ObservationTrigger.SCREEN_CHANGE in wave.triggers
+                    else None
+                ),
+                target_viewer_id=wave.target_viewer_id,
+                target_persona_id=wave.target_persona_id,
+                target_ambiguous=wave.target_ambiguous,
+                selection_reason_codes=list(decision.reason_codes[:32]),
+            ),
         )
 
     @staticmethod

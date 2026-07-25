@@ -19,6 +19,7 @@ from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation_wave import (
     FrameBundle,
     FrameBundleSettings,
+    ObservationTrigger,
     ViewerVisualInputMode,
 )
 from advx_backend.domain.persona import ModeDefinition, PersonaTemplate
@@ -331,6 +332,31 @@ class ViewerPublicEvent(RuntimeContractModel):
     occurred_at_ms: int = Field(ge=0)
 
 
+class ViewerRequestTriggerContext(RuntimeContractModel):
+    """Debug-only provenance for a Viewer generation request."""
+
+    triggers: list[ObservationTrigger] = Field(min_length=1, max_length=5)
+    trigger_event_ids: list[str] = Field(default_factory=list, max_length=128)
+    trigger_frame_ids: list[str] = Field(default_factory=list, max_length=32)
+    screen_change_score: float | None = Field(default=None, ge=0, le=1)
+    target_viewer_id: str | None = Field(default=None, min_length=1, max_length=128)
+    target_persona_id: str | None = Field(default=None, min_length=1, max_length=128)
+    target_ambiguous: bool = False
+    selection_reason_codes: list[str] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_trigger_context(self) -> "ViewerRequestTriggerContext":
+        if len(set(self.triggers)) != len(self.triggers):
+            raise ValueError("trigger context triggers must be unique")
+        if self.target_viewer_id is not None and self.target_persona_id is not None:
+            raise ValueError("trigger context can target either a Viewer or a Persona")
+        if self.target_ambiguous and (
+            self.target_viewer_id is not None or self.target_persona_id is not None
+        ):
+            raise ValueError("ambiguous trigger context cannot contain a direct target")
+        return self
+
+
 class ViewerGenerationRequest(RuntimeContractModel):
     room_id: str = Field(min_length=1, max_length=128)
     session_id: str = Field(min_length=1, max_length=128)
@@ -362,6 +388,8 @@ class ViewerGenerationRequest(RuntimeContractModel):
     viewer_private_state: ViewerPrivateState
     room_memory_slice: RoomMemorySlice
     deadline_at_ms: int = Field(gt=0)
+    # This provenance is recorded in the AI-call log, never sent to the model.
+    trigger_context: ViewerRequestTriggerContext | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def validate_visual_input(self) -> "ViewerGenerationRequest":

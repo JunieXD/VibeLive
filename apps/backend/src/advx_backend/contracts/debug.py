@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 from advx_backend.contracts.protocol import PROTOCOL_VERSION, TRACE_SCHEMA_VERSION
 from advx_backend.contracts.viewer_runtime import (
     CanonicalRuntimeSpec,
+    ViewerRequestTriggerContext,
     ViewerRuntimeTelemetry,
 )
 from advx_backend.domain.crowd_decision import CrowdDecision, DecisionSource
@@ -232,6 +233,7 @@ class AiCallTrace(DebugContractModel):
         max_length=128,
     )
     viewer_instance_id: str | None = Field(default=None, min_length=1, max_length=128)
+    trigger_context: ViewerRequestTriggerContext | None = None
     utterance_id: str | None = Field(default=None, min_length=1, max_length=128)
     started_at_ms: int = Field(ge=0)
     updated_at_ms: int = Field(ge=0)

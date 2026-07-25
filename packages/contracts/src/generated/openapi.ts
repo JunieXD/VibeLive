@@ -977,6 +977,7 @@ export interface components {
             generation_request_id?: string | null;
             /** Viewer Instance Id */
             viewer_instance_id?: string | null;
+            trigger_context?: components["schemas"]["ViewerRequestTriggerContext"] | null;
             /** Utterance Id */
             utterance_id?: string | null;
             /** Started At Ms */
@@ -2571,6 +2572,31 @@ export interface components {
             stale_or_cancel_reason: string | null;
             side_effects?: components["schemas"]["SideEffectTrace"];
         };
+        /**
+         * ViewerRequestTriggerContext
+         * @description Debug-only provenance for a Viewer generation request.
+         */
+        ViewerRequestTriggerContext: {
+            /** Triggers */
+            triggers: components["schemas"]["ObservationTrigger"][];
+            /** Trigger Event Ids */
+            trigger_event_ids?: string[];
+            /** Trigger Frame Ids */
+            trigger_frame_ids?: string[];
+            /** Screen Change Score */
+            screen_change_score?: number | null;
+            /** Target Viewer Id */
+            target_viewer_id?: string | null;
+            /** Target Persona Id */
+            target_persona_id?: string | null;
+            /**
+             * Target Ambiguous
+             * @default false
+             */
+            target_ambiguous: boolean;
+            /** Selection Reason Codes */
+            selection_reason_codes?: string[];
+        };
         /** ViewerRuntimeTelemetry */
         ViewerRuntimeTelemetry: {
             /**
@@ -3333,6 +3359,8 @@ export interface components {
             room_memory_slice: components["schemas"]["RoomMemorySlice"];
             /** Deadline At Ms */
             deadline_at_ms: number;
+            /** @default null */
+            trigger_context: components["schemas"]["ViewerRequestTriggerContext"] | null;
         };
         /**
          * ViewerAction

@@ -17,6 +17,7 @@ from advx_backend.contracts.debug import AiCallRole, AiCallStatus, AiCallTrace
 from advx_backend.contracts.viewer_runtime import (
     ProviderRuntimeSpec,
     ViewerGenerationRequest,
+    ViewerRequestTriggerContext,
     WindowBatchGenerationRequest,
 )
 from advx_backend.domain.memory import RoomMemorySlice
@@ -219,7 +220,10 @@ def test_lifecycle_records_sent_received_and_parsed_output() -> None:
     assert [event.stage for event in final.timeline][-2:] == ["parsed", "completed"]
 
 
-def _viewer_request() -> ViewerGenerationRequest:
+def _viewer_request(
+    *,
+    trigger_context: ViewerRequestTriggerContext | None = None,
+) -> ViewerGenerationRequest:
     assessment = SceneAssessment(
         assessment_id="assessment-1",
         room_id="room-1",
@@ -277,7 +281,73 @@ def _viewer_request() -> ViewerGenerationRequest:
         viewer_private_state=ViewerPrivateState(),
         room_memory_slice=RoomMemorySlice(room_id="room-1", memory_revision=0),
         deadline_at_ms=time.time_ns() // 1_000_000 + 60_000,
+        trigger_context=trigger_context,
     )
+
+
+@pytest.mark.asyncio
+async def test_viewer_call_records_trigger_context_outside_model_payload() -> None:
+    trigger_context = ViewerRequestTriggerContext(
+        triggers=[ObservationTrigger.USER_TEXT, ObservationTrigger.SCREEN_CHANGE],
+        trigger_event_ids=["event-1"],
+        trigger_frame_ids=["frame-1"],
+        screen_change_score=0.73,
+        selection_reason_codes=["per_viewer_independent_decision"],
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        context = json.loads(payload["messages"][1]["content"])
+        assert "trigger_context" not in context
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "action": "barrage",
+                                    "intent": "react_to_host",
+                                    "target": None,
+                                    "texts": ["收到"],
+                                    "reaction_type": "comment",
+                                    "decision_reason": "回应主播文本",
+                                    "evidence_refs": [
+                                        {"source": "event", "event_id": "event-1"}
+                                    ],
+                                },
+                                ensure_ascii=False,
+                            )
+                        },
+                    }
+                ]
+            },
+        )
+
+    sink = RecordingSink()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            OpenAICompatibleViewerRuntimeConfig(
+                base_url="https://example.com/v1",
+                provider=ProviderRuntimeSpec(
+                    provider_profile_id="profile-1",
+                    viewer_model="viewer",
+                    memory_model="memory",
+                    visual_summary_model="visual",
+                ),
+                api_key="test-key",
+            ),
+            client=client,
+            ai_call_sink=sink,
+        )
+        result = await provider.generate(_viewer_request(trigger_context=trigger_context))
+        await provider.aclose()
+
+    assert result.texts == ["收到"]
+    assert sink.traces[-1].trigger_context == trigger_context
 
 
 @pytest.mark.asyncio
@@ -292,6 +362,7 @@ async def test_window_batch_provider_uses_one_logged_strict_json_call() -> None:
         assert '"candidates"' in payload["messages"][0]["content"]
         context = json.loads(payload["messages"][1]["content"])
         assert "requests" not in context
+        assert "trigger_context" not in context
         assert [viewer["viewer_instance_id"] for viewer in context["viewers"]] == [
             "viewer-1",
             "viewer-2",
@@ -332,7 +403,11 @@ async def test_window_batch_provider_uses_one_logged_strict_json_call() -> None:
             },
         )
 
-    first = _viewer_request()
+    trigger_context = ViewerRequestTriggerContext(
+        triggers=[ObservationTrigger.AMBIENT_TICK],
+        selection_reason_codes=["per_viewer_independent_decision"],
+    )
+    first = _viewer_request(trigger_context=trigger_context)
     second = first.model_copy(
         update={
             "generation_request_id": "generation-2",
@@ -382,6 +457,7 @@ async def test_window_batch_provider_uses_one_logged_strict_json_call() -> None:
         AiCallStatus.SUCCEEDED,
     ]
     assert sink.traces[-1].generation_request_id == "batch-1"
+    assert sink.traces[-1].trigger_context == trigger_context
 
 
 @pytest.mark.asyncio

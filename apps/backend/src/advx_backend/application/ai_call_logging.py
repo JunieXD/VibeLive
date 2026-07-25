@@ -20,6 +20,7 @@ from advx_backend.contracts.debug import (
     AiCallTimelineEvent,
     AiCallTrace,
 )
+from advx_backend.contracts.viewer_runtime import ViewerRequestTriggerContext
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ class AiCallScope:
     observation_id: str | None = None
     generation_request_id: str | None = None
     viewer_instance_id: str | None = None
+    trigger_context: ViewerRequestTriggerContext | None = None
     utterance_id: str | None = None
 
 
@@ -132,6 +134,7 @@ class AiCallLifecycle:
             observation_id=scope.observation_id,
             generation_request_id=scope.generation_request_id,
             viewer_instance_id=scope.viewer_instance_id,
+            trigger_context=scope.trigger_context,
             utterance_id=scope.utterance_id,
             started_at_ms=started_at_ms,
             updated_at_ms=started_at_ms,

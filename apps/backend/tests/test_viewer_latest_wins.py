@@ -628,6 +628,49 @@ def _runtime_context() -> object:
     )
 
 
+@pytest.mark.asyncio
+async def test_viewer_request_carries_trigger_provenance_from_wave_and_decision() -> None:
+    provider = _GatedProvider()
+    runtime, _, _ = _runtime(provider)
+    await runtime.start_session("session-1")
+    wave = _wave("trigger-context").model_copy(
+        update={
+            "triggers": [
+                ObservationTrigger.USER_TEXT,
+                ObservationTrigger.SCREEN_CHANGE,
+            ],
+            "trigger_frame_ids": ["frame-trigger-context"],
+            "trigger_screen_change_score": 0.82,
+            "target_viewer_id": "viewer-1",
+        }
+    )
+    decision = _decision("trigger-context", "viewer-1").model_copy(
+        update={"reason_codes": ["per_viewer_independent_decision"]}
+    )
+
+    summary = await runtime.dispatch(
+        wave=wave,
+        decision=decision,
+        pool=SimpleNamespace(viewers=(_viewer(),)),
+        runtime=_runtime_context(),
+    )
+
+    assert summary.published == 1
+    request = provider.requests[0]
+    assert request.trigger_context is not None
+    assert request.trigger_context.triggers == [
+        ObservationTrigger.USER_TEXT,
+        ObservationTrigger.SCREEN_CHANGE,
+    ]
+    assert request.trigger_context.trigger_event_ids == ["event-trigger-context"]
+    assert request.trigger_context.trigger_frame_ids == ["frame-trigger-context"]
+    assert request.trigger_context.screen_change_score == 0.82
+    assert request.trigger_context.target_viewer_id == "viewer-1"
+    assert request.trigger_context.selection_reason_codes == [
+        "per_viewer_independent_decision"
+    ]
+
+
 def test_zero_viewer_request_ttl_disables_the_viewer_deadline() -> None:
     assert RuntimeSettings().viewer_request_ttl_ms == 0
 

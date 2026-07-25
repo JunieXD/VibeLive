@@ -336,6 +336,7 @@ class OpenAICompatibleViewerRuntimeProvider:
                 observation_id=request.observation_id,
                 generation_request_id=request.generation_request_id,
                 viewer_instance_id=request.viewer_instance_id,
+                trigger_context=request.trigger_context,
             ),
         )
         try:
@@ -412,6 +413,7 @@ class OpenAICompatibleViewerRuntimeProvider:
                 audience_epoch=request.audience_epoch,
                 observation_id=request.observation_id,
                 generation_request_id=request.batch_generation_request_id,
+                trigger_context=request.requests[0].trigger_context,
             ),
         )
         try:

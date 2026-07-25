@@ -9,7 +9,8 @@ import {
   Image as ImageIcon,
   RefreshCw,
   Search,
-  Unplug
+  Unplug,
+  Zap
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type {
@@ -26,7 +27,12 @@ import {
   collectCorrelationIds,
   formatDuration,
   formatJson,
-  formatTimestamp
+  formatScreenChangeScore,
+  formatTimestamp,
+  formatViewerSelectionReasons,
+  formatViewerTriggerLabels,
+  formatViewerTriggerReasons,
+  formatViewerTriggerTarget
 } from './aiCallFormatters'
 import { collectAiCallImageReferences } from './aiCallImages'
 
@@ -138,6 +144,77 @@ function viewerDecisionReason(value: unknown): string | null {
   return typeof reason === 'string' && reason.trim() ? reason.trim() : '模型未提供'
 }
 
+function ViewerTriggerContext({ trace }: { trace: AiCallTrace }): React.JSX.Element | null {
+  if (trace.role !== 'viewer') return null
+  const context = trace.trigger_context
+  if (!context) {
+    return (
+      <section className="border-b border-[var(--border)]">
+        <h2 className="flex items-center gap-2 px-4 py-3 text-xs font-bold">
+          <Zap size={15} className="text-[var(--amber)]" aria-hidden="true" />
+          本次触发
+        </h2>
+        <p className="m-0 border-t border-[var(--border)] px-4 py-3 text-xs text-[var(--text-faint)]">
+          旧记录未保留触发上下文
+        </p>
+      </section>
+    )
+  }
+
+  const triggerReasons = formatViewerTriggerReasons(context)
+  const selectionReasons = formatViewerSelectionReasons(context)
+  const hasScreenChangeScore = context.screen_change_score !== null && context.screen_change_score !== undefined
+  const references = [
+    { label: '触发事件', ids: context.trigger_event_ids },
+    { label: '触发画面', ids: context.trigger_frame_ids }
+  ].filter(({ ids }) => ids.length > 0)
+
+  return (
+    <section className="border-b border-[var(--border)]">
+      <h2 className="flex items-center gap-2 px-4 py-3 text-xs font-bold">
+        <Zap size={15} className="text-[var(--amber)]" aria-hidden="true" />
+        本次触发
+      </h2>
+      <div className="grid grid-cols-3 border-y border-[var(--border)] max-[980px]:grid-cols-1">
+        <Metric label="触发类型" value={formatViewerTriggerLabels(context.triggers)} />
+        <Metric label="调度目标" value={formatViewerTriggerTarget(context)} />
+        <Metric
+          label={hasScreenChangeScore ? '画面变化' : '触发事件'}
+          value={hasScreenChangeScore
+            ? formatScreenChangeScore(context.screen_change_score)
+            : context.trigger_event_ids.length > 0 ? `${context.trigger_event_ids.length} 条` : '无'}
+        />
+      </div>
+      <div className="grid grid-cols-2 border-b border-[var(--border)] max-[980px]:grid-cols-1">
+        <div className="border-r border-[var(--border)] px-4 py-3 max-[980px]:border-r-0 max-[980px]:border-b">
+          <h3 className="m-0 text-[10px] font-bold uppercase text-[var(--text-faint)]">触发原因</h3>
+          <ul className="mb-0 mt-2 list-none space-y-1 p-0 text-xs leading-5 text-[var(--text)]">
+            {triggerReasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </div>
+        <div className="px-4 py-3">
+          <h3 className="m-0 text-[10px] font-bold uppercase text-[var(--text-faint)]">观众调度</h3>
+          <ul className="mb-0 mt-2 list-none space-y-1 p-0 text-xs leading-5 text-[var(--text)]">
+            {selectionReasons.map((reason) => <li key={reason}>{reason}</li>)}
+          </ul>
+        </div>
+      </div>
+      {references.length > 0 && (
+        <dl className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2 px-4 py-3 text-[11px]">
+          {references.map(({ label, ids }) => (
+            <div className="contents" key={label}>
+              <dt className="text-[var(--text-faint)]">{label}</dt>
+              <dd className="m-0 select-text break-all font-mono text-[var(--text-dim)]">
+                {ids.join('、')}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  )
+}
+
 function EmptyDetail(): React.JSX.Element {
   return (
     <div className="grid h-full min-h-64 place-items-center px-8 text-center">
@@ -208,6 +285,8 @@ function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
         <Metric label="输入 Token" value={trace.response?.input_tokens ?? '—'} />
         <Metric label="输出 Token" value={trace.response?.output_tokens ?? '—'} />
       </div>
+
+      <ViewerTriggerContext trace={trace} />
 
       {trace.error && (
         <section className="border-b border-[var(--danger-border)] bg-[var(--danger-soft)] px-4 py-3" role="alert">
@@ -459,6 +538,9 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
             <ol className="m-0 list-none p-0">
               {log.items.map((trace) => {
                 const selected = trace.call_id === log.selectedCallId
+                const triggerLabel = trace.role === 'viewer' && trace.trigger_context
+                  ? formatViewerTriggerLabels(trace.trigger_context.triggers)
+                  : null
                 return (
                   <li className="border-b border-[var(--border)]" key={trace.call_id}>
                     <button
@@ -468,7 +550,17 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
                       onClick={() => log.selectCall(trace.call_id)}
                     >
                       <span className="flex min-w-0 items-center justify-between gap-2">
-                        <strong className="truncate text-xs">{aiCallRoleLabels[trace.role]}</strong>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <strong className="truncate text-xs">{aiCallRoleLabels[trace.role]}</strong>
+                          {triggerLabel && (
+                            <span
+                              className="max-w-32 truncate rounded-md bg-[var(--panel-raise)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-dim)]"
+                              title={triggerLabel}
+                            >
+                              {triggerLabel}
+                            </span>
+                          )}
+                        </span>
                         <time className="shrink-0 text-[10px] tabular-nums text-[var(--text-faint)]">
                           {formatTimestamp(trace.started_at_ms)}
                         </time>
