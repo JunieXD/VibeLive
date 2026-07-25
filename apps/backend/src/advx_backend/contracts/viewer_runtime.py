@@ -77,7 +77,7 @@ class RuntimeSettings(RuntimeContractModel):
     viewer_ambient_speaker_budget: int = Field(default=2, ge=0, le=32)
     max_direct_frame_age_ms: int = Field(default=30_000, ge=1)
     screen_change_threshold: float = Field(default=0.2, ge=0, le=1)
-    screen_change_cooldown_ms: int = Field(default=10_000, ge=0)
+    screen_change_cooldown_ms: int = Field(default=5_000, ge=0)
     ambient_tick_cooldown_ms: int = Field(default=30_000, ge=1)
     max_consecutive_ambient_waves: int = Field(default=1, ge=0, le=32)
     window_batch_interval_ms: int = Field(default=5_000, ge=1)

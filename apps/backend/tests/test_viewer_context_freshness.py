@@ -454,7 +454,7 @@ def _wave(
     )
 
 
-def test_screen_waves_select_all_eligible_viewers_and_keep_other_budgets() -> None:
+def test_screen_waves_select_a_deterministic_quarter_and_keep_other_budgets() -> None:
     viewers = [
         _viewer(f"viewer-{index:02}", last_spoke_at_ms=None if index < 2 else index * 1_000)
         for index in range(10)
@@ -462,7 +462,7 @@ def test_screen_waves_select_all_eligible_viewers_and_keep_other_budgets() -> No
     viewers.append(_viewer("persona-old", persona_id="target", last_spoke_at_ms=20_000))
     viewers.append(_viewer("persona-fresh", persona_id="target", last_spoke_at_ms=None))
     committed = SimpleNamespace(
-        pool=SimpleNamespace(viewers=viewers),
+        pool=SimpleNamespace(viewers=viewers, session_seed="screen-selection-seed"),
         spec=SimpleNamespace(settings=RuntimeSettings()),
     )
     coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
@@ -474,6 +474,24 @@ def test_screen_waves_select_all_eligible_viewers_and_keep_other_budgets() -> No
     screen = coordinator._decide_speakers(
         wave=_wave(ObservationTrigger.SCREEN_CHANGE),
         committed=committed,
+    )
+    repeated_screen = coordinator._decide_speakers(
+        wave=_wave(ObservationTrigger.SCREEN_CHANGE),
+        committed=committed,
+    )
+    alternative_screen = coordinator._decide_speakers(
+        wave=_wave(ObservationTrigger.SCREEN_CHANGE),
+        committed=SimpleNamespace(
+            pool=SimpleNamespace(viewers=viewers, session_seed="other-screen-selection-seed"),
+            spec=SimpleNamespace(settings=RuntimeSettings()),
+        ),
+    )
+    single_viewer_screen = coordinator._decide_speakers(
+        wave=_wave(ObservationTrigger.SCREEN_CHANGE),
+        committed=SimpleNamespace(
+            pool=SimpleNamespace(viewers=[viewers[0]], session_seed="screen-selection-seed"),
+            spec=SimpleNamespace(settings=RuntimeSettings()),
+        ),
     )
     system_audio = coordinator._decide_speakers(
         wave=_wave(ObservationTrigger.SYSTEM_AUDIO),
@@ -515,20 +533,13 @@ def test_screen_waves_select_all_eligible_viewers_and_keep_other_budgets() -> No
     )
 
     assert len(user.selected_viewer_ids) == 6
-    assert screen.selected_viewer_ids == [
-        "persona-fresh",
-        "viewer-00",
-        "viewer-01",
-        "viewer-02",
-        "viewer-03",
-        "viewer-04",
-        "viewer-05",
-        "viewer-06",
-        "viewer-07",
-        "viewer-08",
-        "viewer-09",
-        "persona-old",
-    ]
+    assert len(screen.selected_viewer_ids) == 3
+    assert set(screen.selected_viewer_ids).issubset(
+        {viewer.viewer_instance_id for viewer in viewers}
+    )
+    assert screen.selected_viewer_ids == repeated_screen.selected_viewer_ids
+    assert screen.selected_viewer_ids != alternative_screen.selected_viewer_ids
+    assert single_viewer_screen.selected_viewer_ids == ["viewer-00"]
     assert system_audio.selected_viewer_ids == ["persona-fresh", "viewer-00"]
     assert ambient.selected_viewer_ids == ["persona-fresh", "viewer-00"]
     assert len(mixed_window.selected_viewer_ids) == 6

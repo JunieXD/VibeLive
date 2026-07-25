@@ -534,6 +534,8 @@ class ViewerRuntimeCoordinator:
                 viewer.private_state.last_spoke_at_ms or 0,
                 viewer.viewer_instance_id,
             )
+
+        ordered_eligible = sorted(eligible, key=least_recent)
         if wave.target_viewer_id is not None:
             target = by_id.get(wave.target_viewer_id)
             selected = [] if target is None else [target.viewer_instance_id]
@@ -562,11 +564,20 @@ class ViewerRuntimeCoordinator:
             ):
                 budget = settings.viewer_ambient_speaker_budget
             else:
-                # A screen-only wave is the fallback: invite every eligible viewer.
-                budget = len(eligible)
+                # Keep screen-only waves cheap while distributing opportunities across viewers.
+                budget = (len(eligible) + 3) // 4
+                session_seed = getattr(committed.pool, "session_seed", wave.session_id)
+                ordered_eligible = sorted(
+                    eligible,
+                    key=lambda viewer: self._screen_selection_key(
+                        session_seed=session_seed,
+                        observation_id=wave.observation_id,
+                        viewer_instance_id=viewer.viewer_instance_id,
+                    ),
+                )
             selected = [
                 viewer.viewer_instance_id
-                for viewer in sorted(eligible, key=least_recent)[:budget]
+                for viewer in ordered_eligible[:budget]
             ]
         return CrowdDecision(
             decision_id=f"autonomous-{wave.observation_id}",
@@ -584,6 +595,20 @@ class ViewerRuntimeCoordinator:
             created_at_ms=wave.created_at_ms,
             expires_at_ms=wave.deadline_at_ms,
         )
+
+    @staticmethod
+    def _screen_selection_key(
+        *,
+        session_seed: str,
+        observation_id: str,
+        viewer_instance_id: str,
+    ) -> bytes:
+        return hashlib.sha256(
+            (
+                f"{session_seed}\0{observation_id}\0{viewer_instance_id}"
+                "\0screen-selection-v1"
+            ).encode()
+        ).digest()
 
     def _independent_assessment(
         self,

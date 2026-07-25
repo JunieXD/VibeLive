@@ -168,7 +168,7 @@ async def test_only_a_change_at_or_above_the_threshold_creates_a_screen_wave() -
 
 
 @pytest.mark.asyncio
-async def test_any_trigger_starts_the_ten_second_screen_cooldown() -> None:
+async def test_any_trigger_starts_the_five_second_screen_cooldown() -> None:
     clock = _Clock(value=1_000)
     service, scheduler = _service(clock)
 
@@ -180,14 +180,14 @@ async def test_any_trigger_starts_the_ten_second_screen_cooldown() -> None:
             text="主播发言",
         )
     )
-    clock.value = 10_999
+    clock.value = 5_999
     await _submit_frame(
         service,
         input_id="too-soon",
         captured_at_ms=clock.now_ms(),
         change_score=0.2,
     )
-    clock.value = 11_000
+    clock.value = 6_000
     await _submit_frame(
         service,
         input_id="cold-again",

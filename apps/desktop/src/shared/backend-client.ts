@@ -192,7 +192,7 @@ export function compileCanonicalRuntimeSpec(
       viewer_ambient_speaker_budget: 2,
       max_direct_frame_age_ms: 30_000,
       screen_change_threshold: 0.2,
-      screen_change_cooldown_ms: 10_000,
+      screen_change_cooldown_ms: 5_000,
       ambient_tick_cooldown_ms: 30_000,
       max_consecutive_ambient_waves: 1
     }

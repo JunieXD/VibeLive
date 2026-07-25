@@ -1613,12 +1613,12 @@
         "viewer_ambient_speaker_budget": 2,
         "max_direct_frame_age_ms": 30000,
         "screen_change_threshold": 0.2,
-        "screen_change_cooldown_ms": 10000,
+        "screen_change_cooldown_ms": 5000,
         "ambient_tick_cooldown_ms": 30000,
         "max_consecutive_ambient_waves": 1
       }
     },
-    "config_hash": "baa4fe6f1a40cc8d6121589bce644b6ef8b5eb370e7d8af93d6338eeaf50ad81",
+    "config_hash": "326cdd76844eb4048202d5673e38faf735eaadae588ecb55bb5ff122485a645b",
     "created_at_ms": 2000,
     "events": [
       {
@@ -3404,7 +3404,7 @@
       "viewer_ambient_speaker_budget": 2,
       "max_direct_frame_age_ms": 30000,
       "screen_change_threshold": 0.2,
-      "screen_change_cooldown_ms": 10000,
+      "screen_change_cooldown_ms": 5000,
       "ambient_tick_cooldown_ms": 30000,
       "max_consecutive_ambient_waves": 1
     }
