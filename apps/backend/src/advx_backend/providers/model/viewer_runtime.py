@@ -223,6 +223,7 @@ _WINDOW_BATCH_OUTPUT_TOKEN_BUDGET: Final = 1_536
 _REPAIR_TIMEOUT_SECONDS: Final = 6.0
 _MIN_REPAIR_REMAINING_SECONDS: Final = 6.0
 _CALL_STATE_CAPACITY: Final = 4_096
+_CALL_STATE_RETENTION_MS: Final = 300_000
 
 
 class _ViewerModelOutput(BaseModel):
@@ -285,8 +286,11 @@ class _WindowBatchModelOutput(BaseModel):
 @dataclass(slots=True)
 class _ViewerCallState:
     deadline_at_ms: int
+    retention_expires_at_ms: int
     invocations: int = 0
     provider_calls: int = 0
+    active_invocations: int = 0
+    discard_when_idle: bool = False
 
 
 class OpenAICompatibleViewerRuntimeProvider:
@@ -318,6 +322,7 @@ class OpenAICompatibleViewerRuntimeProvider:
 
     async def generate(self, request: ViewerGenerationRequest) -> ViewerGenerationResponse:
         invocation = await self._begin_viewer_invocation(request)
+        retain_call_state = False
         lifecycle = self._call_lifecycle(
             role=AiCallRole.VIEWER,
             correlation_id=request.generation_request_id,
@@ -389,8 +394,18 @@ class OpenAICompatibleViewerRuntimeProvider:
             lifecycle.cancelled()
             raise
         except Exception as error:
+            retain_call_state = (
+                invocation == 1
+                and isinstance(error, ViewerRuntimeProviderError)
+                and error.retryable
+            )
             lifecycle.failed(error)
             raise
+        finally:
+            await self._finish_viewer_invocation(
+                request.generation_request_id,
+                retain_for_retry=retain_call_state,
+            )
 
     async def generate_window_batch(
         self,
@@ -1000,7 +1015,11 @@ class OpenAICompatibleViewerRuntimeProvider:
             expired = [
                 request_id
                 for request_id, state in self._viewer_call_states.items()
-                if state.deadline_at_ms <= now_ms
+                if state.active_invocations == 0
+                and (
+                    state.deadline_at_ms <= now_ms
+                    or state.retention_expires_at_ms <= now_ms
+                )
             ]
             for request_id in expired:
                 self._viewer_call_states.pop(request_id, None)
@@ -1010,13 +1029,38 @@ class OpenAICompatibleViewerRuntimeProvider:
                     raise ViewerRuntimeProtocolError(
                         "Viewer provider call-state capacity was exhausted"
                     )
-                state = _ViewerCallState(deadline_at_ms=request.deadline_at_ms)
+                state = _ViewerCallState(
+                    deadline_at_ms=request.deadline_at_ms,
+                    retention_expires_at_ms=now_ms + _CALL_STATE_RETENTION_MS,
+                )
                 self._viewer_call_states[request.generation_request_id] = state
             else:
                 state.deadline_at_ms = max(state.deadline_at_ms, request.deadline_at_ms)
+                state.retention_expires_at_ms = now_ms + _CALL_STATE_RETENTION_MS
                 self._viewer_call_states.move_to_end(request.generation_request_id)
             state.invocations += 1
+            state.active_invocations += 1
             return state.invocations
+
+    async def _finish_viewer_invocation(
+        self,
+        generation_request_id: str,
+        *,
+        retain_for_retry: bool,
+    ) -> None:
+        async with self._viewer_call_state_lock:
+            state = self._viewer_call_states.get(generation_request_id)
+            if state is None:
+                return
+            state.active_invocations = max(0, state.active_invocations - 1)
+            if retain_for_retry:
+                state.retention_expires_at_ms = (
+                    self._clock_ms() + _CALL_STATE_RETENTION_MS
+                )
+            else:
+                state.discard_when_idle = True
+            if state.active_invocations == 0 and state.discard_when_idle:
+                self._viewer_call_states.pop(generation_request_id, None)
 
     async def _reserve_viewer_call(self, request: ViewerGenerationRequest) -> None:
         async with self._viewer_call_state_lock:

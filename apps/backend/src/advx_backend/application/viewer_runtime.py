@@ -1154,8 +1154,6 @@ class ViewerRuntime:
                 )
                 self._resolve(item, "cancelled")
                 return future
-            self._sequences[viewer.viewer_instance_id] = sequence
-            self._sequence_epochs[viewer.viewer_instance_id] = viewer.audience_epoch
             if not mailbox_busy:
                 if needs_queue:
                     lane.queued += 1
@@ -1194,6 +1192,47 @@ class ViewerRuntime:
             viewer_instance_id=request.viewer_instance_id,
             viewer_sequence=request.viewer_sequence,
         )
+
+    async def _claim_item_sequence(self, item: _WorkItem) -> bool:
+        claim = asyncio.create_task(
+            self._claim_item_sequence_to_completion(item),
+            name=f"viewer-sequence:{item.request.generation_request_id}",
+        )
+        try:
+            return await asyncio.shield(claim)
+        except asyncio.CancelledError:
+            await claim
+            raise
+
+    async def _claim_item_sequence_to_completion(self, item: _WorkItem) -> bool:
+        viewer_id = item.request.viewer_instance_id
+        async with self._lock:
+            previous_epoch = self._sequence_epochs.get(viewer_id)
+            previous_sequence = (
+                self._sequences.get(viewer_id, item.viewer.viewer_sequence)
+                if previous_epoch == item.request.audience_epoch
+                else item.viewer.viewer_sequence
+            )
+            sequence = previous_sequence + 1
+            if item.request.viewer_sequence != sequence:
+                item.request = item.request.model_copy(
+                    update={"viewer_sequence": sequence}
+                )
+            request = item.request
+
+        if not await self._claim_sequence(request):
+            return False
+
+        async with self._lock:
+            current_epoch = self._sequence_epochs.get(viewer_id)
+            current_sequence = self._sequences.get(viewer_id, 0)
+            if (
+                current_epoch != request.audience_epoch
+                or request.viewer_sequence > current_sequence
+            ):
+                self._sequences[viewer_id] = request.viewer_sequence
+                self._sequence_epochs[viewer_id] = request.audience_epoch
+        return True
 
     async def _advance_wave_fence(self, wave: ObservationWave) -> int | None:
         priority = self._wave_priority(wave)
@@ -1292,7 +1331,29 @@ class ViewerRuntime:
                     if current.slot_reserved or current.superseded_reason is not None:
                         break
                     await current.ready.wait()
-                outcome = await self._execute(current)
+                try:
+                    outcome = await self._execute(current)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    logger.exception(
+                        "Viewer mailbox item failed",
+                        extra={
+                            "generation_request_id": (
+                                current.request.generation_request_id
+                            ),
+                            "error_type": type(error).__name__,
+                        },
+                    )
+                    current.completed_at_ms = self._clock.now_ms()
+                    self._record_trace(
+                        current,
+                        status=TraceResponseStatus.FAILED,
+                        accepted=False,
+                        reason="viewer_mailbox_failed",
+                        validation_codes=("viewer_mailbox_failed",),
+                    )
+                    outcome = "failed"
                 self._resolve(current, outcome)
                 async with self._lock:
                     self._release_slot_locked(current)
@@ -1348,7 +1409,7 @@ class ViewerRuntime:
         try:
             if not self._is_current(item) or self._expired(request):
                 return self._finalize_pre_dispatch(item)
-            if not await self._claim_sequence(request):
+            if not await self._claim_item_sequence(item):
                 self._record_trace(
                     item,
                     status=TraceResponseStatus.STALE,
@@ -1357,6 +1418,7 @@ class ViewerRuntime:
                     validation_codes=("viewer_sequence_claim_rejected",),
                 )
                 return "stale"
+            request = item.request
             if not self._is_current(item) or self._expired(request):
                 return self._finalize_pre_dispatch(item)
             response = await self._generate_with_retry(item)
