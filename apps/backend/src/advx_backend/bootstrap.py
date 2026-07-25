@@ -352,7 +352,7 @@ class BackendRuntime:
         try:
             committed = await self.runtime_state.snapshot(session_id)
         except KeyError:
-            return 0.2, 5_000
+            return 0.1, 5_000
         settings = committed.spec.settings
         return settings.screen_change_threshold, settings.screen_change_cooldown_ms
 

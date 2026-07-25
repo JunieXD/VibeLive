@@ -2207,7 +2207,7 @@ export interface components {
             max_direct_frame_age_ms: number;
             /**
              * Screen Change Threshold
-             * @default 0.2
+             * @default 0.1
              */
             screen_change_threshold: number;
             /**
