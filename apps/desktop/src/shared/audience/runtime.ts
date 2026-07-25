@@ -4,7 +4,7 @@ import type {
   Persona,
   RuntimePersona
 } from './types'
-import { compileViewerPool } from './viewer-allocation'
+import { compileViewerPool, totalViewerCount } from './viewer-allocation'
 import { createPersonaTemplate } from './canonical'
 
 export function compileAudienceRuntimeSnapshot(
@@ -27,7 +27,7 @@ export function compileAudienceRuntimeSnapshot(
       revision: mode.revision,
       name: mode.name,
       description: mode.description,
-      targetConcurrentViewers: mode.targetConcurrentViewers,
+      viewerCount: totalViewerCount(mode),
       normalResponseRange: [...mode.normalResponseRange],
       highlightResponseRange: [...mode.highlightResponseRange],
       ambience: mode.ambience,

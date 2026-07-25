@@ -19,7 +19,7 @@ export type AudienceWorkspaceParseResult =
   | {
       readonly ok: true
       readonly workspace: AudienceWorkspaceState
-      readonly migratedFromVersion?: 1 | 2
+      readonly migratedFromVersion?: 1 | 2 | 3
       readonly legacyMemes?: readonly LegacyLocalMeme[]
     }
   | { readonly ok: false; readonly issues: readonly string[] }
@@ -32,8 +32,8 @@ export type LegacyLocalMeme = {
 
 export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspaceParseResult {
   if (!isRecord(value)) return { ok: false, issues: ['workspace must be an object'] }
-  if (value.version !== 1 && value.version !== 2 && value.version !== 3) {
-    return { ok: false, issues: ['version must be 1, 2 or 3'] }
+  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4) {
+    return { ok: false, issues: ['version must be 1, 2, 3 or 4'] }
   }
   const sourceVersion = value.version
   const issues: string[] = []
@@ -67,12 +67,10 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
 
   validateReferences(personas, modes, activeModeId, issues)
   if (issues.length > 0) return { ok: false, issues }
-  const migratedFromVersion = sourceVersion === 1 || sourceVersion === 2
-    ? sourceVersion
-    : undefined
+  const migratedFromVersion = sourceVersion < 4 ? sourceVersion : undefined
   return {
     ok: true,
-    workspace: { version: 3, personas, modeState: { modes, activeModeId } },
+    workspace: { version: 4, personas, modeState: { modes, activeModeId } },
     ...(migratedFromVersion === undefined ? {} : { migratedFromVersion }),
     ...(legacyMemes.length > 0 ? { legacyMemes } : {})
   }
@@ -113,7 +111,7 @@ function parseLegacyMemes(value: unknown, issues: string[]): LegacyLocalMeme[] {
 
 function parsePersonas(
   value: unknown,
-  sourceVersion: 1 | 2 | 3,
+  sourceVersion: 1 | 2 | 3 | 4,
   issues: string[]
 ): PersonaTemplate[] {
   const builtInIds = new Set(BASE_PERSONAS.map((persona) => persona.id))
@@ -133,7 +131,7 @@ function parsePersonas(
 function parsePersona(
   value: unknown,
   path: string,
-  sourceVersion: 1 | 2 | 3,
+  sourceVersion: 1 | 2 | 3 | 4,
   issues: string[]
 ): PersonaTemplate | null {
   if (!isRecord(value)) return fail(path, 'must be an object', issues)
@@ -160,7 +158,7 @@ function parsePersona(
 function parseMode(
   value: unknown,
   path: string,
-  sourceVersion: 1 | 2 | 3,
+  sourceVersion: 1 | 2 | 3 | 4,
   issues: string[]
 ): AudienceMode | null {
   if (!isRecord(value)) return fail(path, 'must be an object', issues)
@@ -174,9 +172,12 @@ function parseMode(
   }
   if (typeof value.builtIn !== 'boolean') issues.push(`${path}.builtIn must be boolean`)
 
-  const personaIds = stringArray(value.personaIds, `${path}.personaIds`, issues)
-  if (new Set(personaIds).size !== personaIds.length) issues.push(`${path}.personaIds must be unique`)
-  const personaWeights = parsePersonaWeights(value.personaWeights, personaIds, path, issues)
+  const legacyPersonaIds = sourceVersion < 4
+    ? stringArray(value.personaIds, `${path}.personaIds`, issues)
+    : []
+  if (new Set(legacyPersonaIds).size !== legacyPersonaIds.length) {
+    issues.push(`${path}.personaIds must be unique`)
+  }
   const personaOverrides = parsePersonaOverrides(value.personaOverrides, path, issues)
   const legacyBase = sourceVersion === 1
     ? integerRange(value.baseActivity, `${path}.baseActivity`, issues)
@@ -190,22 +191,35 @@ function parseMode(
   const highlightResponseRange = sourceVersion === 1
     ? legacyBurst
     : integerRange(value.highlightResponseRange, `${path}.highlightResponseRange`, issues)
-  const targetConcurrentViewers = sourceVersion === 1
+  const legacyTargetConcurrentViewers = sourceVersion === 1
     ? clamp(legacyBurst[1], 1, 32)
     : sourceVersion === 2
       ? boundedInteger(value.viewerCount, `${path}.viewerCount`, 1, 32, issues)
-      : boundedInteger(
+      : sourceVersion === 3
+        ? boundedInteger(
           value.targetConcurrentViewers,
           `${path}.targetConcurrentViewers`,
           1,
           32,
           issues
         )
-  if (normalResponseRange[1] > targetConcurrentViewers) {
-    issues.push(`${path}.normalResponseRange maximum cannot exceed targetConcurrentViewers`)
+        : 0
+  const personaCounts = sourceVersion === 4
+    ? parsePersonaCounts(value.personaCounts, path, issues)
+    : allocateLegacyPersonaCounts(
+        legacyPersonaIds,
+        parsePersonaWeights(value.personaWeights, legacyPersonaIds, path, issues),
+        legacyTargetConcurrentViewers
+      )
+  const viewerCount = Object.values(personaCounts).reduce((total, count) => total + count, 0)
+  if (viewerCount < 1 || viewerCount > 32) {
+    issues.push(`${path}.personaCounts must add up to an integer from 1 to 32`)
   }
-  if (highlightResponseRange[1] > targetConcurrentViewers) {
-    issues.push(`${path}.highlightResponseRange maximum cannot exceed targetConcurrentViewers`)
+  if (normalResponseRange[1] > viewerCount) {
+    issues.push(`${path}.normalResponseRange maximum cannot exceed the total persona count`)
+  }
+  if (highlightResponseRange[1] > viewerCount) {
+    issues.push(`${path}.highlightResponseRange maximum cannot exceed the total persona count`)
   }
   if (value.ambience !== 'natural' && value.ambience !== 'continuous') {
     issues.push(`${path}.ambience must be natural or continuous`)
@@ -233,9 +247,7 @@ function parseMode(
     name: value.name as string,
     description: value.description as string,
     builtIn: value.builtIn as boolean,
-    targetConcurrentViewers,
-    personaIds,
-    personaWeights,
+    personaCounts,
     personaOverrides,
     normalResponseRange,
     highlightResponseRange,
@@ -298,6 +310,57 @@ function parsePersonaWeights(
     issues.push(`${path}.personaWeights must contain a positive weight`)
   }
   return weights
+}
+
+function parsePersonaCounts(
+  value: unknown,
+  path: string,
+  issues: string[]
+): Record<string, number> {
+  if (!isRecord(value)) {
+    issues.push(`${path}.personaCounts must be an object`)
+    return {}
+  }
+  const counts: Record<string, number> = {}
+  for (const [personaId, count] of Object.entries(value)) {
+    if (!STABLE_ID_PATTERN.test(personaId) || !Number.isInteger(count) || count < 0 || count > 32) {
+      issues.push(`${path}.personaCounts.${personaId} must be an integer from 0 to 32`)
+      continue
+    }
+    counts[personaId] = count
+  }
+  if (Object.keys(counts).length === 0) {
+    issues.push(`${path}.personaCounts must contain at least one persona`)
+  }
+  return counts
+}
+
+function allocateLegacyPersonaCounts(
+  personaIds: readonly string[],
+  weights: Readonly<Record<string, number>>,
+  target: number
+): Record<string, number> {
+  const eligible = personaIds
+    .map((personaId, index) => ({ personaId, index, weight: weights[personaId] ?? 0 }))
+    .filter((item) => item.weight > 0)
+  const totalWeight = eligible.reduce((total, item) => total + item.weight, 0)
+  if (totalWeight <= 0) return Object.fromEntries(personaIds.map((personaId) => [personaId, 0]))
+  const allocations = eligible.map((item) => {
+    const exact = target * item.weight / totalWeight
+    return { ...item, count: Math.floor(exact), remainder: exact - Math.floor(exact) }
+  })
+  const remaining = target - allocations.reduce((total, item) => total + item.count, 0)
+  for (const item of [...allocations]
+    .sort((left, right) =>
+      right.remainder - left.remainder || left.index - right.index ||
+      left.personaId.localeCompare(right.personaId)
+    )
+    .slice(0, remaining)) {
+    item.count += 1
+  }
+  const counts = Object.fromEntries(personaIds.map((personaId) => [personaId, 0]))
+  for (const item of allocations) counts[item.personaId] = item.count
+  return counts
 }
 
 function parsePersonaOverrides(
@@ -410,13 +473,17 @@ function validateReferences(
     if (mode.builtIn !== builtInModeIds.has(mode.id)) {
       issues.push(`mode ${mode.id} has an invalid builtIn identity`)
     }
-    for (const personaId of mode.personaIds) {
+    for (const personaId of Object.keys(mode.personaCounts)) {
       if (!personaIds.has(personaId)) issues.push(`mode ${mode.id} references unknown persona ${personaId}`)
     }
-    if (!mode.personaIds.some((personaId) =>
-      personasById.get(personaId)?.enabled && mode.personaWeights[personaId] > 0
-    )) {
-      issues.push(`mode ${mode.id} must have a positive weight for an enabled persona`)
+    const viewerCount = Object.values(mode.personaCounts).reduce((total, count) => total + count, 0)
+    if (viewerCount < 1 || viewerCount > 32) {
+      issues.push(`mode ${mode.id} must assign from 1 to 32 viewers`)
+    }
+    for (const [personaId, count] of Object.entries(mode.personaCounts)) {
+      if (count > 0 && !personasById.get(personaId)?.enabled) {
+        issues.push(`mode ${mode.id} assigns viewers to disabled persona ${personaId}`)
+      }
     }
     for (const [personaId, override] of Object.entries(mode.personaOverrides)) {
       const base = personasById.get(personaId)
@@ -491,8 +558,7 @@ function clonePersonaOverride(override: Record<string, unknown>): PersonaOverrid
 function cloneAudienceMode(mode: AudienceMode): AudienceMode {
   return {
     ...mode,
-    personaIds: [...mode.personaIds],
-    personaWeights: { ...mode.personaWeights },
+    personaCounts: { ...mode.personaCounts },
     personaOverrides: Object.fromEntries(
       Object.entries(mode.personaOverrides).map(([personaId, override]) => [
         personaId,

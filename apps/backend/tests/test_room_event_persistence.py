@@ -80,9 +80,7 @@ def runtime_spec() -> CanonicalRuntimeSpec:
         mode_id="mode-1",
         namespace_id="mode-1",
         revision=1,
-        viewer_count=1,
-        persona_ids=[persona.persona_id],
-        persona_weights={persona.persona_id: 1},
+        persona_counts={persona.persona_id: 1},
         normal_response_range=ResponseRange(minimum=0, maximum=1),
         highlight_response_range=ResponseRange(minimum=0, maximum=1),
     )

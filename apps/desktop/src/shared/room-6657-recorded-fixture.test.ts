@@ -45,7 +45,11 @@ function compileFixtureSpecs() {
     modes: activeModeState.modes.map((mode) =>
       mode.id === 'room-6657'
         ? reviseAudienceMode(mode, {
-            personaWeights: { ...mode.personaWeights, instigator: 8 }
+            personaCounts: {
+              ...mode.personaCounts,
+              reaction_qmark: 2,
+              instigator: 4
+            }
           })
         : mode
     )
@@ -68,7 +72,7 @@ function compileFixtureSpecs() {
   const initialMode = initial.spec.modes.find((mode) => mode.mode_id === 'room-6657')
   const personaNames = Object.fromEntries(
     activeWorkspace.personas
-      .filter((persona) => initialMode?.persona_ids.includes(persona.id))
+      .filter((persona) => (initialMode?.persona_counts[persona.id] ?? 0) > 0)
       .map((persona) => [persona.id, persona.name])
   )
   if (!initialMode) throw new Error('room-6657 is missing from the Desktop workspace')
@@ -83,8 +87,9 @@ function compileFixtureSpecs() {
       primary_persona_ids: primaryPersonaIds,
       secondary_persona_ids: secondaryPersonaIds,
       persona_alias_bases: personaNames,
-      initial_viewer_count: initialMode.target_concurrent_viewers,
-      initial_persona_weights: initialMode.persona_weights
+      initial_viewer_count: Object.values(initialMode.persona_counts)
+        .reduce((total, count) => total + count, 0),
+      initial_persona_counts: initialMode.persona_counts
     }
   }
 }
@@ -95,11 +100,11 @@ describe('recorded room-6657 fixture', () => {
     const { initial, updated, desktopSource } = compileFixtureSpecs()
 
     if (process.env.ADVX_UPDATE_FIXTURES === '1') {
-      fixture.fixture_version = 2
+      fixture.fixture_version = 3
       fixture.desktop_source = desktopSource
       fixture.initial_canonical_runtime_spec = initial.spec
-      fixture.hot_update = { persona_weight_updates: { instigator: 8 } }
-      fixture.bundle.bundle_id = 'cs2-6657-desktop-preset-recorded-v2'
+      fixture.hot_update = { persona_count_updates: { reaction_qmark: 2, instigator: 4 } }
+      fixture.bundle.bundle_id = 'cs2-6657-desktop-preset-recorded-v3'
       fixture.bundle.canonical_runtime_spec = updated.spec
       fixture.bundle.config_hash = updated.configHash
       writeFileSync(fixtureUrl, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8')

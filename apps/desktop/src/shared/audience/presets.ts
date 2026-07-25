@@ -183,7 +183,7 @@ function createMode(
     readonly personaOverrides?: Readonly<Record<string, PersonaOverride>>
   } = {}
 ): AudienceMode {
-  const personaIds = [...high, ...medium]
+  const personaCounts = presetPersonaCounts(high, medium, burstLimit[1])
   const normalResponseRange = [...baseActivity] as const
   const highlightResponseRange = [...burstLimit] as const
   return {
@@ -193,12 +193,7 @@ function createMode(
     name,
     description,
     builtIn: true,
-    targetConcurrentViewers: burstLimit[1],
-    personaIds,
-    personaWeights: Object.fromEntries([
-      ...high.map((personaId) => [personaId, 3]),
-      ...medium.map((personaId) => [personaId, 1])
-    ]),
+    personaCounts,
     personaOverrides: options.personaOverrides ?? {},
     normalResponseRange,
     highlightResponseRange,
@@ -207,6 +202,33 @@ function createMode(
     baseActivity: normalResponseRange,
     burstLimit: highlightResponseRange
   }
+}
+
+function presetPersonaCounts(
+  primary: readonly string[],
+  secondary: readonly string[],
+  total: number
+): Readonly<Record<string, number>> {
+  const entries = [
+    ...primary.map((personaId, index) => ({ personaId, index, share: 3 })),
+    ...secondary.map((personaId, index) => ({
+      personaId,
+      index: primary.length + index,
+      share: 1
+    }))
+  ]
+  const shareTotal = entries.reduce((sum, entry) => sum + entry.share, 0)
+  const allocations = entries.map((entry) => {
+    const exact = total * entry.share / shareTotal
+    return { ...entry, count: Math.floor(exact), remainder: exact - Math.floor(exact) }
+  })
+  const remaining = total - allocations.reduce((sum, entry) => sum + entry.count, 0)
+  for (const entry of [...allocations]
+    .sort((left, right) => right.remainder - left.remainder || left.index - right.index)
+    .slice(0, remaining)) {
+    entry.count += 1
+  }
+  return Object.fromEntries(allocations.map((entry) => [entry.personaId, entry.count]))
 }
 
 export const DEFAULT_VISUAL_SETTINGS: AudienceVisualSettings = {

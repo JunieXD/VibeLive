@@ -1,7 +1,5 @@
 import { Pencil, Plus, Search } from 'lucide-react'
 import {
-  allocateViewerCounts,
-  createPersonaTemplate,
   materializePersonaTemplate,
   type AudienceMode,
   type Persona
@@ -11,7 +9,6 @@ import { cx } from './styles'
 
 type PersonaListProps = {
   personas: readonly Persona[]
-  allPersonas: readonly Persona[]
   activeMode: AudienceMode
   selectedPersonaId: string
   search: string
@@ -19,7 +16,6 @@ type PersonaListProps = {
   onSearchChange(value: string): void
   onAdd(): void
   onChoose(personaId: string): void
-  onParticipationChange(personaId: string, enabled: boolean): void
 }
 
 function effectivePersona(base: Persona, mode: AudienceMode): Persona {
@@ -28,24 +24,14 @@ function effectivePersona(base: Persona, mode: AudienceMode): Persona {
 
 export function PersonaList({
   personas,
-  allPersonas,
   activeMode,
   selectedPersonaId,
   search,
   structureLocked,
   onSearchChange,
   onAdd,
-  onChoose,
-  onParticipationChange
+  onChoose
 }: PersonaListProps): React.JSX.Element {
-  const allocations = new Map(
-    allocateViewerCounts(
-      activeMode,
-      allPersonas.map((persona) =>
-        'documentVersion' in persona ? persona : createPersonaTemplate(persona)
-      )
-    ).map((item) => [item.personaId, item.count])
-  )
   return (
     <aside className={cx('aw-directory')}>
       <div className={cx('aw-search-row')}>
@@ -62,8 +48,7 @@ export function PersonaList({
       <div className={cx('aw-persona-list')}>
         {personas.map((persona) => {
           const resolved = effectivePersona(persona, activeMode)
-          const included = activeMode.personaIds.includes(persona.id)
-          const participating = included && resolved.enabled
+          const viewerCount = activeMode.personaCounts[persona.id] ?? 0
           return (
             <article
               key={persona.id}
@@ -89,22 +74,8 @@ export function PersonaList({
                 <span>{resolved.behavior}</span>
               </div>
               <span className={cx('aw-persona-allocation')}>
-                {participating ? `${allocations.get(persona.id) ?? 0} Viewer` : '未参与'}
+                {viewerCount} 人
               </span>
-              <label
-                className={cx('aw-switch')}
-                data-audience-participation
-                title={participating ? '停用人格' : '启用人格'}
-              >
-                <input
-                  type="checkbox"
-                  checked={participating}
-                  disabled={structureLocked}
-                  aria-label={`${participating ? '停用' : '启用'}${resolved.name}`}
-                  onChange={() => onParticipationChange(persona.id, !participating)}
-                />
-                <span aria-hidden="true" />
-              </label>
               <IconButton title={`编辑${resolved.name}`} onClick={() => onChoose(persona.id)}>
                 <Pencil size={14} />
               </IconButton>
@@ -113,7 +84,7 @@ export function PersonaList({
         })}
       </div>
       <footer className={cx('aw-viewer-allocation-total')}>
-        共 {Array.from(allocations.values()).reduce((total, count) => total + count, 0)} 个 Viewer
+        共 {Object.values(activeMode.personaCounts).reduce((total, count) => total + count, 0)} 人
       </footer>
     </aside>
   )

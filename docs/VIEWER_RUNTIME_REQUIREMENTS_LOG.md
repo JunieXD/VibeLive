@@ -76,8 +76,8 @@
 
 ### 3.2 Mode 和 Viewer
 
-- Mode 保存 viewer count、Persona 权重、普通/高光 response range 和 ambience。
-- 权重只用于确定性 Viewer 池分配，不在 Director 中再次加权。
+- Mode 保存每个人格的 Viewer 人数、普通/高光 response range 和 ambience。
+- 各人格人数之和为 1 到 32；`0` 表示该人格不参与，Viewer 池按这些人数精确构成。
 - 现有六个模式初始 Viewer 数为 24、28、16、14、24、14。
 - Viewer 使用 Persona 名加实例序号作为首版确定性别名。
 - 同 Persona 实例具有稳定的确定性微变体。

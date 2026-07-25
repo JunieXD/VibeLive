@@ -15,6 +15,7 @@ import {
   resetBuiltInMode,
   reviseAudienceMode,
   serializePersonaMarkdown,
+  totalViewerCount,
   validatePersona
 } from './index'
 
@@ -26,7 +27,7 @@ describe('audience presets and modes', () => {
     expect(BASE_PERSONAS.map((persona) => persona.id)).toContain('instigator')
     expect(BASE_PERSONAS.find((persona) => persona.id === 'instigator')?.name).toBe('串子哥')
     expect(BUILT_IN_MODES).toHaveLength(6)
-    expect(BUILT_IN_MODES.map((mode) => mode.targetConcurrentViewers))
+    expect(BUILT_IN_MODES.map(totalViewerCount))
       .toEqual([24, 28, 16, 14, 24, 14])
     expect(BUILT_IN_MODES.every(
       (mode) => mode.visualSettings.barrageGenerationMode === 'per_viewer'
@@ -37,13 +38,12 @@ describe('audience presets and modes', () => {
     expect(mode6657).toMatchObject({
       ambience: 'continuous',
       revision: 2,
-      targetConcurrentViewers: 28,
       normalResponseRange: [6, 10],
       highlightResponseRange: [20, 28],
       baseActivity: [6, 10],
       burstLimit: [20, 28]
     })
-    expect(mode6657?.personaWeights.reaction_qmark).toBe(3)
+    expect(mode6657?.personaCounts.reaction_qmark).toBe(3)
     expect(mode6657?.personaOverrides.reaction_qmark?.speechStyle).toContain('1-8 字')
     expect(mode6657?.personaOverrides.meme_archivist?.avoidPatterns).toContain(
       '逐字复刻外部语料'
@@ -89,8 +89,8 @@ describe('audience presets and modes', () => {
     const copied = duplicateModeAsCustom(activated, 'room-6657', 'my-room', '我的房间')
     expect(copied.activeModeId).toBe('my-room')
     expect(copied.modes.at(-1)?.builtIn).toBe(false)
-    expect(copied.modes.at(-1)?.personaWeights).not.toBe(
-      copied.modes.find((mode) => mode.id === 'room-6657')?.personaWeights
+    expect(copied.modes.at(-1)?.personaCounts).not.toBe(
+      copied.modes.find((mode) => mode.id === 'room-6657')?.personaCounts
     )
     expect(copied.modes.at(-1)?.personaOverrides.reaction_qmark?.traits).not.toBe(
       copied.modes.find((mode) => mode.id === 'room-6657')
@@ -131,14 +131,12 @@ describe('persona Markdown', () => {
 })
 
 describe('viewer pool v2', () => {
-  it('allocates exact viewers with deterministic Hamilton tie breaking', () => {
+  it('allocates configured viewer counts exactly', () => {
     const mode = {
       ...BUILT_IN_MODES[0],
-      targetConcurrentViewers: 5,
-      personaIds: ['reaction_qmark', 'cheat_suspector', 'praise_then_bite'],
-      personaWeights: {
-        reaction_qmark: 1,
-        cheat_suspector: 1,
+      personaCounts: {
+        reaction_qmark: 2,
+        cheat_suspector: 2,
         praise_then_bite: 1
       }
     }
@@ -198,13 +196,19 @@ describe('workspace persistence', () => {
           const {
             namespaceId,
             revision,
-            targetConcurrentViewers,
+            personaCounts,
             normalResponseRange,
             highlightResponseRange,
             visualSettings,
             ...legacy
           } = mode
-          return legacy
+          return {
+            ...legacy,
+            personaIds: Object.keys(personaCounts as Record<string, number>),
+            personaWeights: { ...personaCounts as Record<string, number> },
+            baseActivity: normalResponseRange,
+            burstLimit: highlightResponseRange
+          }
         })
       }
     }
@@ -212,8 +216,8 @@ describe('workspace persistence', () => {
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
     expect(parsed.migratedFromVersion).toBe(1)
-    expect(parsed.workspace.version).toBe(3)
-    expect(parsed.workspace.modeState.modes.map((mode) => mode.targetConcurrentViewers))
+    expect(parsed.workspace.version).toBe(4)
+    expect(parsed.workspace.modeState.modes.map(totalViewerCount))
       .toEqual([24, 28, 16, 14, 24, 14])
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
       barrageGenerationMode: 'per_viewer',
@@ -221,6 +225,29 @@ describe('workspace persistence', () => {
       frameBundleSize: 15,
       frameSelectionStrategy: 'change_peaks'
     })
+  })
+
+  it('migrates v2 and v3 weighted modes to their exact viewer counts', () => {
+    for (const sourceVersion of [2, 3] as const) {
+      const legacy = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+      legacy.version = sourceVersion
+      for (const mode of legacy.modeState.modes) {
+        const personaCounts = mode.personaCounts
+        mode.personaIds = Object.keys(personaCounts)
+        mode.personaWeights = { ...personaCounts }
+        if (sourceVersion === 2) mode.viewerCount = totalViewerCount(mode)
+        else mode.targetConcurrentViewers = totalViewerCount(mode)
+        delete mode.personaCounts
+      }
+
+      const parsed = parseAudienceWorkspaceState(legacy)
+      expect(parsed.ok).toBe(true)
+      if (!parsed.ok) continue
+      expect(parsed.migratedFromVersion).toBe(sourceVersion)
+      expect(parsed.workspace.version).toBe(4)
+      expect(parsed.workspace.modeState.modes.map(totalViewerCount))
+        .toEqual([24, 28, 16, 14, 24, 14])
+    }
   })
 
   it('extracts v1 local memes for one-time Shared Brain migration', () => {
@@ -239,7 +266,12 @@ describe('workspace persistence', () => {
     for (const mode of v1.modeState.modes) {
       delete mode.namespaceId
       delete mode.revision
-      delete mode.targetConcurrentViewers
+      const personaCounts = mode.personaCounts
+      mode.personaIds = Object.keys(personaCounts)
+      mode.personaWeights = { ...personaCounts }
+      mode.baseActivity = [...mode.normalResponseRange]
+      mode.burstLimit = [...mode.highlightResponseRange]
+      delete mode.personaCounts
       delete mode.normalResponseRange
       delete mode.highlightResponseRange
       delete mode.visualSettings

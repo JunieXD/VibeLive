@@ -104,9 +104,7 @@ def _spec() -> CanonicalRuntimeSpec:
         mode_id="default",
         namespace_id="default",
         revision=1,
-        target_concurrent_viewers=1,
-        persona_ids=[persona.persona_id],
-        persona_weights={persona.persona_id: 1},
+        persona_counts={persona.persona_id: 1},
         normal_response_range=ResponseRange(minimum=0, maximum=1),
         highlight_response_range=ResponseRange(minimum=0, maximum=1),
     )

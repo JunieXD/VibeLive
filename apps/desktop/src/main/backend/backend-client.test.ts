@@ -895,7 +895,7 @@ describe("BackendClient runtime v2", () => {
     fetchMock.mockRestore();
   });
 
-  it("submits session-scoped atomic apply requests with protocol v2", async () => {
+  it("submits session-scoped atomic apply requests with audience contract v3", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({
         room_id: "default-room",
@@ -934,7 +934,7 @@ describe("BackendClient runtime v2", () => {
     expect(body).toMatchObject({
       apply_id: "apply-1",
       base_revision: 1,
-      audience_contract_version: 2,
+      audience_contract_version: 3,
       client_config_hash: compiled.configHash,
       provider_candidate: providerCandidate
     });

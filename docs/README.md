@@ -40,7 +40,7 @@ Windows 系统声音 ─> StepFun ASR B ─┘
 - 每个 ViewerInstance 都有稳定 ID、PersonaTemplate、实例微变体和会话内短期状态；所有 Viewer 共享 Room 工作记忆和跨 Session 长期记忆。
 - 内置模式可以复制为自定义模式；人格覆盖只在所属模式内生效，完整编辑结果使用版本化 `personality.md` 表示。
 - 用户发送的文字弹幕和语音都会进入房间对话，AI 观众可以回应用户、画面和其他观众。
-- 观众身份与行为连续性是产品要求；现有 32 个 PersonaTemplate 是可扩展素材库，Mode 使用 viewer count 和权重确定性建立 Viewer 池。
+- 观众身份与行为连续性是产品要求；现有 32 个 PersonaTemplate 是可扩展素材库，Mode 使用每个人格的精确人数确定性建立 Viewer 池。
 - Director 在后端预算内选择准确 ViewerInstance；每个被选实例发起一次独立模型请求，首版不做多 Viewer batching。
 - 人格、模式和角色模型配置通过 revision、hash 和 epoch 保护的原子热更新应用到当前 Session。
 - Debug API、结构化 trace、headless harness 和 recorded/live replay 是首版必要能力。

@@ -6,7 +6,7 @@ import { createInitialAudienceWorkspace } from './audience'
 import { canonicalJsonStringify, compileCanonicalRuntimeSpec } from './backend-client'
 
 describe('canonical desktop runtime spec', () => {
-  it('compiles the full v2 snapshot with backend-compatible hashes and frame quality', () => {
+  it('compiles the full v3 snapshot with backend-compatible hashes and frame quality', () => {
     const workspace = createInitialAudienceWorkspace()
     const compiled = compileCanonicalRuntimeSpec(workspace, {
       configRevision: 3,
@@ -19,7 +19,7 @@ describe('canonical desktop runtime spec', () => {
     })
     expect(compiled.spec).toMatchObject({
       protocol_version: 3,
-      audience_contract_version: 2,
+      audience_contract_version: 3,
       config_revision: 3,
       active_mode_id: 'lively-game-room',
       provider: {
@@ -57,8 +57,9 @@ describe('canonical desktop runtime spec', () => {
     })
     expect(compiled.spec.personas[0].content_hash).toMatch(/^[0-9a-f]{64}$/)
     expect(compiled.spec.personas[0].content_hash).not.toContain('sha256:')
-    expect(compiled.spec.modes.map((mode) => mode.target_concurrent_viewers))
-      .toEqual([24, 28, 16, 14, 24, 14])
+    expect(compiled.spec.modes.map((mode) =>
+      Object.values(mode.persona_counts).reduce((total, count) => total + count, 0)
+    )).toEqual([24, 28, 16, 14, 24, 14])
     expect(compiled.configHash).toBe(
       createHash('sha256').update(compiled.canonicalJson).digest('hex')
     )

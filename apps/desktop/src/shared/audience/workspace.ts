@@ -5,7 +5,7 @@ import type { AudienceRuntimeSnapshot, AudienceWorkspaceState } from './types'
 
 export function createInitialAudienceWorkspace(): AudienceWorkspaceState {
   return {
-    version: 3,
+    version: 4,
     personas: BASE_PERSONAS,
     modeState: createInitialModeState()
   }

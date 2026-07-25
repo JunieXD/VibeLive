@@ -478,7 +478,7 @@ Provider 原始响应和隐藏推理始终不进入日志。日志以有界 JSON
 
 ## 13. 测试要求
 
-- Domain 单元测试覆盖 Session/epoch 转换、Hamilton Viewer 池分配、稳定别名/微变体、ObservationWave 冻结、TTL、latest-wins、去重和记忆状态转换。
+- Domain 单元测试覆盖 Session/epoch 转换、精确人格人数的 Viewer 池分配、稳定别名/微变体、ObservationWave 冻结、TTL、latest-wins、去重和记忆状态转换。
 - Application 测试使用内存 Fake Port，覆盖暂停、停止、热更新、回滚、模式切换、旧结果零副作用、同波冻结、Room 共享记忆和写入失败降级。
 - 所有 SQLite Repository 运行同一组 Repository 合同测试。
 - 迁移测试至少覆盖空数据库、上一版本数据库、失败回滚和备份恢复。
@@ -487,7 +487,7 @@ Provider 原始响应和隐藏推理始终不进入日志。日志以有界 JSON
 - Headless harness 测试覆盖 JSON stdin/stdout、稳定退出码、固定 seed、虚拟时钟以及隔离 data dir、SQLite、端口、token 和 room。
 - recorded replay 测试不得调用 Provider；live replay 只有显式开启才允许调用并产生费用。
 - 集成测试覆盖后端重启后恢复相同逻辑 Session、epoch 递增、旧任务失效和 `RoomWorkingMemory` 有界重建。
-- CS2/CSGO E2E fixture 覆盖普通沉默、高光、点名、文字回应、6657 串子权重更新、共享记忆、成长梗和失败路径；真实输出按结构、身份、证据、类别和状态变化验收，不比较固定文案。
+- CS2/CSGO E2E fixture 覆盖普通沉默、高光、点名、文字回应、6657 指定人格人数更新、共享记忆、成长梗和失败路径；真实输出按结构、身份、证据、类别和状态变化验收，不比较固定文案。
 
 ## 14. 保留的开放问题
 

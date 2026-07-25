@@ -247,7 +247,7 @@ class RoomLongTermMemory(TypedDict):
 
 观众产品状态按“模式 > PersonaTemplate 引用与覆盖 > SessionAudience > ViewerInstance > 成长梗库”分层。现有 32 个基础人格继续作为首版内置模板库；同时 active Viewer 上限为 32，同一 Session 内已创建 Viewer 另有有界上限。同一 PersonaTemplate 可以赋予多个实例。
 
-模式保存 `target_concurrent_viewers`、`persona_weights`、模式内人格覆盖、普通/高光响应人数范围和 ambient 行为。目标在线人数范围为 1 到 32；Persona 权重只在创建新 Viewer 时决定 assignment。Mode 热更新保留 ViewerIdentity，不按 Persona 席位重建身份。状态中只能存在一个 `active_mode_id`，不能把多个模式合并为同一运行快照。
+模式保存 `persona_counts`、模式内人格覆盖、普通/高光响应人数范围和 ambient 行为。每个数值就是该人格应有的 Viewer 数，`0` 表示不参与；模式总人数由这些数值相加得出，必须在 1 到 32 之间。新 Session 和显式热更新都按该构成精确建池或重平衡，优先保留仍在配额内的 ViewerIdentity。状态中只能存在一个 `active_mode_id`，不能把多个模式合并为同一运行快照。
 
 运行时人格按“当前版本内置模板 -> 当前模式覆盖”解析。覆盖不能反写基础模板，也不能影响其他模式。内置模式保留可恢复基线，用户既可以直接调整后重置，也可以复制为新的自定义模式继续编辑。
 
@@ -494,7 +494,7 @@ Room 长期记忆只保存从公开房间事件中提炼的必要事实、共同
 
 - 领域单元测试：ObservationWave 合并与冻结、会话/epoch 失效、TTL、latest-wins、去重和调度。
 - Viewer 状态测试：确定性池分配、稳定实例 ID、微变体、点名路由、短期状态协调和模式切换。
-- 模式合同测试：六个内置模式、1 到 32 个 Viewer 上限、权重分配、单一激活、覆盖隔离、复制和 `personality.md` 版本校验。
+- 模式合同测试：六个内置模式、1 到 32 个 Viewer 上限、精确人格人数、单一激活、覆盖隔离、复制和 `personality.md` 版本校验。
 - Shared Brain 测试：下一波共享可见、跨 Session/模式 Room 记忆、证据约束、异步提取和删除生效。
 - 成长梗库测试：来源归一化、当前模式隔离、自动入库撤销、持久恢复、衰减归档，以及 `MemeCandidate` 不能直接成为弹幕。
 - Provider 合同测试：角色模型探测、独立 Viewer 请求、沉默、非法输出、超时、取消、限流、一次重试和断流。

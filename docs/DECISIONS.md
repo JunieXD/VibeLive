@@ -276,15 +276,15 @@
 
 - 状态：`Accepted`
 - 日期：2026-07-24
-- 决定：使用固定 CS2/CSGO 片段、脚本化 final 语音和文字验证普通跑图、高光、失误、点名、6657 权重热更新、共享记忆和模式梗，再补真实游戏 smoke。
+- 决定：使用固定 CS2/CSGO 片段、脚本化 final 语音和文字验证普通跑图、高光、失误、点名、6657 指定人格人数热更新、共享记忆和模式梗，再补真实游戏 smoke。
 - 影响：真实模型按身份、证据、反应类别和状态变化验收，不比较固定弹幕文本。
 
 ### D-040：Session Viewer 生命周期与逐 Viewer 行为决策
 
 - 状态：`Accepted`
 - 日期：2026-07-24
-- 决定：PersonaTemplate 是持久化行为模板，ViewerInstance 是仅属于单次 Session 的独立观众，拥有与 Persona 无关的用户名和头像种子。Mode 使用 `target_concurrent_viewers` 表示目标同时在线人数，Persona 权重只在创建 Viewer 时决定 assignment。Director 只输出 `SceneAssessment`；每个 active 且未禁言 Viewer 使用本地可解释概率和稳定抽样独立决定是否发言，最终候选再各自调用一次模型。
-- 影响：Viewer 可以加入、离开、同场重返、限时禁言、解除禁言和被踢；被踢后本场不可重返并可由新 Viewer 补位。Mode 热更新保留 ViewerIdentity。最终提交同时校验 epoch、sequence、presence/moderation/behavior revisions。正常关播清空当前 audience 和私有状态，新直播创建全新 Viewer；异常重启恢复同一未终止 Session 的 Viewer。
+- 决定：PersonaTemplate 是持久化行为模板，ViewerInstance 是仅属于单次 Session 的独立观众，拥有与 Persona 无关的用户名和头像种子。Mode 使用 `persona_counts` 直接设置每种人格的 Viewer 数，`0` 表示不参与，合计必须为 1 到 32；总在线目标由该合计派生。Director 只输出 `SceneAssessment`；每个 active 且未禁言 Viewer 使用本地可解释概率和稳定抽样独立决定是否发言，最终候选再各自调用一次模型。
+- 影响：Viewer 可以加入、离开、同场重返、限时禁言、解除禁言和被踢；被踢后本场不可重返并由所缺人格的新 Viewer 补位。显式 Mode 热更新按新人数精确重平衡，并优先保留仍在配额内的 ViewerIdentity。最终提交同时校验 epoch、sequence、presence/moderation/behavior revisions。正常关播清空当前 audience 和私有状态，新直播创建全新 Viewer；异常重启恢复同一未终止 Session 的 Viewer。
 
 ### D-041：麦克风与 Windows 系统声音使用独立 ASR 通道
 

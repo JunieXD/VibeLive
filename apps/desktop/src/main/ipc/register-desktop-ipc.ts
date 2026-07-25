@@ -479,7 +479,9 @@ async function materializePersonaDocuments(workspace: AudienceWorkspaceState): P
   try {
     await Promise.all(
       workspace.modeState.modes.flatMap((mode) =>
-        mode.personaIds.map(async (personaId) => {
+        Object.entries(mode.personaCounts)
+          .filter(([, count]) => count > 0)
+          .map(async ([personaId]) => {
           const directory = resolve(staging, mode.id, "personas", personaId);
           const relativeDirectory = relative(staging, directory);
           if (

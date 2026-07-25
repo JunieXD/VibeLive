@@ -1,5 +1,5 @@
 {
-  "artifact_version": 3,
+  "artifact_version": 4,
   "call_identity": {
     "generation_request_ids": [
       "fake-viewer-call-1",
@@ -186,7 +186,7 @@
       {
         "display_name": "夜航观测员59",
         "generation_request_id": "fake-viewer-call-26",
-        "persona_id": "reaction_qmark",
+        "persona_id": "instigator",
         "viewer_instance_id": "viewer-cccc9eb9e69b2e183dcb7c69"
       },
       {
@@ -360,7 +360,7 @@
       },
       {
         "display_name": "夜航观测员59",
-        "persona_id": "reaction_qmark",
+        "persona_id": "instigator",
         "viewer_instance_id": "viewer-cccc9eb9e69b2e183dcb7c69"
       },
       {
@@ -408,8 +408,8 @@
     "unique_generation_request_ids": 28
   },
   "canonical_hash": {
-    "backend": "6b88e2d24e6c7dae88e7e583fe26978fe051bb887036f1aabd6c3df6c218164a",
-    "fixture": "6b88e2d24e6c7dae88e7e583fe26978fe051bb887036f1aabd6c3df6c218164a",
+    "backend": "76c292ae0669dbc256e78f74c10d37a823d3ac56620cfb7b90ecc4f823359106",
+    "fixture": "76c292ae0669dbc256e78f74c10d37a823d3ac56620cfb7b90ecc4f823359106",
     "matches": true
   },
   "claims": {
@@ -417,25 +417,25 @@
     "canonical_hash_matches_backend": true,
     "desktop_room_6657_primary_personas_are_real_preset": true,
     "hot_update_reconciliation_is_exact": true,
-    "initial_hamilton_allocation_is_exact": true,
+    "initial_persona_counts_are_exact": true,
     "one_independent_call_per_selected_viewer": true,
     "selected_and_request_identity_match": true,
-    "updated_hamilton_allocation_is_exact": true
+    "updated_persona_counts_are_exact": true
   },
   "desktop_source": {
     "active_mode_id": "room-6657",
     "compiler": "apps/desktop/src/shared/backend-client.ts#compileCanonicalRuntimeSpec",
-    "initial_persona_weights": {
+    "initial_persona_counts": {
       "abstract_radio": 3,
       "cheat_suspector": 1,
       "clip_alarm": 1,
       "fun_seeker": 3,
-      "grudge_keeper": 3,
+      "grudge_keeper": 2,
       "hardmouth_antifan": 3,
       "instigator": 3,
-      "jinx_machine": 3,
+      "jinx_machine": 2,
       "meme_archivist": 3,
-      "parrot_unit": 3,
+      "parrot_unit": 2,
       "praise_then_bite": 1,
       "reaction_qmark": 3,
       "room_historian": 1
@@ -476,7 +476,7 @@
     ],
     "workspace_factory": "apps/desktop/src/shared/audience/workspace.ts#createInitialAudienceWorkspace"
   },
-  "fixture_bundle_id": "cs2-6657-desktop-preset-recorded-v2",
+  "fixture_bundle_id": "cs2-6657-desktop-preset-recorded-v3",
   "hot_update": {
     "added_viewer_ids": [],
     "initial_counts": {
@@ -665,7 +665,9 @@
       }
     ],
     "removed_viewer_ids": [],
-    "reset_viewer_ids": [],
+    "reset_viewer_ids": [
+      "viewer-cccc9eb9e69b2e183dcb7c69"
+    ],
     "retained_viewer_ids": [
       "viewer-282ddb069859faacd59dea99",
       "viewer-ab12b783d4682b9bb4be015f",
@@ -692,7 +694,6 @@
       "viewer-0ea52f0190ce2ffca31caed5",
       "viewer-47fa72a6d7d285208c186a14",
       "viewer-6ab3429266f04d472caf3f0d",
-      "viewer-cccc9eb9e69b2e183dcb7c69",
       "viewer-f2967b956115183e0dc715ae",
       "viewer-c264a3089340eb83a541be78"
     ],
@@ -703,12 +704,12 @@
       "fun_seeker": 3,
       "grudge_keeper": 2,
       "hardmouth_antifan": 3,
-      "instigator": 3,
+      "instigator": 4,
       "jinx_machine": 2,
       "meme_archivist": 3,
       "parrot_unit": 2,
       "praise_then_bite": 1,
-      "reaction_qmark": 3,
+      "reaction_qmark": 2,
       "room_historian": 1
     },
     "updated_pool": [
@@ -865,7 +866,7 @@
       {
         "display_name": "夜航观测员59",
         "ordinal": 26,
-        "persona_id": "reaction_qmark",
+        "persona_id": "instigator",
         "viewer_instance_id": "viewer-cccc9eb9e69b2e183dcb7c69"
       },
       {

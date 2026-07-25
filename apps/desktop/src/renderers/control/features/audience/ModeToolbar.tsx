@@ -1,5 +1,9 @@
 import { Copy, RotateCcw, SlidersHorizontal, Trash2 } from 'lucide-react'
-import type { AudienceMode, AudienceWorkspaceState } from '../../../../shared/audience'
+import {
+  totalViewerCount,
+  type AudienceMode,
+  type AudienceWorkspaceState
+} from '../../../../shared/audience'
 import { SelectDropdown } from '../../components/SelectDropdown'
 import { IconButton } from './IconButton'
 import { Popover } from './Popover'
@@ -62,6 +66,7 @@ export function ModeToolbar({
   onDeleteMode
 }: ModeToolbarProps): React.JSX.Element {
   const windowBatch = activeMode.visualSettings.barrageGenerationMode === 'window_batch'
+  const viewerCount = totalViewerCount(activeMode)
   return (
     <header className={cx('aw-mode-toolbar')}>
       <div className={cx('aw-mode-main')}>
@@ -102,8 +107,8 @@ export function ModeToolbar({
         </div>
       </div>
       <div className={cx('aw-mode-controls')}>
-        <span className={cx('aw-mode-summary')} title="目标人数 · 普通响应 · 高光响应">
-          目标 {activeMode.targetConcurrentViewers} · 普通 {activeMode.normalResponseRange[0]}–
+        <span className={cx('aw-mode-summary')} title="在线人数 · 普通响应 · 高光响应">
+          在线 {viewerCount} · 普通 {activeMode.normalResponseRange[0]}–
           {activeMode.normalResponseRange[1]} · 高光 {activeMode.highlightResponseRange[0]}–
           {activeMode.highlightResponseRange[1]}
         </span>
@@ -118,39 +123,13 @@ export function ModeToolbar({
         >
           <div className={cx('aw-popover-section')}>
             <h4>响应规模</h4>
-            <label>
-              <span>目标在线</span>
-              <input
-                type="number"
-                min={1}
-                max={32}
-                value={activeMode.targetConcurrentViewers}
-                onChange={(event) => {
-                  const targetConcurrentViewers = Math.max(
-                    1,
-                    clampActivityValue(event.target.value)
-                  )
-                  onPatchMode({
-                    targetConcurrentViewers,
-                    normalResponseRange: [
-                      Math.min(activeMode.normalResponseRange[0], targetConcurrentViewers),
-                      Math.min(activeMode.normalResponseRange[1], targetConcurrentViewers)
-                    ],
-                    highlightResponseRange: [
-                      Math.min(activeMode.highlightResponseRange[0], targetConcurrentViewers),
-                      Math.min(activeMode.highlightResponseRange[1], targetConcurrentViewers)
-                    ]
-                  })
-                }}
-              />
-            </label>
             <label data-audience-range>
               <span>普通响应</span>
               <div className={cx('aw-range-pair')}>
                 <input
                   type="number"
                   min={0}
-                  max={activeMode.targetConcurrentViewers}
+                  max={viewerCount}
                   value={activeMode.normalResponseRange[0]}
                   onChange={(event) =>
                     onPatchMode({
@@ -158,7 +137,7 @@ export function ModeToolbar({
                         Math.min(
                           clampActivityValue(
                             event.target.value,
-                            activeMode.targetConcurrentViewers
+                            viewerCount
                           ),
                           activeMode.normalResponseRange[1]
                         ),
@@ -171,7 +150,7 @@ export function ModeToolbar({
                 <input
                   type="number"
                   min={0}
-                  max={activeMode.targetConcurrentViewers}
+                  max={viewerCount}
                   value={activeMode.normalResponseRange[1]}
                   onChange={(event) =>
                     onPatchMode({
@@ -180,7 +159,7 @@ export function ModeToolbar({
                         Math.max(
                           clampActivityValue(
                             event.target.value,
-                            activeMode.targetConcurrentViewers
+                            viewerCount
                           ),
                           activeMode.normalResponseRange[0]
                         )
@@ -196,7 +175,7 @@ export function ModeToolbar({
                 <input
                   type="number"
                   min={0}
-                  max={activeMode.targetConcurrentViewers}
+                  max={viewerCount}
                   value={activeMode.highlightResponseRange[0]}
                   onChange={(event) =>
                     onPatchMode({
@@ -204,7 +183,7 @@ export function ModeToolbar({
                         Math.min(
                           clampActivityValue(
                             event.target.value,
-                            activeMode.targetConcurrentViewers
+                            viewerCount
                           ),
                           activeMode.highlightResponseRange[1]
                         ),
@@ -217,7 +196,7 @@ export function ModeToolbar({
                 <input
                   type="number"
                   min={0}
-                  max={activeMode.targetConcurrentViewers}
+                  max={viewerCount}
                   value={activeMode.highlightResponseRange[1]}
                   onChange={(event) =>
                     onPatchMode({
@@ -226,7 +205,7 @@ export function ModeToolbar({
                         Math.max(
                           clampActivityValue(
                             event.target.value,
-                            activeMode.targetConcurrentViewers
+                            viewerCount
                           ),
                           activeMode.highlightResponseRange[0]
                         )

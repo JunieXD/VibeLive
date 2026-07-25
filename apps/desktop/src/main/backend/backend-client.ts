@@ -345,7 +345,7 @@ export class BackendClient {
       {
         apply_id: applyId,
         base_revision: baseRevision,
-        audience_contract_version: 2,
+        audience_contract_version: 3,
         canonical_runtime_spec: compiled.spec,
         client_config_hash: compiled.configHash,
         provider_candidate: providerChanged ? providerCandidate : undefined
@@ -384,7 +384,7 @@ export class BackendClient {
         apply_id: applyId,
         base_revision: baseRevision,
         target_revision: targetRevision,
-        audience_contract_version: 2,
+        audience_contract_version: 3,
         provider_candidate:
           providerChanged && providerCandidateMatchesTarget ? providerCandidate : undefined
       },

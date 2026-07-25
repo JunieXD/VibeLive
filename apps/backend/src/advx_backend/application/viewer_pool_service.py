@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import math
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -39,7 +38,7 @@ class ViewerPoolReconciliation(ViewerPoolModel):
 
 
 class ViewerPoolService:
-    """Compile a deterministic, weighted Viewer pool for one logical Session."""
+    """Compile a deterministic Viewer pool with exact per-Persona counts."""
 
     def __init__(self, *, id_generator: IdGenerator) -> None:
         self._id_generator = id_generator
@@ -76,10 +75,10 @@ class ViewerPoolService:
 
         mode = self._active_mode(spec)
         personas = {persona.persona_id: persona for persona in spec.personas}
-        allocations = self._allocate(mode, personas)
+        counts = self._counts(mode, personas)
         persona_slots = self._persona_slots(
             mode=mode,
-            allocations=allocations,
+            counts=counts,
             session_seed=session_seed,
         )
         viewers: list[ViewerInstance] = []
@@ -151,13 +150,34 @@ class ViewerPoolService:
             for persona in spec.personas
             if persona.enabled
         }
-        target_count = self._active_mode(spec).target_concurrent_viewers
-        retained_active_ids = [
-            viewer.viewer_instance_id
+        mode = self._active_mode(spec)
+        desired_counts = self._counts(mode, next_personas)
+        target_count = sum(desired_counts.values())
+        active_viewers = [
+            viewer
             for viewer in sorted(current.viewers, key=lambda item: item.ordinal)
             if viewer.is_active()
-        ][:target_count]
-        retained_active_ids = set(retained_active_ids)
+        ]
+        remaining_counts = dict(desired_counts)
+        retained_active_ids: set[str] = set()
+        for viewer in active_viewers:
+            if remaining_counts.get(viewer.persona_id, 0) <= 0:
+                continue
+            retained_active_ids.add(viewer.viewer_instance_id)
+            remaining_counts[viewer.persona_id] -= 1
+
+        reassignment_slots = self._persona_slots(
+            mode=mode,
+            counts=remaining_counts,
+            session_seed=f"{current.session_seed}\0reconcile\0{next_epoch}",
+        )
+        reassignment_ids = [
+            viewer.viewer_instance_id
+            for viewer in active_viewers
+            if viewer.viewer_instance_id not in retained_active_ids
+        ]
+        assignments = dict(zip(reassignment_ids, reassignment_slots, strict=False))
+        removed_active_ids = set(reassignment_ids[len(reassignment_slots) :])
 
         reconciled: list[ViewerInstance] = []
         retained: list[str] = []
@@ -165,43 +185,27 @@ class ViewerPoolService:
         added: list[str] = []
         removed: list[str] = []
         for previous in sorted(current.viewers, key=lambda item: item.ordinal):
-            if (
-                previous.is_active()
-                and previous.viewer_instance_id not in retained_active_ids
-            ):
+            if previous.viewer_instance_id in removed_active_ids:
                 removed.append(previous.viewer_instance_id)
                 continue
 
-            next_persona = next_personas.get(previous.persona_id)
+            assigned_persona_id = assignments.get(previous.viewer_instance_id)
+            next_persona = next_personas.get(assigned_persona_id or previous.persona_id)
             if next_persona is None:
-                assignment = target.viewers[
-                    (previous.ordinal - 1) % len(target.viewers)
-                ]
-                next_persona = next_personas[assignment.persona_id]
-                viewer = previous.model_copy(
-                    update={
-                        "audience_epoch": next_epoch,
-                        "persona_id": next_persona.persona_id,
-                        "persona_revision": next_persona.revision,
-                        "persona_content_hash": next_persona.content_hash,
-                        "variant": assignment.variant,
-                        "private_state": ViewerPrivateState(),
-                        "behavior_revision": previous.behavior_revision + 1,
-                    }
-                )
+                viewer = previous.model_copy(update={"audience_epoch": next_epoch})
                 reconciled.append(viewer)
-                reset.append(viewer.viewer_instance_id)
+                retained.append(viewer.viewer_instance_id)
                 continue
-            unchanged = previous_signatures.get(previous.persona_id) == next_signatures.get(
-                previous.persona_id
-            )
-            private_state = (
-                previous.private_state if unchanged else ViewerPrivateState()
+            persona_changed = next_persona.persona_id != previous.persona_id
+            unchanged = (
+                not persona_changed
+                and previous_signatures.get(previous.persona_id)
+                == next_signatures.get(previous.persona_id)
             )
             viewer = previous.model_copy(
                 update={
                     "audience_epoch": next_epoch,
-                    "persona_id": previous.persona_id,
+                    "persona_id": next_persona.persona_id,
                     "persona_revision": next_persona.revision,
                     "persona_content_hash": next_persona.content_hash,
                     "variant": previous.variant.model_copy(
@@ -213,7 +217,7 @@ class ViewerPoolService:
                             )
                         }
                     ),
-                    "private_state": private_state,
+                    "private_state": previous.private_state if unchanged else ViewerPrivateState(),
                     "behavior_revision": (
                         previous.behavior_revision
                         if unchanged
@@ -279,14 +283,32 @@ class ViewerPoolService:
         if ordinal > 128:
             raise ValueError("Session Viewer creation limit reached")
         mode = self._active_mode(spec)
-        personas = {persona.persona_id: persona for persona in spec.personas}
-        allocations = self._allocate(mode, personas)
+        personas = {
+            persona.persona_id: persona
+            for persona in spec.personas
+            if persona.enabled
+        }
+        desired_counts = self._counts(mode, personas)
+        active_counts = {
+            persona_id: sum(
+                viewer.is_active() and viewer.persona_id == persona_id
+                for viewer in current.viewers
+            )
+            for persona_id in desired_counts
+        }
+        deficits = {
+            persona_id: count - active_counts[persona_id]
+            for persona_id, count in desired_counts.items()
+            if count > active_counts[persona_id]
+        }
+        if not deficits:
+            raise ValueError("No persona slot is available for a replacement Viewer")
         slots = self._persona_slots(
             mode=mode,
-            allocations=allocations,
+            counts=deficits,
             session_seed=f"{current.session_seed}\0replacement\0{ordinal}",
         )
-        persona = personas[slots[(ordinal - 1) % len(slots)]]
+        persona = personas[slots[0]]
         return self._new_viewer(
             room_id=current.room_id,
             session_id=current.session_id,
@@ -302,55 +324,33 @@ class ViewerPoolService:
         return next(mode for mode in spec.modes if mode.mode_id == spec.active_mode_id)
 
     @staticmethod
-    def _allocate(
+    def _counts(
         mode: ModeDefinition,
         personas: Mapping[str, PersonaTemplate],
     ) -> dict[str, int]:
-        eligible = [
-            persona_id
-            for persona_id in mode.persona_ids
-            if (persona := personas.get(persona_id)) is not None
-            and persona.enabled
-            and mode.persona_weights.get(persona_id, 0) > 0
-        ]
-        if not eligible:
-            raise ValueError("Mode does not contain an enabled positive-weight Persona")
-
-        total_weight = sum(mode.persona_weights[persona_id] for persona_id in eligible)
-        quotas = {
-            persona_id: mode.target_concurrent_viewers
-            * mode.persona_weights[persona_id]
-            / total_weight
-            for persona_id in eligible
-        }
-        allocations = {
-            persona_id: math.floor(quota) for persona_id, quota in quotas.items()
-        }
-        remaining = mode.target_concurrent_viewers - sum(allocations.values())
-        order = {persona_id: index for index, persona_id in enumerate(mode.persona_ids)}
-        ranked = sorted(
-            eligible,
-            key=lambda persona_id: (
-                -(quotas[persona_id] - allocations[persona_id]),
-                order[persona_id],
-                persona_id,
-            ),
-        )
-        for persona_id in ranked[:remaining]:
-            allocations[persona_id] += 1
-        return allocations
+        counts: dict[str, int] = {}
+        for persona_id, count in mode.persona_counts.items():
+            if count == 0:
+                continue
+            persona = personas.get(persona_id)
+            if persona is None or not persona.enabled:
+                raise ValueError("Mode contains an unavailable Persona with a positive count")
+            counts[persona_id] = count
+        if not counts:
+            raise ValueError("Mode does not contain an enabled Persona with a positive count")
+        return counts
 
     @staticmethod
     def _persona_slots(
         *,
         mode: ModeDefinition,
-        allocations: Mapping[str, int],
+        counts: Mapping[str, int],
         session_seed: str,
     ) -> list[str]:
         slots = [
             (persona_id, ordinal)
-            for persona_id in mode.persona_ids
-            for ordinal in range(1, allocations.get(persona_id, 0) + 1)
+            for persona_id, count in counts.items()
+            for ordinal in range(1, count + 1)
         ]
         slots.sort(
             key=lambda item: (

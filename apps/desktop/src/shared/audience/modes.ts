@@ -47,8 +47,7 @@ export function duplicateModeAsCustom(
     revision: 1,
     name: customName.trim(),
     builtIn: false,
-    personaIds: [...source.personaIds],
-    personaWeights: { ...source.personaWeights },
+    personaCounts: { ...source.personaCounts },
     personaOverrides: Object.fromEntries(
       Object.entries(source.personaOverrides).map(([id, override]) => [
         id,
@@ -76,10 +75,11 @@ export function canonicalModeContent(mode: AudienceMode): string {
     name: mode.name,
     description: mode.description,
     built_in: mode.builtIn,
-    target_concurrent_viewers: mode.targetConcurrentViewers,
-    persona_ids: [...mode.personaIds],
-    persona_weights: Object.fromEntries(
-      mode.personaIds.map((personaId) => [personaId, mode.personaWeights[personaId]])
+    persona_counts: Object.fromEntries(
+      Object.keys(mode.personaCounts).sort().map((personaId) => [
+        personaId,
+        mode.personaCounts[personaId]
+      ])
     ),
     persona_overrides: Object.fromEntries(
       Object.keys(mode.personaOverrides).sort().map((personaId) => [
@@ -129,8 +129,7 @@ function canonicalOverride(override: PersonaOverride): PersonaOverride {
 function normalizeModeAliases(mode: AudienceMode): AudienceMode {
   return {
     ...mode,
-    personaIds: [...mode.personaIds],
-    personaWeights: { ...mode.personaWeights },
+    personaCounts: { ...mode.personaCounts },
     personaOverrides: { ...mode.personaOverrides },
     normalResponseRange: [...mode.normalResponseRange],
     highlightResponseRange: [...mode.highlightResponseRange],

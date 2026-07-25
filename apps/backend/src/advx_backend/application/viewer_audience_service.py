@@ -284,22 +284,43 @@ class ViewerAudienceService:
             item for item in state.spec.modes if item.mode_id == state.spec.active_mode_id
         )
         active = [viewer for viewer in state.pool.viewers if viewer.is_active()]
-        deficit = mode.target_concurrent_viewers - len(active)
+        desired_counts = {
+            persona_id: count
+            for persona_id, count in mode.persona_counts.items()
+            if count > 0
+        }
+        active_counts = {
+            persona_id: sum(viewer.persona_id == persona_id for viewer in active)
+            for persona_id in desired_counts
+        }
+        deficit = mode.viewer_count - len(active)
         if deficit > 0:
             rejoinable = sorted(
                 (
                     viewer
                     for viewer in state.pool.viewers
                     if viewer.lifecycle_state is ViewerLifecycleState.LEFT
+                    and active_counts.get(viewer.persona_id, 0)
+                    < desired_counts.get(viewer.persona_id, 0)
                 ),
                 key=lambda viewer: (viewer.last_left_at_ms or 0, viewer.ordinal),
             )
-            for previous in rejoinable[:deficit]:
+            rejoined = 0
+            for previous in rejoinable:
+                if rejoined >= deficit:
+                    break
+                if active_counts.get(previous.persona_id, 0) >= desired_counts.get(
+                    previous.persona_id,
+                    0,
+                ):
+                    continue
                 viewer = await self._rejoin(previous)
                 await self._publish("viewer.rejoined", viewer)
+                active_counts[viewer.persona_id] = active_counts.get(viewer.persona_id, 0) + 1
+                rejoined += 1
             state = await self._runtime_state.snapshot(session_id)
             active_count = sum(viewer.is_active() for viewer in state.pool.viewers)
-            while active_count < mode.target_concurrent_viewers:
+            while active_count < mode.viewer_count:
                 viewer = self._viewer_pool.create_replacement(
                     current=state.pool,
                     spec=state.spec,

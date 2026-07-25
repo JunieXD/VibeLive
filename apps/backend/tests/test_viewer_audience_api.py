@@ -41,9 +41,7 @@ def spec() -> CanonicalRuntimeSpec:
         mode_id="default",
         namespace_id="default",
         revision=1,
-        target_concurrent_viewers=2,
-        persona_ids=[persona.persona_id],
-        persona_weights={persona.persona_id: 1},
+        persona_counts={persona.persona_id: 2},
         normal_response_range=ResponseRange(minimum=0, maximum=1),
         highlight_response_range=ResponseRange(minimum=0, maximum=2),
     )
@@ -142,9 +140,7 @@ def test_moderation_and_new_session_identity(tmp_path) -> None:
             mode_id="expanded",
             namespace_id="expanded",
             revision=2,
-            target_concurrent_viewers=3,
-            persona_ids=[canonical.personas[0].persona_id],
-            persona_weights={canonical.personas[0].persona_id: 1},
+            persona_counts={canonical.personas[0].persona_id: 3},
             normal_response_range=ResponseRange(minimum=0, maximum=2),
             highlight_response_range=ResponseRange(minimum=0, maximum=3),
         )

@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from advx_backend.contracts.protocol import PROTOCOL_VERSION_HEADER
+from advx_backend.contracts.viewer_runtime import CanonicalRuntimeSpec
 
 LOCAL_TOKEN = "test-local-token"
 
@@ -33,7 +34,7 @@ def persona(persona_id: str, *, revision: int = 1) -> dict[str, object]:
 def runtime_spec(*, revision: int = 1, persona_revision: int = 1) -> dict[str, object]:
     return {
         "protocol_version": 3,
-        "audience_contract_version": 2,
+        "audience_contract_version": 3,
         "config_revision": revision,
         "room": {
             "room_id": "room-1",
@@ -49,9 +50,7 @@ def runtime_spec(*, revision: int = 1, persona_revision: int = 1) -> dict[str, o
                 "mode_id": "mode-1",
                 "namespace_id": "mode-1",
                 "revision": revision,
-                "target_concurrent_viewers": 1,
-                "persona_ids": ["persona-1"],
-                "persona_weights": {"persona-1": 1},
+                "persona_counts": {"persona-1": 1},
                 "persona_overrides": {},
                 "normal_response_range": {"minimum": 0, "maximum": 1},
                 "highlight_response_range": {"minimum": 0, "maximum": 1},
@@ -239,7 +238,7 @@ def test_runtime_current_apply_and_rollback_are_explicit_session_operations() ->
     apply_request = {
         "apply_id": "apply-2",
         "base_revision": 1,
-        "audience_contract_version": 2,
+        "audience_contract_version": 3,
         "canonical_runtime_spec": next_spec,
         "client_config_hash": start_body(spec=next_spec)["client_config_hash"],
     }
@@ -259,7 +258,7 @@ def test_runtime_current_apply_and_rollback_are_explicit_session_operations() ->
                 "apply_id": "rollback-1",
                 "base_revision": 2,
                 "target_revision": 1,
-                "audience_contract_version": 2,
+                "audience_contract_version": 3,
             },
         )
 
@@ -287,7 +286,7 @@ def test_failed_apply_preserves_previous_committed_runtime() -> None:
             json={
                 "apply_id": "apply-2",
                 "base_revision": 1,
-                "audience_contract_version": 2,
+                "audience_contract_version": 3,
                 "canonical_runtime_spec": next_spec,
                 "client_config_hash": start_body(spec=next_spec)["client_config_hash"],
             },
@@ -298,6 +297,31 @@ def test_failed_apply_preserves_previous_committed_runtime() -> None:
     assert rejected.json()["detail"]["code"] == "runtime_apply_rejected"
     assert current.json()["config_revision"] == 1
     assert current.json()["audience_epoch"] == 1
+
+
+def test_runtime_apply_rejects_a_legacy_inner_audience_contract() -> None:
+    service = FakeRuntimeSessionService()
+    started = start_body()
+    legacy_spec = runtime_spec(revision=2)
+    legacy_spec["audience_contract_version"] = 2
+    canonical = CanonicalRuntimeSpec.model_validate(legacy_spec)
+
+    with TestClient(app_with(service)) as client:
+        client.post("/runtime/sessions", headers=headers(), json=started)
+        rejected = client.post(
+            "/runtime/sessions/session-1/apply",
+            headers=headers(),
+            json={
+                "apply_id": "apply-legacy",
+                "base_revision": 1,
+                "audience_contract_version": 3,
+                "canonical_runtime_spec": canonical.model_dump(mode="json"),
+                "client_config_hash": canonical.config_hash(),
+            },
+        )
+
+    assert rejected.status_code == 422
+    assert "current audience contract version" in rejected.text
 
 
 def test_explicit_recovery_keeps_session_id_and_advances_epoch() -> None:

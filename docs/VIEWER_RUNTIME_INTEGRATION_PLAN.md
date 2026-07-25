@@ -92,7 +92,7 @@ ModeDefinition 决定：
 
 - 当前 Room 中本次 Session 建立多少 Viewer。
 - 使用哪些 PersonaTemplate。
-- PersonaTemplate 的相对权重。
+- 每个 PersonaTemplate 对应的准确 Viewer 人数，`0` 表示不参与。
 - 模式内人格覆盖。
 - 普通与高光事件的响应人数范围。
 - ambient 行为。
@@ -134,8 +134,7 @@ ModeMeme 是模式内的可复用梗，不等于 Room 记忆。
 ModeDefinition 使用：
 
 ```text
-viewer_count: 1..32
-persona_weights
+persona_counts: { persona_id: 0..32 }
 normal_response_range
 highlight_response_range
 ```
@@ -144,7 +143,7 @@ highlight_response_range
 
 | 概念 | 含义 |
 | --- | --- |
-| `viewer_count` | 当前 Session 中存在多少 AI 观众 |
+| `sum(persona_counts)` | 当前 Session 中存在多少 AI 观众 |
 | response range | 一次 ObservationWave 建议选择多少 Viewer |
 | `max_in_flight` | 同时进行多少个 Provider 网络请求 |
 
@@ -211,10 +210,10 @@ client_config_hash
 
 ### 5.3 Viewer 状态协调
 
-- Persona、覆盖和 slot 都未变化：保留 Viewer ID、短期状态和冷却。
-- Persona 或模式覆盖发生变化：保留仍存在的 Viewer ID，但清空其短期私有状态并加载新 persona revision。
-- 权重或 viewer count 移除实例：取消任务并销毁状态，ID 在当前 Session 不复用。
-- 新增实例：创建新 ID、确定性别名、微变体和空状态。
+- Persona、覆盖和配额都未变化：保留 Viewer ID、短期状态和冷却。
+- Persona 或模式覆盖发生变化：保留仍在对应配额内的 Viewer ID，但清空其短期私有状态并加载新 persona revision。
+- 人数调整造成某人格超额时，优先把超额实例重置并分配到缺额人格；总人数缩小时才移除没有新席位的实例，ID 在当前 Session 不复用。
+- 新增配额：创建新 ID、确定性别名、微变体和空状态。
 - 切换整个模式：重建 Viewer 池并清空 ViewerPrivateState。
 - RoomWorkingMemory 和 RoomLongTermMemory 不因模式切换清空。
 
@@ -263,15 +262,13 @@ enabled
 
 ## 7. ModeDefinition 和 Viewer 池
 
-### 7.1 ModeDefinition v2
+### 7.1 ModeDefinition v3
 
 ```text
 mode_id
 namespace_id
 revision
-viewer_count
-persona_ids
-persona_weights
+persona_counts
 persona_overrides
 normal_response_range
 highlight_response_range
@@ -280,13 +277,13 @@ ambience
 
 约束：
 
-- `viewer_count` 为 1 到 32。
-- response range 最大值不能超过 `viewer_count`。
+- `persona_counts` 中每个值为 0 到 32，合计为 1 到 32。
+- response range 最大值不能超过 `persona_counts` 的合计。
 - 0 个响应始终合法。
-- 至少一个启用 Persona 的权重大于 0。
-- `persona_weights` 只影响 Viewer 池构成，不在 Director 中再次加权。
+- 至少一个启用 Persona 的人数大于 0。
+- 每个正人数直接决定 Viewer 池中的实例数，不存在第二套权重或比例模式。
 
-### 7.2 Workspace v1 到 v2
+### 7.2 Workspace 迁移
 
 一次性迁移：
 
@@ -307,18 +304,16 @@ highlight_response_range = old_burst_limit
 | 竞技嘴硬局 | 24 |
 | 纯乐子冷场包 | 14 |
 
-迁移后 `viewer_count` 不再自动跟随 response range。
+迁移后，旧 workspace 的 `targetConcurrentViewers`、`personaIds` 和 `personaWeights` 使用既有最大余数法一次性换算为 `personaCounts`；保存后的 v4 workspace 只保留精确人数。总人数不再自动跟随 response range。
 
-### 7.3 Hamilton（最大余数法）确定性加权分配
+### 7.3 精确人数建池
 
-1. 过滤未知、禁用或权重不大于 0 的 Persona。
-2. 计算 `viewer_count * weight / total_weight`。
-3. 先分配整数部分。
-4. 剩余 slot 按小数余数从大到小分配。
-5. 余数相同按 Mode 中的 Persona 顺序，再按 `persona_id`。
-6. 每个 Persona 内按 ordinal 创建 Viewer。
+1. 校验每个 `persona_counts` 值为整数 0 到 32，合计为 1 到 32。
+2. 忽略人数为 0 的 Persona，并拒绝引用未知或禁用 Persona 的正人数。
+3. 为每个剩余 Persona 创建恰好等于其人数的 ViewerInstance。
+4. 稳定排序只用于实例 ordinal、别名和微变体，不改变各 Persona 的人数。
 
-UI 保存权重，实时显示编译后的准确实例数量，不保存第二套 exact count。
+UI 直接保存人数并显示合计，不保存权重、比例或独立目标人数。
 
 ### 7.4 Viewer 微变体
 
@@ -480,7 +475,7 @@ expires_at
 
 - 每个 selected ViewerInstance 创建一个独立逻辑 Provider 请求。
 - 不把多个人格或多个实例合并为一个 prompt。
-- `persona_weights` 已在池分配时生效，不在调用阶段二次放大。
+- `persona_counts` 已在池分配时精确生效，不在调用阶段二次放大。
 - shared summary 只复用视觉理解，不合并 Viewer 请求。
 
 ### 10.2 请求内容
@@ -850,9 +845,8 @@ expires_at
 
 ### 17.1 Mode 编辑
 
-- viewer count 1 到 32。
-- Persona 权重编辑。
-- 编译后实例数实时预览。
+- 每种 Persona 的人数可编辑为 0 到 32。
+- 各 Persona 人数合计为 1 到 32，并实时显示。
 - normal/highlight response range。
 - ambient 类型。
 - 视觉模式和 FrameBundle 参数。
@@ -1014,7 +1008,7 @@ expires_at
 3. 明显失误。
 4. 用户 final 语音点名 Viewer。
 5. 用户文字回应。
-6. 6657 热更新串子权重。
+6. 6657 热更新指定人格人数。
 7. RoomLongTermMemory 跨 Session 恢复。
 8. MemeCandidate、自动入库、撤销和 backend restart。
 
@@ -1046,7 +1040,7 @@ uv run --project apps/backend ruff check apps/backend
 - 结构合法且身份准确。
 - evidence 引用属于本波。
 - Director 选择符合场景允许的 Persona 类别。
-- 6657 高权重串子类实例参与比例高于低权重人格。
+- 6657 热更新后各人格实例数与配置人数完全一致。
 - 普通跑图允许 silence，不编造击杀。
 - 点名目标 Viewer 返回明确结果。
 - 快请求先显示。
@@ -1063,7 +1057,7 @@ uv run --project apps/backend ruff check apps/backend
 - [x] 32 被正确实现为 ViewerInstance 上限。
 - [x] 现有 32 Persona 仅作为模板库。
 - [x] 六个 Mode 迁移值准确。
-- [x] 6657 权重产生更多串子类实例。
+- [x] 6657 人格人数热更新精确重平衡实例。
 - [x] 同 Persona 实例具有不同 ID、别名、微变体和短期状态。
 - [x] Viewer 都访问同一 Room Shared Brain。
 - [x] Mode 切换不清空 Room 长期记忆。

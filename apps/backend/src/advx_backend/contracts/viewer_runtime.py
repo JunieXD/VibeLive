@@ -106,7 +106,8 @@ class ViewerRuntimeTelemetry(RuntimeContractModel):
 
 class CanonicalRuntimeSpec(RuntimeContractModel):
     protocol_version: Literal[3] = PROTOCOL_VERSION
-    audience_contract_version: Literal[2] = AUDIENCE_CONTRACT_VERSION
+    # Keep v2 readable for persisted sessions. New Desktop payloads always emit v3.
+    audience_contract_version: Literal[2, 3] = AUDIENCE_CONTRACT_VERSION
     config_revision: int = Field(ge=1)
     room: Room
     active_mode_id: str = Field(min_length=1, max_length=128)
@@ -126,16 +127,17 @@ class CanonicalRuntimeSpec(RuntimeContractModel):
         if self.active_mode_id not in mode_by_id:
             raise ValueError("active_mode_id must reference a configured Mode")
         for mode in self.modes:
-            unknown = set(mode.persona_ids) - set(persona_by_id)
+            unknown = set(mode.persona_counts) - set(persona_by_id)
             if unknown:
                 raise ValueError(f"Mode {mode.mode_id} references unknown Personas")
-            if not any(
-                persona_by_id[persona_id].enabled
-                and mode.persona_weights[persona_id] > 0
-                for persona_id in mode.persona_ids
-            ):
+            unavailable = [
+                persona_id
+                for persona_id, count in mode.persona_counts.items()
+                if count > 0 and not persona_by_id[persona_id].enabled
+            ]
+            if unavailable:
                 raise ValueError(
-                    f"Mode {mode.mode_id} requires an enabled Persona with positive weight"
+                    f"Mode {mode.mode_id} assigns a positive count to a disabled Persona"
                 )
         return self
 
@@ -231,7 +233,7 @@ class RuntimeDiffSummary(RuntimeContractModel):
 class RuntimeApplyRequest(RuntimeContractModel):
     apply_id: str = Field(min_length=1, max_length=128)
     base_revision: int = Field(ge=0)
-    audience_contract_version: Literal[2] = AUDIENCE_CONTRACT_VERSION
+    audience_contract_version: Literal[3] = AUDIENCE_CONTRACT_VERSION
     canonical_runtime_spec: CanonicalRuntimeSpec
     client_config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     provider_candidate: RuntimeModelProviderCandidate | None = Field(
@@ -241,6 +243,8 @@ class RuntimeApplyRequest(RuntimeContractModel):
 
     @model_validator(mode="after")
     def validate_config_hash(self) -> "RuntimeApplyRequest":
+        if self.canonical_runtime_spec.audience_contract_version != AUDIENCE_CONTRACT_VERSION:
+            raise ValueError("runtime apply requires the current audience contract version")
         if self.client_config_hash != self.canonical_runtime_spec.config_hash():
             raise ValueError("client_config_hash does not match canonical_runtime_spec")
         return self
@@ -271,7 +275,7 @@ class RuntimeRollbackRequest(RuntimeContractModel):
     apply_id: str = Field(min_length=1, max_length=128)
     base_revision: int = Field(ge=1)
     target_revision: int = Field(ge=1)
-    audience_contract_version: Literal[2] = AUDIENCE_CONTRACT_VERSION
+    audience_contract_version: Literal[3] = AUDIENCE_CONTRACT_VERSION
     provider_candidate: RuntimeModelProviderCandidate | None = Field(
         default=None,
         repr=False,

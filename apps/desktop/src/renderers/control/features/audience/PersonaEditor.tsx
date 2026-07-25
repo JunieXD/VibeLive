@@ -30,8 +30,7 @@ type PersonaEditorProps = {
   onReset(): void
   onApplyMarkdown(): void
   onSave(): void
-  onParticipationChange(personaId: string, enabled: boolean): void
-  onWeightChange(personaId: string, weight: number): void
+  onViewerCountChange(personaId: string, count: number): void
 }
 
 function splitList(value: string): string[] {
@@ -58,8 +57,7 @@ export function PersonaEditor({
   onReset,
   onApplyMarkdown,
   onSave,
-  onParticipationChange,
-  onWeightChange
+  onViewerCountChange
 }: PersonaEditorProps): React.JSX.Element {
   if (!draft || !selectedBasePersona) {
     return (
@@ -71,8 +69,7 @@ export function PersonaEditor({
 
   const update = (change: Partial<Omit<PersonaContent, 'id'>>): void =>
     setDraft(materializePersonaTemplate(draft, change))
-  const participating = activeMode.personaIds.includes(draft.id) && draft.enabled
-  const weight = activeMode.personaWeights[draft.id] ?? 1
+  const viewerCount = activeMode.personaCounts[draft.id] ?? 0
 
   return (
     <section
@@ -296,32 +293,19 @@ export function PersonaEditor({
               />
             </label>
             <div className={cx('aw-toggle-field')}>
-              <span>参与状态</span>
-              <label className={cx('aw-switch')}>
-                <input
-                  type="checkbox"
-                  checked={participating}
-                  disabled={structureLocked}
-                  aria-label={`${participating ? '停用' : '启用'}${draft.name}`}
-                  onChange={(event) => onParticipationChange(draft.id, event.target.checked)}
-                />
-                <span aria-hidden="true" />
-                <em>{participating ? '参与' : '停用'}</em>
-              </label>
               <label className={cx('aw-editor-weight')}>
                 <span>
-                  权重 <b>{weight}</b>
+                  人数 <b>{viewerCount}</b>
                 </span>
                 <input
-                  type="range"
-                  min={1}
-                  max={5}
+                  type="number"
+                  min={0}
+                  max={32}
                   step={1}
-                  value={weight}
-                  disabled={structureLocked || !participating}
-                  aria-label={`${draft.name} 权重`}
-                  aria-valuetext={`${weight}`}
-                  onChange={(event) => onWeightChange(draft.id, Number(event.target.value))}
+                  value={viewerCount}
+                  disabled={structureLocked}
+                  aria-label={`${draft.name} 人数`}
+                  onChange={(event) => onViewerCountChange(draft.id, Number(event.target.value))}
                 />
               </label>
             </div>

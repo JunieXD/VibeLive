@@ -11,6 +11,7 @@ import type {
 } from '@advx/contracts'
 import {
   createPersonaTemplate,
+  totalViewerCount,
   type AudienceMode,
   type AudienceWorkspaceState,
   type PersonaOverride,
@@ -141,7 +142,7 @@ export function compileCanonicalRuntimeSpec(
   const windowBatch = visual.barrageGenerationMode === 'window_batch'
   const spec: CanonicalRuntimeSpec = {
     protocol_version: 3,
-    audience_contract_version: 2,
+    audience_contract_version: 3,
     config_revision: options.configRevision,
     room: {
       room_id: options.roomId ?? 'default-room',
@@ -176,7 +177,7 @@ export function compileCanonicalRuntimeSpec(
       window_batch_context_window_ms: 30_000,
       window_batch_max_frames: 5,
       viewer_visual_input_mode: windowBatch ? 'direct_frames' : visual.viewerVisualInputMode,
-      max_in_flight_viewer_requests: Math.min(6, activeMode.targetConcurrentViewers),
+      max_in_flight_viewer_requests: Math.min(6, totalViewerCount(activeMode)),
       viewer_request_ttl_ms: 30_000,
       viewer_queue_capacity: 64,
       observation_merge_window_ms: 1_000,
@@ -255,10 +256,11 @@ function compileMode(mode: AudienceMode): CanonicalModeDefinition {
     mode_id: mode.id,
     namespace_id: mode.namespaceId,
     revision: mode.revision,
-    target_concurrent_viewers: mode.targetConcurrentViewers,
-    persona_ids: [...mode.personaIds],
-    persona_weights: Object.fromEntries(
-      mode.personaIds.map((personaId) => [personaId, mode.personaWeights[personaId]])
+    persona_counts: Object.fromEntries(
+      Object.keys(mode.personaCounts).sort().map((personaId) => [
+        personaId,
+        mode.personaCounts[personaId]
+      ])
     ),
     persona_overrides: Object.fromEntries(
       Object.entries(mode.personaOverrides).map(([personaId, override]) => [

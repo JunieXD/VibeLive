@@ -1,8 +1,8 @@
 {
-  "expected_config_hash": "ffad67114e265bf6b5d4da3eb477b7b684b749a6855d4213170901fec3e71b48",
+  "expected_config_hash": "ab21c6e707b25f87f42dfc01d1e7b073dcedf0d6e6031b980e6e1b5d3772abed",
   "spec": {
     "protocol_version": 3,
-    "audience_contract_version": 2,
+  "audience_contract_version": 3,
     "config_revision": 7,
     "room": {
       "room_id": "numeric-parity-room",
@@ -71,14 +71,9 @@
         "mode_id": "numeric-parity-mode",
         "namespace_id": "numeric-parity-memes",
         "revision": 1,
-        "target_concurrent_viewers": 2,
-        "persona_ids": [
-          "zero-bias",
-          "one-bias"
-        ],
-        "persona_weights": {
-          "zero-bias": 0.0,
-          "one-bias": 1.0
+        "persona_counts": {
+          "zero-bias": 0,
+          "one-bias": 2
         },
         "persona_overrides": {},
         "normal_response_range": {
@@ -94,7 +89,6 @@
     ],
     "provider": {
       "provider_profile_id": "numeric-parity-provider",
-      "director_model": "model",
       "viewer_model": "model",
       "memory_model": "model",
       "visual_summary_model": "model"
@@ -105,15 +99,24 @@
         "frame_window_ms": 10000,
         "frame_selection_strategy": "change_peaks",
         "frame_max_dimension": 1280,
-        "frame_quality": 80
+        "frame_quality": 80,
+        "frame_similarity_threshold": 0.9,
+        "frame_anchor_interval_ms": 5000
       },
       "viewer_visual_input_mode": "direct_frames",
-      "director_failure_mode": "strict",
       "max_in_flight_viewer_requests": 2,
-      "viewer_request_ttl_ms": 15000,
-      "viewer_queue_capacity": 64,
-      "observation_merge_window_ms": 250,
-      "screen_change_threshold": 0.2,
+    "viewer_request_ttl_ms": 15000,
+    "viewer_queue_capacity": 64,
+    "observation_merge_window_ms": 250,
+    "public_context_window_ms": 60000,
+    "public_context_max_events": 48,
+    "replyable_event_window_ms": 30000,
+    "max_replyable_events": 8,
+    "viewer_user_speaker_budget": 6,
+    "viewer_screen_speaker_budget": 4,
+    "viewer_ambient_speaker_budget": 2,
+    "max_direct_frame_age_ms": 30000,
+    "screen_change_threshold": 0.2,
       "screen_change_cooldown_ms": 2000,
       "ambient_tick_cooldown_ms": 5000,
       "max_consecutive_ambient_waves": 2

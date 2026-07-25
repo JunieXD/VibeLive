@@ -234,12 +234,16 @@ async def collect_evidence(
         "reaction_qmark": 3,
         "room_historian": 1,
     }
-    expected_updated_counts = expected_initial_counts
+    expected_updated_counts = {
+        **expected_initial_counts,
+        "instigator": 4,
+        "reaction_qmark": 2,
+    }
     active_mode = next(
         mode for mode in updated_spec.modes if mode.mode_id == updated_spec.active_mode_id
     )
     return {
-        "artifact_version": 3,
+        "artifact_version": 4,
         "proof_scope": fixture["proof_scope"],
         "fixture_bundle_id": bundle["bundle_id"],
         "desktop_source": fixture["desktop_source"],
@@ -270,20 +274,24 @@ async def collect_evidence(
         },
         "claims": {
             "desktop_room_6657_primary_personas_are_real_preset": (
-                fixture["desktop_source"]["primary_persona_ids"]
-                == active_mode.persona_ids[:9]
+                set(fixture["desktop_source"]["primary_persona_ids"])
+                == {
+                    persona_id
+                    for persona_id, count in active_mode.persona_counts.items()
+                    if count > 1
+                }
             ),
             "canonical_hash_matches_backend": bundle["config_hash"]
             == updated_spec.config_hash(),
-            "initial_hamilton_allocation_is_exact": initial_counts
+            "initial_persona_counts_are_exact": initial_counts
             == expected_initial_counts,
-            "updated_hamilton_allocation_is_exact": updated_counts
+            "updated_persona_counts_are_exact": updated_counts
             == expected_updated_counts,
             "hot_update_reconciliation_is_exact": (
-                len(reconciliation.retained_viewer_ids) == 28
+                len(reconciliation.retained_viewer_ids) == 27
                 and not reconciliation.added_viewer_ids
                 and not reconciliation.removed_viewer_ids
-                and not reconciliation.reset_viewer_ids
+                and len(reconciliation.reset_viewer_ids) == 1
             ),
             "all_active_viewers_are_called": (
                 set(request_viewer_ids) == set(selected_ids)

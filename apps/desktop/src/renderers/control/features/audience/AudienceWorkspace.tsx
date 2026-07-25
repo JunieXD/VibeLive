@@ -9,6 +9,7 @@ import {
   resetBuiltInMode,
   reviseAudienceMode,
   serializePersonaMarkdown,
+  totalViewerCount,
   validatePersona,
   type AudienceMode,
   type AudienceWorkspaceState,
@@ -186,44 +187,29 @@ export function AudienceWorkspace({
     if (name !== activeMode.name) patchMode({ name })
   }
 
-  const setPersonaParticipation = (personaId: string, enabled: boolean): void => {
-    const base = workspace.personas.find((persona) => persona.id === personaId)
-    if (!base) return
-    if (!enabled && activeMode.personaIds.length <= 1) {
-      setPersonaError('模式至少需要一个参与人格')
+  const setPersonaCount = (personaId: string, value: number): void => {
+    const count = Number.isFinite(value) ? Math.min(32, Math.max(0, Math.trunc(value))) : 0
+    const personaCounts = { ...activeMode.personaCounts, [personaId]: count }
+    const viewerCount = totalViewerCount({ ...activeMode, personaCounts })
+    if (viewerCount < 1) {
+      setPersonaError('模式至少需要 1 位观众')
       return
     }
-    const resolved = effectivePersona(base, activeMode)
-    const personaIds =
-      enabled
-        ? activeMode.personaIds.includes(personaId)
-          ? activeMode.personaIds
-          : [...activeMode.personaIds, personaId]
-        : activeMode.personaIds.filter((id) => id !== personaId)
-    const personaWeights = { ...activeMode.personaWeights }
-    if (enabled && !Object.hasOwn(personaWeights, personaId)) personaWeights[personaId] = 1
-    if (!enabled) delete personaWeights[personaId]
-    const override = personaOverride(base, resolved)
-    const personaOverrides = { ...activeMode.personaOverrides }
-    if (!enabled || Object.keys(override).length === 0) delete personaOverrides[personaId]
-    else personaOverrides[personaId] = override
-    patchMode({ personaIds, personaWeights, personaOverrides })
-    if (personaDraft?.id === personaId) {
-      setPersonaDraft(materializePersonaTemplate(personaDraft, { enabled }))
-      const parsedMarkdown = parsePersonaMarkdown(markdownDraft)
-      if (parsedMarkdown.ok && parsedMarkdown.persona.id === personaId) {
-        setMarkdownDraft(
-          serializePersonaMarkdown(
-            materializePersonaTemplate(parsedMarkdown.persona, { enabled })
-          )
-        )
-      }
+    if (viewerCount > 32) {
+      setPersonaError('一个模式最多只能有 32 位观众')
+      return
     }
-  }
-
-  const setPersonaWeight = (personaId: string, weight: number): void => {
+    setPersonaError('')
     patchMode({
-      personaWeights: { ...activeMode.personaWeights, [personaId]: weight }
+      personaCounts,
+      normalResponseRange: [
+        Math.min(activeMode.normalResponseRange[0], viewerCount),
+        Math.min(activeMode.normalResponseRange[1], viewerCount)
+      ],
+      highlightResponseRange: [
+        Math.min(activeMode.highlightResponseRange[0], viewerCount),
+        Math.min(activeMode.highlightResponseRange[1], viewerCount)
+      ]
     })
   }
 
@@ -304,8 +290,7 @@ export function AudienceWorkspace({
     onChange({
       ...updateActiveMode(workspace, (mode) => ({
         ...mode,
-        personaIds: [...mode.personaIds, id],
-        personaWeights: { ...mode.personaWeights, [id]: 1 }
+        personaCounts: { ...mode.personaCounts, [id]: 0 }
       })),
       personas: [...workspace.personas, persona]
     })
@@ -323,17 +308,20 @@ export function AudienceWorkspace({
     }
     const personaId = selectedBasePersona.id
     const modes = workspace.modeState.modes.map((mode) => {
-      const personaWeights = { ...mode.personaWeights }
+      const personaCounts = { ...mode.personaCounts }
       const personaOverrides = { ...mode.personaOverrides }
-      delete personaWeights[personaId]
+      delete personaCounts[personaId]
       delete personaOverrides[personaId]
       return {
         ...mode,
-        personaIds: mode.personaIds.filter((id) => id !== personaId),
-        personaWeights,
+        personaCounts,
         personaOverrides
       }
     })
+    if (modes.some((mode) => totalViewerCount(mode) === 0)) {
+      setPersonaError('请先为每个模式保留至少 1 位其他观众，再删除该人格')
+      return
+    }
     onChange({
       ...workspace,
       personas: workspace.personas.filter((persona) => persona.id !== personaId),
@@ -479,7 +467,6 @@ export function AudienceWorkspace({
         <div className={cx('aw-persona-layout')} data-audience-persona-layout>
           <PersonaList
             personas={personaRows}
-            allPersonas={workspace.personas}
             activeMode={activeMode}
             selectedPersonaId={personaEditorOpen ? selectedPersonaId : ''}
             search={personaSearch}
@@ -487,7 +474,6 @@ export function AudienceWorkspace({
             onSearchChange={setPersonaSearch}
             onAdd={addCustomPersona}
             onChoose={choosePersona}
-            onParticipationChange={setPersonaParticipation}
           />
         </div>
       ) : tab === 'memes' ? (
@@ -527,8 +513,7 @@ export function AudienceWorkspace({
               onReset={resetPersona}
               onApplyMarkdown={applyMarkdown}
               onSave={savePersona}
-              onParticipationChange={setPersonaParticipation}
-              onWeightChange={setPersonaWeight}
+              onViewerCountChange={setPersonaCount}
             />
           </div>
         </div>

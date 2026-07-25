@@ -1031,10 +1031,10 @@ export interface components {
             protocol_version: 3;
             /**
              * Audience Contract Version
-             * @default 2
-             * @constant
+             * @default 3
+             * @enum {integer}
              */
-            audience_contract_version: 2;
+            audience_contract_version: 2 | 3;
             /** Config Revision */
             config_revision: number;
             room: components["schemas"]["Room"];
@@ -1411,12 +1411,8 @@ export interface components {
             namespace_id: string;
             /** Revision */
             revision: number;
-            /** Target Concurrent Viewers */
-            target_concurrent_viewers: number;
-            /** Persona Ids */
-            persona_ids: string[];
-            /** Persona Weights */
-            persona_weights: {
+            /** Persona Counts */
+            persona_counts: {
                 [key: string]: number;
             };
             /** Persona Overrides */
@@ -1817,10 +1813,10 @@ export interface components {
             protocol_version: 3;
             /**
              * Audience Contract Version
-             * @default 2
-             * @constant
+             * @default 3
+             * @enum {integer}
              */
-            audience_contract_version: 2;
+            audience_contract_version: 2 | 3;
             /** Bundle Id */
             bundle_id: string;
             /** Created At Ms */
@@ -1972,10 +1968,10 @@ export interface components {
             base_revision: number;
             /**
              * Audience Contract Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            audience_contract_version: 2;
+            audience_contract_version: 3;
             canonical_runtime_spec: components["schemas"]["CanonicalRuntimeSpec"];
             /** Client Config Hash */
             client_config_hash: string;
@@ -2025,10 +2021,10 @@ export interface components {
             target_revision: number;
             /**
              * Audience Contract Version
-             * @default 2
+             * @default 3
              * @constant
              */
-            audience_contract_version: 2;
+            audience_contract_version: 3;
             /** @default null */
             provider_candidate: components["schemas"]["RuntimeModelProviderCandidate"] | null;
         };

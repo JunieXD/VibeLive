@@ -58,9 +58,7 @@ def _bundle() -> ReplayBundle:
         mode_id="runtime-smoke-mode",
         namespace_id="runtime-smoke-memes",
         revision=1,
-        viewer_count=1,
-        persona_ids=[persona.persona_id],
-        persona_weights={persona.persona_id: 1},
+        persona_counts={persona.persona_id: 1},
         normal_response_range=ResponseRange(minimum=1, maximum=1),
         highlight_response_range=ResponseRange(minimum=1, maximum=1),
     )

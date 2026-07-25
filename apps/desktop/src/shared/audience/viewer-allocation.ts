@@ -10,35 +10,28 @@ export type PersonaAllocation = {
   readonly count: number
 }
 
+export function totalViewerCount(mode: AudienceMode): number {
+  return Object.values(mode.personaCounts).reduce((total, count) => total + count, 0)
+}
+
 export function allocateViewerCounts(
   mode: AudienceMode,
   personas: readonly PersonaTemplate[]
 ): readonly PersonaAllocation[] {
   const personasById = new Map(personas.map((persona) => [persona.id, persona]))
-  const eligible = mode.personaIds.flatMap((personaId, modeIndex) => {
+  const allocations = Object.entries(mode.personaCounts).flatMap(([personaId, count]) => {
     const persona = personasById.get(personaId)
-    const weight = mode.personaWeights[personaId]
-    return persona?.enabled && Number.isFinite(weight) && weight > 0
-      ? [{ personaId, modeIndex, weight }]
-      : []
+    if (!Number.isInteger(count) || count < 0) {
+      throw new Error(`Mode ${mode.id} has an invalid viewer count for ${personaId}`)
+    }
+    if (count === 0) return []
+    if (!persona?.enabled) {
+      throw new Error(`Mode ${mode.id} assigns viewers to an unavailable persona`)
+    }
+    return [{ personaId, count }]
   })
-  const totalWeight = eligible.reduce((total, item) => total + item.weight, 0)
-  if (totalWeight <= 0) throw new Error(`Mode ${mode.id} has no enabled weighted personas`)
-
-  const allocations = eligible.map((item) => {
-    const exact = mode.targetConcurrentViewers * item.weight / totalWeight
-    return { ...item, count: Math.floor(exact), remainder: exact - Math.floor(exact) }
-  })
-  let remaining = mode.targetConcurrentViewers - allocations.reduce((total, item) => total + item.count, 0)
-  const remainderOrder = [...allocations].sort((left, right) =>
-    right.remainder - left.remainder ||
-    left.modeIndex - right.modeIndex ||
-    compareStableId(left.personaId, right.personaId)
-  )
-  for (let index = 0; index < remaining; index += 1) remainderOrder[index].count += 1
+  if (allocations.length === 0) throw new Error(`Mode ${mode.id} has no assigned viewers`)
   return allocations
-    .filter((item) => item.count > 0)
-    .map(({ personaId, count }) => ({ personaId, count }))
 }
 
 export function compileViewerPool(
@@ -75,7 +68,6 @@ export function compileViewerPool(
         personaContentHash: persona.contentHash,
         ordinal,
         alias: `${name}·${String(ordinal).padStart(2, '0')}`,
-        weight: mode.personaWeights[personaId],
         variant: deriveViewerVariant(sessionSeed, personaId, ordinal)
       }
     })
@@ -106,8 +98,4 @@ function stableHash(value: string): number {
     hash = Math.imul(hash, 16777619)
   }
   return hash >>> 0
-}
-
-function compareStableId(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0
 }

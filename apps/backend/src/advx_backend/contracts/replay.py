@@ -64,7 +64,7 @@ class RecordedProviderOutput(ReplayContractModel):
 class ReplayBundle(ReplayContractModel):
     replay_schema_version: Literal[1] = REPLAY_SCHEMA_VERSION
     protocol_version: Literal[3] = PROTOCOL_VERSION
-    audience_contract_version: Literal[2] = AUDIENCE_CONTRACT_VERSION
+    audience_contract_version: Literal[2, 3] = AUDIENCE_CONTRACT_VERSION
     bundle_id: str = Field(min_length=1, max_length=128)
     created_at_ms: int = Field(ge=0)
     seed: int
@@ -83,6 +83,8 @@ class ReplayBundle(ReplayContractModel):
 
     @model_validator(mode="after")
     def validate_bundle(self) -> "ReplayBundle":
+        if self.audience_contract_version != self.canonical_runtime_spec.audience_contract_version:
+            raise ValueError("audience_contract_version does not match canonical_runtime_spec")
         if self.config_hash != self.canonical_runtime_spec.config_hash():
             raise ValueError("config_hash does not match canonical_runtime_spec")
         sequences = [event.sequence for event in self.events]

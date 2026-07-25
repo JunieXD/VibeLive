@@ -35,7 +35,7 @@
 3. 每次新开直播都创建全新的 ViewerInstance；上一场观众不会出现在下一场。
 4. Viewer 的用户名和头像独立于 Persona；同一 Persona 可以赋予多个不同 Viewer。
 5. Viewer 的加入、离开和发言是彼此独立的行为过程。
-6. `viewer_count` 不再表示开播时一次性创建的固定人格席位，而表示模式期望维持的同时在线观众规模。
+6. Mode 的 `persona_counts` 直接表示每种人格的 Viewer 数；`0` 表示不参与，模式总人数由这些数值相加得出。
 7. Director 负责理解场景和给出全局预算，不再直接集中指定准确发言者。
 8. 每个在场 Viewer 独立计算发言意愿；全局仲裁器只负责密度、时效和多样性约束。
 9. 只有经过本地候选筛选的少量 Viewer 才调用模型，不能每个事件都调用全部 Viewer。
@@ -79,7 +79,7 @@
 
 ```text
 ModeDefinition
-  -> 按 Persona 权重创建固定 Viewer 池
+  -> 按 Persona 的精确人数创建 Viewer 池
   -> ObservationWave
   -> 本地计算最大响应数
   -> Director 选择准确 ViewerInstance ID
@@ -102,7 +102,7 @@ ModeDefinition
 
 #### 4.2.1 身份仍由 Persona 派生
 
-当前 Viewer 池先按 Persona 权重分配数量，再为每个 Persona 创建 `(persona_id, ordinal)` 席位。显示名由 Persona 名称加序号组成，例如 `某人格·02`。
+当前 Viewer 池按 Mode 中每个 Persona 的直接人数创建 `(persona_id, ordinal)` 席位。显示名由 Persona 名称加序号组成，例如 `某人格·02`。
 
 这意味着数据类型虽然区分了 Viewer 与 Persona，但产品语义仍接近“人格复制出多个观众”。用户名、席位、热更新身份匹配和 Viewer 创建顺序都依赖 Persona。
 
@@ -421,45 +421,36 @@ SessionAudience
 
 SessionAudience 是 Viewer 创建、在线人数控制、恢复和 deterministic replay 的权威边界。
 
-### 7.2 `viewer_count` 的新含义
+### 7.2 `persona_counts` 的配置含义
 
-建议在下一版 workspace schema 中将 `viewer_count` 重命名为：
+当前 workspace schema 使用：
 
 ```text
-target_concurrent_viewers
+persona_counts: { persona_id: 0..32 }
 ```
 
-其含义是模式希望维持的同时在线 Viewer 规模，而不是固定 Persona 席位数。
-
-实际在线数允许围绕目标值小幅变化。变化范围由内部策略控制，不需要首版暴露给普通用户。
+每个值就是该 Persona 的 Viewer 数，`0` 表示不参与；模式总人数为所有值的合计，必须在 1 到 32 之间。`target_concurrent_viewers` 只作为 SessionAudience 和持久化层的派生兼容字段，不是可编辑配置。
 
 硬约束：
 
 - 同时 `active` Viewer 不超过 32。
 - 一个 Session 内创建过的唯一 Viewer 总数必须有可配置上限，防止长直播无限增长。
 - `kicked` Viewer 计入已创建总数，但不计入在线数。
-- Viewer 离开后，系统可以选择等待其重返，也可以创建新 Viewer 补足在线目标。
+- Viewer 离开后，系统只会重新加入或创建当前人格配额仍有缺额的 Viewer。
 
-### 7.3 Persona 权重的新含义
+### 7.3 Persona 人数的运行时含义
 
-Mode 中的 Persona 权重只在创建新 Viewer 时决定 PersonaAssignment：
+Mode 中的 Persona 人数决定精确的 PersonaAssignment：
 
 ```text
 new Viewer
-  -> 从当前 Mode 的 enabled Persona 中按权重抽样
+  -> 从当前 Mode 中人数尚未补足的 enabled Persona 选择
   -> 创建独立 ViewerIdentity
   -> 派生 ViewerInstanceVariant
   -> 进入 not_joined 或 active
 ```
 
-权重不决定用户名，也不直接决定某一波谁发言。
-
-为避免小样本长期偏离模式意图，可以使用带欠额修正的确定性加权抽样，而不是每次完全独立随机：
-
-- 记录本 Session 各 Persona 已分配数量。
-- 根据目标比例计算当前欠额。
-- 新 Viewer 优先从欠额较大的 Persona 中按权重抽样。
-- 固定 Session seed 时结果可重放。
+人数不决定用户名，也不直接决定某一波谁发言。新建或重返 Viewer 只填补其 Persona 的当前缺额；固定 Session seed 时实例顺序和微变体可重放。
 
 ## 8. Viewer 身份生成
 
@@ -1226,7 +1217,7 @@ Session Viewer 持久化只服务：
 
 - `session_seed`
 - `next_creation_ordinal`
-- `target_concurrent_viewers`
+- 从 `persona_counts` 派生的 `target_concurrent_viewers`
 - `population_revision`
 - `controller_state_json`
 
@@ -1309,7 +1300,7 @@ presence、moderation、sequence 和 revision 不应只藏在 JSON 中，因为�
 
 - 展示 PersonaTemplate 库。
 - 编辑 Persona 核心特征、说话风格和行为偏好。
-- 配置 Mode 的 Persona 权重与目标同时在线人数。
+- 配置 Mode 中每个 Persona 的 Viewer 人数；总人数自动由各项相加得出。
 - 不把 Persona 卡片称为“当前观众”。
 
 #### 当前直播观众
@@ -1500,7 +1491,7 @@ final_outcome
 - 固定 seed 生成结果稳定。
 - 不同 Session seed 生成新身份。
 - 用户名无冲突、无保留词、无屏蔽词。
-- Persona 分配长期接近 Mode 权重。
+- active Persona 分配始终等于 Mode 的正人数配置（临时离开后会按对应缺额补位）。
 - active count 不超过 32。
 - 长直播创建总数有界。
 - 暂停期间不补发 join/leave。
@@ -1565,12 +1556,12 @@ final_outcome
 
 ## 29. 数据与合同迁移
 
-### 29.1 Desktop workspace v2 -> v3
+### 29.1 Desktop workspace v3 -> v4
 
 建议迁移：
 
-- `mode.viewerCount` -> `mode.targetConcurrentViewers`
-- 保留 Persona IDs、weights、overrides 和 response ranges。
+- `mode.targetConcurrentViewers`、`mode.personaIds` 和 `mode.personaWeights` -> `mode.personaCounts`。
+- 使用旧版最大余数法一次性换算人数，之后只保存精确人数、overrides 和 response ranges。
 - 新增 audience behavior settings version。
 - 不迁移任何旧 RuntimePersona alias 为新 ViewerIdentity。
 
@@ -1667,7 +1658,7 @@ final_outcome
 - [ ] 同一 Session 中 Viewer 可以 join、leave 和 rejoin。
 - [ ] 被踢 Viewer 本 Session 不可重返。
 - [ ] 限时禁言期间零弹幕泄漏，且可提前解除。
-- [ ] Mode 控制目标同时在线人数和 PersonaAssignment 权重。
+- [ ] Mode 以每种 Persona 的精确人数控制 Viewer 构成。
 - [ ] 发言候选来自每 Viewer 独立概率，而非 Director 精确点名。
 - [ ] Viewer 请求包含完整 Persona 和公开事件正文。
 - [ ] Viewer 可以结构化回应主播、场景和其他 Viewer。
@@ -1702,15 +1693,15 @@ final_outcome
 
 跨 Session Room 记忆可能让新 Viewer 说出像亲历者的话。必须在记忆类型、Prompt 和验收中明确“频道背景”和“个人经历”的区别。
 
-### 32.6 在线人数语义变化
+### 32.6 人格人数语义变化
 
-将固定 Viewer 池改为目标同时在线人数，会影响现有 Mode 编辑器、测试夹具和 deterministic allocation 证据。迁移必须明确，不能在同一字段名下悄悄改变含义。
+将权重和独立目标人数改为每种 Persona 的直接人数，会影响现有 Mode 编辑器、测试夹具和 deterministic allocation 证据。迁移必须明确，不能在同一字段名下悄悄改变含义。
 
 ## 33. 评审时需要重点确认
 
 本文推荐但仍需要最终签字的事项：
 
-1. `viewer_count` 是否正式重命名为 `target_concurrent_viewers`。
+1. `persona_counts` 作为唯一可编辑人数来源；`target_concurrent_viewers` 仅保留为派生兼容字段。
 2. 主动离开的 Viewer 是否允许同场重新加入。本文推荐允许。
 3. 被踢 Viewer 是否为本 Session 不可撤销终态。本文推荐是。
 4. Social follow-up 首版是否采用最大一层回复。本文推荐是。
