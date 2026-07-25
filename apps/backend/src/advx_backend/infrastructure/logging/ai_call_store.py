@@ -55,17 +55,14 @@ class AiCallStore:
     def upsert(self, trace: AiCallTrace) -> None:
         with self._lock:
             assert_redacted_artifact(trace)
-            evicted = (
-                trace.call_id not in self._items
-                and len(self._items) >= self._max_items
-            )
-            if evicted:
+            if trace.call_id not in self._items and len(self._items) >= self._max_items:
                 self._items.popitem(last=False)
             self._items[trace.call_id] = trace
             self._ordered_items = None
             if self._path is None:
                 return
-            if evicted or self._writes_since_compaction >= self._max_items * 4:
+            # Keep capacity eviction in memory; per-eviction rewrites stall live model work.
+            if self._writes_since_compaction >= self._max_items * 4:
                 self._persist()
                 return
             self._append(trace)
