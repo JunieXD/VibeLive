@@ -1994,7 +1994,7 @@
         {
           "mode_id": "room-6657",
           "namespace_id": "room-6657",
-          "revision": 3,
+          "revision": 4,
           "persona_counts": {
             "abstract_radio": 3,
             "cheat_suspector": 1,
@@ -2561,24 +2561,24 @@
       },
       "settings": {
         "frame_bundle": {
-          "frame_bundle_size": 5,
+          "frame_bundle_size": 4,
           "frame_window_ms": 30000,
           "frame_selection_strategy": "change_peaks",
-          "frame_max_dimension": 1280,
-          "frame_quality": 82,
+          "frame_max_dimension": 768,
+          "frame_quality": 70,
           "frame_similarity_threshold": 0.95,
           "frame_anchor_interval_ms": 5000
         },
-        "barrage_generation_mode": "per_viewer",
+        "barrage_generation_mode": "window_batch",
         "window_batch_interval_ms": 5000,
         "window_batch_context_window_ms": 30000,
-        "window_batch_max_frames": 5,
+        "window_batch_max_frames": 4,
         "viewer_visual_input_mode": "direct_frames",
-        "max_in_flight_viewer_requests": 6,
+        "max_in_flight_viewer_requests": 12,
         "viewer_request_ttl_ms": 0,
         "viewer_queue_capacity": 64,
         "observation_merge_window_ms": 1000,
-        "public_context_window_ms": 60000,
+        "public_context_window_ms": 30000,
         "public_context_max_events": 48,
         "replyable_event_window_ms": 30000,
         "max_replyable_events": 8,
@@ -2592,7 +2592,7 @@
         "max_consecutive_ambient_waves": 1
       }
     },
-    "config_hash": "cd6dd00331cd03c40c8ad6530213684abdcdc925286c04219312f8d6eeaf118f",
+    "config_hash": "9b5fefa5e60673cb5ca5e3aebb96591686e061a345f53483fa130782f85dfcd7",
     "created_at_ms": 2000,
     "events": [
       {
@@ -4759,7 +4759,7 @@
       {
         "mode_id": "room-6657",
         "namespace_id": "room-6657",
-        "revision": 2,
+        "revision": 3,
         "persona_counts": {
           "abstract_radio": 3,
           "cheat_suspector": 1,
@@ -5326,24 +5326,24 @@
     },
     "settings": {
       "frame_bundle": {
-        "frame_bundle_size": 5,
+        "frame_bundle_size": 4,
         "frame_window_ms": 30000,
         "frame_selection_strategy": "change_peaks",
-        "frame_max_dimension": 1280,
-        "frame_quality": 82,
+        "frame_max_dimension": 768,
+        "frame_quality": 70,
         "frame_similarity_threshold": 0.95,
         "frame_anchor_interval_ms": 5000
       },
-      "barrage_generation_mode": "per_viewer",
+      "barrage_generation_mode": "window_batch",
       "window_batch_interval_ms": 5000,
       "window_batch_context_window_ms": 30000,
-      "window_batch_max_frames": 5,
+      "window_batch_max_frames": 4,
       "viewer_visual_input_mode": "direct_frames",
-      "max_in_flight_viewer_requests": 6,
+      "max_in_flight_viewer_requests": 12,
       "viewer_request_ttl_ms": 0,
       "viewer_queue_capacity": 64,
       "observation_merge_window_ms": 1000,
-      "public_context_window_ms": 60000,
+      "public_context_window_ms": 30000,
       "public_context_max_events": 48,
       "replyable_event_window_ms": 30000,
       "max_replyable_events": 8,

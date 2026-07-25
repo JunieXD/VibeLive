@@ -112,7 +112,7 @@ export function ModeToolbar({
       <div className={cx('aw-mode-controls')}>
         <span
           className={cx('aw-mode-summary')}
-          title="在线人数 · 文本/语音每波 · 画面每波 · 系统音频/静默每波"
+          title="在线人数 · 文本/语音/系统音频每波 · 画面每波 · 静默每波"
         >
           在线 {viewerCount} · 文本 {dispatch.userSpeakerBudget} · 画面{' '}
           {dispatch.screenSpeakerBudget} · 静默 {dispatch.ambientSpeakerBudget}
@@ -129,7 +129,7 @@ export function ModeToolbar({
           <div className={cx('aw-popover-section')}>
             <h4>发言调度</h4>
             <label>
-              <span>文本/语音每波</span>
+              <span>文本/语音/系统音频每波</span>
               <input
                 type="number"
                 min={0}
@@ -153,7 +153,7 @@ export function ModeToolbar({
               />
             </label>
             <label>
-              <span>系统音频/静默每波</span>
+              <span>静默每波</span>
               <input
                 type="number"
                 min={0}

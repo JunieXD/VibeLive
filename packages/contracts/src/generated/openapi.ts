@@ -2135,7 +2135,7 @@ export interface components {
             viewer_visual_input_mode: components["schemas"]["ViewerVisualInputMode"];
             /**
              * Max In Flight Viewer Requests
-             * @default 6
+             * @default 12
              */
             max_in_flight_viewer_requests: number;
             /**

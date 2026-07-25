@@ -316,13 +316,13 @@ Audience Engine 先由本地预算器根据事件类型、模式响应范围和 
 
 - 不把多个 Viewer 合并为一个 prompt，也不使用多 Viewer batching。
 - 每个 Viewer 每波只返回 `action=barrage|silence`；`barrage` 最多一条，沉默是合法结果。
-- 默认 Viewer 请求并发上限为 12、队列容量为 64；用户、画面和 ambient 波的候选预算分别
-  为 6、4、2，直接点名只选择目标 Viewer 或对应 Persona 中的一位。
+- 默认 Viewer 请求并发上限为 12、队列容量为 64；用户、系统音频、画面和 ambient 波的
+  候选预算分别为 6、6、4、2，直接点名只选择目标 Viewer 或对应 Persona 中的一位。
 - 实时 Viewer deadline 默认关闭；配置非零 TTL 时从波创建时开始计算。Observation 与每个
   Viewer 都使用有界 latest-wins。
-  更高优先级波和新的用户输入波会让旧 observation 零副作用；连续自动触发的同优先级
-  新波只替换未执行项，已经发给 Provider 的请求仍须通过 session、epoch、sequence 和
-  deadline 围栏。
+  更高优先级波和新的用户文字波会让旧 observation 零副作用；同优先级最终语音和连续
+  自动触发的新波只替换未执行项，已经发给 Provider 的请求仍须通过 session、epoch、
+  sequence 和 deadline 围栏。
 - 瞬时网络错误、429 或 5xx 仅在 TTL 允许时重试同一 Viewer 一次，不换人补位。
 - 模型结构错误只在剩余截止时间不少于 6 秒时修复一次；调度重试与协议修复共享最多两次
   Provider 请求预算。
