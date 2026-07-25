@@ -15,7 +15,7 @@ export type VoiceActivityDetector = {
 type FrameClassifier = (frame: Float32Array) => boolean
 
 export class BufferedVoiceActivityDetector {
-  private pendingSamples = new Float32Array(0)
+  private pendingSamples: Float32Array = new Float32Array(0)
 
   constructor(private readonly classifyFrame: FrameClassifier) {}
 

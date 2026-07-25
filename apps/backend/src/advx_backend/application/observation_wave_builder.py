@@ -8,6 +8,9 @@ from advx_backend.application.visual_signature import (
     visual_signature_change_score,
 )
 from advx_backend.domain.observation_wave import (
+    DEFAULT_FRAME_SIMILARITY_THRESHOLD,
+    FRAME_BUNDLE_SELECTION_LIMIT,
+    MAX_FRAME_WINDOW_MS,
     FrameBundleItem,
     FrameBundleSettings,
     FrameSelectionStrategy,
@@ -23,7 +26,7 @@ def select_frame_bundle(
 ) -> tuple[FrameBundleItem, ...]:
     """Select unique historical frames without manufacturing missing history."""
 
-    window_start = now_ms - settings.frame_window_ms
+    window_start = now_ms - min(settings.frame_window_ms, MAX_FRAME_WINDOW_MS)
     by_id: dict[str, FrameBundleItem] = {}
     for frame in sorted(frames, key=lambda item: (item.captured_at_ms, item.frame_id)):
         if frame.captured_at_ms < window_start or frame.captured_at_ms > now_ms:
@@ -32,35 +35,33 @@ def select_frame_bundle(
     candidates = tuple(
         sorted(by_id.values(), key=lambda item: (item.captured_at_ms, item.frame_id))
     )
-    count = min(settings.frame_bundle_size, len(candidates))
+    count = min(FRAME_BUNDLE_SELECTION_LIMIT, settings.frame_bundle_size, len(candidates))
     if count == 0:
         return ()
+    similarity_threshold = max(
+        settings.frame_similarity_threshold,
+        DEFAULT_FRAME_SIMILARITY_THRESHOLD,
+    )
 
     if settings.frame_selection_strategy is FrameSelectionStrategy.LATEST_N:
         return candidates[-count:]
     if settings.frame_selection_strategy is FrameSelectionStrategy.EVENLY_SPACED:
-        return _evenly_spaced(candidates, count)
+        return candidates[-count:]
 
-    return _similar_frame_representatives(candidates, count, settings, visual_signatures)
-
-
-def _evenly_spaced(
-    candidates: tuple[FrameBundleItem, ...],
-    count: int,
-) -> tuple[FrameBundleItem, ...]:
-    if count >= len(candidates):
-        return candidates
-    if count == 1:
-        return (candidates[-1],)
-    last = len(candidates) - 1
-    indexes = [round(index * last / (count - 1)) for index in range(count)]
-    return tuple(candidates[index] for index in indexes)
+    return _similar_frame_representatives(
+        candidates,
+        count,
+        settings,
+        similarity_threshold,
+        visual_signatures,
+    )
 
 
 def _similar_frame_representatives(
     candidates: tuple[FrameBundleItem, ...],
     count: int,
     settings: FrameBundleSettings,
+    similarity_threshold: float,
     visual_signatures: Mapping[str, bytes] | None,
 ) -> tuple[FrameBundleItem, ...]:
     """Keep the newest frame from each bounded, anchor-relative visual segment."""
@@ -74,7 +75,7 @@ def _similar_frame_representatives(
             and _is_similar_to_group_anchor(
                 anchor,
                 frame,
-                threshold=settings.frame_similarity_threshold,
+                threshold=similarity_threshold,
                 visual_signatures=visual_signatures,
             )
         ):
@@ -83,7 +84,7 @@ def _similar_frame_representatives(
             groups.append([frame])
 
     selected = tuple(group[-1] for group in groups)
-    return _evenly_spaced(selected, count)
+    return selected[-count:]
 
 
 def _is_similar_to_group_anchor(

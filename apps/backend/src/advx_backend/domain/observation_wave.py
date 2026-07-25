@@ -2,7 +2,11 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# Preserve the legacy wire bound so persisted runtime specs remain readable.
 MAX_FRAME_BUNDLE_SIZE = 15
+FRAME_BUNDLE_SELECTION_LIMIT = 5
+MAX_FRAME_WINDOW_MS = 30_000
+DEFAULT_FRAME_SIMILARITY_THRESHOLD = 0.95
 UNBOUNDED_DEADLINE_AT_MS = 253_402_300_799_999
 
 
@@ -32,15 +36,19 @@ class ObservationTrigger(StrEnum):
 
 class FrameBundleSettings(ObservationDomainModel):
     frame_bundle_size: int = Field(
-        default=MAX_FRAME_BUNDLE_SIZE,
+        default=FRAME_BUNDLE_SELECTION_LIMIT,
         ge=1,
         le=MAX_FRAME_BUNDLE_SIZE,
     )
-    frame_window_ms: int = Field(default=120_000, ge=1)
+    frame_window_ms: int = Field(default=MAX_FRAME_WINDOW_MS, ge=1)
     frame_selection_strategy: FrameSelectionStrategy = FrameSelectionStrategy.CHANGE_PEAKS
     frame_max_dimension: int = Field(default=1280, ge=64, le=8192)
     frame_quality: int = Field(default=80, ge=1, le=100)
-    frame_similarity_threshold: float = Field(default=0.9, ge=0, le=1)
+    frame_similarity_threshold: float = Field(
+        default=DEFAULT_FRAME_SIMILARITY_THRESHOLD,
+        ge=0,
+        le=1,
+    )
     frame_anchor_interval_ms: int = Field(default=5_000, ge=1)
 
 

@@ -222,7 +222,8 @@ describe('workspace persistence', () => {
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
       barrageGenerationMode: 'per_viewer',
       viewerVisualInputMode: 'direct_frames',
-      frameBundleSize: 15,
+      frameBundleSize: 5,
+      frameWindowMs: 30_000,
       frameSelectionStrategy: 'change_peaks'
     })
   })
@@ -301,8 +302,8 @@ describe('workspace persistence', () => {
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
-      frameBundleSize: 15,
-      frameWindowMs: 120_000
+      frameBundleSize: 5,
+      frameWindowMs: 30_000
     })
   })
 
@@ -369,17 +370,23 @@ describe('workspace persistence', () => {
     )?.description).toBe('用户修改过的模式')
   })
 
-  it('caps former frame bundle settings at fifteen', () => {
+  it('migrates former frame limits to the current visual limits', () => {
     const workspace = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
     workspace.modeState.modes[0].visualSettings = {
       ...workspace.modeState.modes[0].visualSettings,
-      frameBundleSize: 60
+      frameBundleSize: 15,
+      frameWindowMs: 120_000,
+      frameSelectionStrategy: 'evenly_spaced'
     }
 
     const parsed = parseAudienceWorkspaceState(workspace)
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
-    expect(parsed.workspace.modeState.modes[0].visualSettings.frameBundleSize).toBe(15)
+    expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
+      frameBundleSize: 5,
+      frameWindowMs: 30_000,
+      frameSelectionStrategy: 'latest_n'
+    })
   })
 
   it('strictly hydrates a JSON round trip and rejects damaged references', () => {

@@ -1201,12 +1201,12 @@ export interface components {
         FrameBundleSettings: {
             /**
              * Frame Bundle Size
-             * @default 15
+             * @default 5
              */
             frame_bundle_size: number;
             /**
              * Frame Window Ms
-             * @default 120000
+             * @default 30000
              */
             frame_window_ms: number;
             /** @default change_peaks */
@@ -1223,7 +1223,7 @@ export interface components {
             frame_quality: number;
             /**
              * Frame Similarity Threshold
-             * @default 0.9
+             * @default 0.95
              */
             frame_similarity_threshold: number;
             /**
@@ -2162,7 +2162,7 @@ export interface components {
             screen_change_threshold: number;
             /**
              * Screen Change Cooldown Ms
-             * @default 10000
+             * @default 5000
              */
             screen_change_cooldown_ms: number;
             /**

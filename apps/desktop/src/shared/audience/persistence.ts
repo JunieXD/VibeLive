@@ -11,6 +11,8 @@ import type {
 
 const STABLE_ID_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/
 const MODE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const MAX_FRAME_BUNDLE_SIZE = 5
+const MAX_FRAME_WINDOW_MS = 30_000
 const BUILT_IN_MODE_MIGRATIONS = new Map([
   ['room-6657', { fromRevision: 1, toRevision: 2 }]
 ])
@@ -67,7 +69,9 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
 
   validateReferences(personas, modes, activeModeId, issues)
   if (issues.length > 0) return { ok: false, issues }
-  const migratedFromVersion = sourceVersion < 4 ? sourceVersion : undefined
+  const migratedFromVersion: 1 | 2 | 3 | undefined = sourceVersion === 4
+    ? undefined
+    : sourceVersion
   return {
     ok: true,
     workspace: { version: 4, personas, modeState: { modes, activeModeId } },
@@ -323,7 +327,13 @@ function parsePersonaCounts(
   }
   const counts: Record<string, number> = {}
   for (const [personaId, count] of Object.entries(value)) {
-    if (!STABLE_ID_PATTERN.test(personaId) || !Number.isInteger(count) || count < 0 || count > 32) {
+    if (
+      !STABLE_ID_PATTERN.test(personaId) ||
+      typeof count !== 'number' ||
+      !Number.isInteger(count) ||
+      count < 0 ||
+      count > 32
+    ) {
       issues.push(`${path}.personaCounts.${personaId} must be an integer from 0 to 32`)
       continue
     }
@@ -416,10 +426,16 @@ function parseVisualSettings(
     value.frameBundleSize,
     `${path}.frameBundleSize`,
     1,
-    15,
+    MAX_FRAME_BUNDLE_SIZE,
     issues
   )
-  const frameWindowMs = boundedInteger(value.frameWindowMs, `${path}.frameWindowMs`, 1, 300_000, issues)
+  const frameWindowMs = legacyFrameWindowMs(value.frameWindowMs) ?? boundedInteger(
+    value.frameWindowMs,
+    `${path}.frameWindowMs`,
+    1,
+    MAX_FRAME_WINDOW_MS,
+    issues
+  )
   const frameMaxDimension = boundedInteger(
     value.frameMaxDimension,
     `${path}.frameMaxDimension`,
@@ -431,6 +447,9 @@ function parseVisualSettings(
     value.frameQuality <= 0 || value.frameQuality > 1) {
     issues.push(`${path}.frameQuality must be greater than 0 and at most 1`)
   }
+  const frameSelectionStrategy = value.frameSelectionStrategy === 'evenly_spaced'
+    ? 'latest_n'
+    : value.frameSelectionStrategy as AudienceVisualSettings['frameSelectionStrategy']
   return {
     barrageGenerationMode,
     viewerVisualInputMode: barrageGenerationMode === 'window_batch'
@@ -440,17 +459,34 @@ function parseVisualSettings(
     frameWindowMs: barrageGenerationMode === 'window_batch' ? 30_000 : frameWindowMs,
     frameSelectionStrategy: barrageGenerationMode === 'window_batch'
       ? 'change_peaks'
-      : value.frameSelectionStrategy as AudienceVisualSettings['frameSelectionStrategy'],
+      : frameSelectionStrategy,
     frameMaxDimension,
     frameQuality: value.frameQuality as number
   }
 }
 
 function legacyFrameBundleSize(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 15 || value > 60) {
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value <= MAX_FRAME_BUNDLE_SIZE ||
+    value > 60
+  ) {
     return null
   }
-  return 15
+  return MAX_FRAME_BUNDLE_SIZE
+}
+
+function legacyFrameWindowMs(value: unknown): number | null {
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value <= MAX_FRAME_WINDOW_MS ||
+    value > 300_000
+  ) {
+    return null
+  }
+  return MAX_FRAME_WINDOW_MS
 }
 
 function validateReferences(

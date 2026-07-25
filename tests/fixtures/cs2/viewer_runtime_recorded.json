@@ -1587,12 +1587,12 @@
       },
       "settings": {
         "frame_bundle": {
-          "frame_bundle_size": 15,
-          "frame_window_ms": 120000,
+          "frame_bundle_size": 5,
+          "frame_window_ms": 30000,
           "frame_selection_strategy": "change_peaks",
           "frame_max_dimension": 1280,
           "frame_quality": 82,
-          "frame_similarity_threshold": 0.9,
+          "frame_similarity_threshold": 0.95,
           "frame_anchor_interval_ms": 5000
         },
         "barrage_generation_mode": "per_viewer",
@@ -1618,7 +1618,7 @@
         "max_consecutive_ambient_waves": 1
       }
     },
-    "config_hash": "326cdd76844eb4048202d5673e38faf735eaadae588ecb55bb5ff122485a645b",
+    "config_hash": "13bd31cf15985b1d9c6a5f875220023267d9a9628cc4c043046805566c8587ce",
     "created_at_ms": 2000,
     "events": [
       {
@@ -3378,12 +3378,12 @@
     },
     "settings": {
       "frame_bundle": {
-        "frame_bundle_size": 15,
-        "frame_window_ms": 120000,
+        "frame_bundle_size": 5,
+        "frame_window_ms": 30000,
         "frame_selection_strategy": "change_peaks",
         "frame_max_dimension": 1280,
         "frame_quality": 82,
-        "frame_similarity_threshold": 0.9,
+        "frame_similarity_threshold": 0.95,
         "frame_anchor_interval_ms": 5000
       },
       "barrage_generation_mode": "per_viewer",

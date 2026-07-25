@@ -285,10 +285,11 @@ class ObservationWave(TypedDict):
 Viewer 的输入。已公开观众弹幕只在后续波的独立 reply context 中短时可见，不会通过整场
 历史或旧摘要持续污染普通上下文。
 
-`FrameBundle` 默认采用 `change_peaks`、最多 15 张，并允许热更新时间窗、
-`latest_n` / `evenly_spaced` / `change_peaks` 策略、最大尺寸和质量。默认
-`direct_frames` 让每个选中 Viewer 独立看到同一画面包；发送前删除超过 30 秒的普通帧，
-当前触发帧例外。`shared_summary` 只复用视觉摘要，不合并 Viewer 请求。
+`FrameBundle` 默认采用 `change_peaks`，只看最近 30 秒、最多发送 5 张。它以每组的首张
+作为相似度基准，同组只保留最新一张；超过 5 组时只保留最新的 5 张代表帧。`latest_n`
+直接保留最新帧；保存的旧 `evenly_spaced` 配置也按这个规则执行。默认 `direct_frames`
+让每个选中 Viewer 独立看到同一画面包；当前触发帧可作为例外保留。`shared_summary` 只复用
+视觉摘要，不合并 Viewer 请求。
 
 正式触发源包括用户文字、麦克风最终语音、独立系统声音最终转写、超过阈值且满足冷却的画面变化，以及连续模式下的
 有界 ambient tick。相近输入在 1 秒窗口内合并成一波；更高优先级波和新的用户输入波取代

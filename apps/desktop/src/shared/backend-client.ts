@@ -20,6 +20,8 @@ import {
 
 type Defaulted<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>
 
+const FRAME_SIMILARITY_THRESHOLD = 0.95
+
 export type CanonicalPersonaTemplate = ContractPersonaTemplate
 export type CanonicalModeDefinition = ModeDefinition
 type CompiledRuntimeSettings = Defaulted<RuntimeSettings, 'frame_bundle'> & {
@@ -171,7 +173,7 @@ export function compileCanonicalRuntimeSpec(
           : visual.frameSelectionStrategy,
         frame_max_dimension: visual.frameMaxDimension,
         frame_quality: Math.max(1, Math.min(100, Math.round(visual.frameQuality * 100))),
-        frame_similarity_threshold: 0.9,
+        frame_similarity_threshold: FRAME_SIMILARITY_THRESHOLD,
         frame_anchor_interval_ms: 5_000
       },
       barrage_generation_mode: visual.barrageGenerationMode,

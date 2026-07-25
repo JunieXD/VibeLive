@@ -284,9 +284,8 @@ export function ModeToolbar({
                 disabled={windowBatch}
                 value={activeMode.visualSettings.frameSelectionStrategy}
                 options={[
-                  { value: 'change_peaks', label: '相邻去重' },
-                  { value: 'latest_n', label: '最新帧' },
-                  { value: 'evenly_spaced', label: '均匀采样' }
+                  { value: 'change_peaks', label: '相似去重' },
+                  { value: 'latest_n', label: '最新帧' }
                 ]}
                 onChange={(frameSelectionStrategy) =>
                   onPatchMode({
@@ -303,7 +302,7 @@ export function ModeToolbar({
               <input
                 type="number"
                 min={1}
-                max={windowBatch ? 5 : 15}
+                max={5}
                 disabled={windowBatch}
                 value={activeMode.visualSettings.frameBundleSize}
                 onChange={(event) =>
@@ -313,7 +312,7 @@ export function ModeToolbar({
                       frameBundleSize: clampNumber(
                         event.target.value,
                         1,
-                        windowBatch ? 5 : 15
+                        5
                       )
                     }
                   })
@@ -325,7 +324,7 @@ export function ModeToolbar({
               <input
                 type="number"
                 min={1}
-                max={windowBatch ? 30000 : 300000}
+                max={30_000}
                 step={500}
                 disabled={windowBatch}
                 value={activeMode.visualSettings.frameWindowMs}
@@ -336,7 +335,7 @@ export function ModeToolbar({
                       frameWindowMs: clampNumber(
                         event.target.value,
                         1,
-                        windowBatch ? 30_000 : 300_000
+                        30_000
                       )
                     }
                   })

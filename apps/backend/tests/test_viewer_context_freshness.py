@@ -15,6 +15,7 @@ from advx_backend.domain.observation_wave import (
     FrameBundle,
     FrameBundleItem,
     FrameBundleSettings,
+    FrameSelectionStrategy,
     ObservationTrigger,
     ObservationWave,
     ViewerVisualInputMode,
@@ -227,11 +228,69 @@ async def test_window_batch_frame_bundle_is_30_seconds_max_five_and_keeps_trigge
 
 
 @pytest.mark.asyncio
+async def test_frame_bundle_keeps_trigger_and_newest_ordinary_frames() -> None:
+    class Metadata:
+        async def resolve(self, *, session_id: str, frame: FrameRef) -> FrameMetadata:
+            del session_id
+            return FrameMetadata(
+                width=1280,
+                height=720,
+                encoding="jpeg",
+                content_hash=f"{int(frame.frame_id) + 1:064x}",
+                change_score=0.0,
+            )
+
+    observation = Observation(
+        session_id="session",
+        observation_id="newest-frames",
+        created_at_ms=100_000,
+        frames=tuple(
+            FrameRef(
+                frame_id=str(index),
+                created_at_ms=94_000 + index * 1_000,
+                mime_type="image/jpeg",
+                data_ref=f"frame:{index}",
+            )
+            for index in range(7)
+        ),
+        trigger_frame_ids=("0",),
+    )
+    committed = SimpleNamespace(
+        audience_epoch=1,
+        spec=SimpleNamespace(
+            room=SimpleNamespace(room_id="room"),
+            settings=RuntimeSettings(
+                frame_bundle=FrameBundleSettings(
+                    frame_bundle_size=15,
+                    frame_window_ms=120_000,
+                    frame_selection_strategy=FrameSelectionStrategy.EVENLY_SPACED,
+                    frame_similarity_threshold=0.9,
+                )
+            ),
+        ),
+    )
+    coordinator = ViewerRuntimeCoordinator(
+        runtime_state=object(),
+        viewer_runtime=object(),
+        frame_metadata=Metadata(),
+    )
+
+    wave = await coordinator._build_wave(observation, committed)
+
+    assert wave.frame_bundle is not None
+    assert wave.frame_bundle.settings.frame_bundle_size == 5
+    assert wave.frame_bundle.settings.frame_window_ms == 30_000
+    assert wave.frame_bundle.settings.frame_similarity_threshold == 0.95
+    assert wave.frame_bundle.settings.frame_selection_strategy is FrameSelectionStrategy.LATEST_N
+    assert [frame.frame_id for frame in wave.frame_bundle.frames] == ["0", "3", "4", "5", "6"]
+
+
+@pytest.mark.asyncio
 async def test_frame_bundle_uses_visual_signatures_to_bound_gradual_scene_drift() -> None:
     class Metadata:
         async def resolve(self, *, session_id: str, frame: FrameRef) -> FrameMetadata:
             del session_id
-            level = int(frame.frame_id)
+            level = 0 if int(frame.frame_id) < 2 else 1
             return FrameMetadata(
                 width=1280,
                 height=720,
@@ -262,7 +321,7 @@ async def test_frame_bundle_uses_visual_signatures_to_bound_gradual_scene_drift(
             room=SimpleNamespace(room_id="room"),
             settings=RuntimeSettings(
                 frame_bundle=FrameBundleSettings(
-                    frame_bundle_size=15,
+                    frame_bundle_size=5,
                     frame_similarity_threshold=0.9,
                 )
             ),
@@ -277,6 +336,7 @@ async def test_frame_bundle_uses_visual_signatures_to_bound_gradual_scene_drift(
     wave = await coordinator._build_wave(observation, committed)
 
     assert wave.frame_bundle is not None
+    assert wave.frame_bundle.settings.frame_similarity_threshold == 0.95
     assert [frame.frame_id for frame in wave.frame_bundle.frames] == ["1", "2"]
 
 

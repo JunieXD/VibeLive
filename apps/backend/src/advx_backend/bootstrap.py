@@ -100,7 +100,7 @@ class PipelineConfig:
     room_event_capacity: int | None = None
     room_event_ttl_ms: int | None = None
     frame_capacity: int = 120
-    frame_ttl_ms: int = 120_000
+    frame_ttl_ms: int = 30_000
     max_frames_per_observation: int = 120
     max_events_per_observation: int | None = None
     frame_max_bytes: int = 4_194_304

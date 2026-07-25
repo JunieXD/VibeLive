@@ -30,9 +30,13 @@ from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemorySlice, RoomWorkingMemory
 from advx_backend.domain.observation import FrameRef, Observation
 from advx_backend.domain.observation_wave import (
+    DEFAULT_FRAME_SIMILARITY_THRESHOLD,
+    FRAME_BUNDLE_SELECTION_LIMIT,
+    MAX_FRAME_WINDOW_MS,
     UNBOUNDED_DEADLINE_AT_MS,
     FrameBundle,
     FrameBundleItem,
+    FrameSelectionStrategy,
     ObservationTrigger,
     ObservationWave,
     ViewerVisualInputMode,
@@ -727,6 +731,28 @@ class ViewerRuntimeCoordinator:
                 }
             )
         )
+        frame_settings = frame_settings.model_copy(
+            update={
+                "frame_bundle_size": min(
+                    frame_settings.frame_bundle_size,
+                    FRAME_BUNDLE_SELECTION_LIMIT,
+                ),
+                "frame_window_ms": min(
+                    frame_settings.frame_window_ms,
+                    MAX_FRAME_WINDOW_MS,
+                ),
+                "frame_similarity_threshold": max(
+                    frame_settings.frame_similarity_threshold,
+                    DEFAULT_FRAME_SIMILARITY_THRESHOLD,
+                ),
+                "frame_selection_strategy": (
+                    FrameSelectionStrategy.LATEST_N
+                    if frame_settings.frame_selection_strategy
+                    is FrameSelectionStrategy.EVENLY_SPACED
+                    else frame_settings.frame_selection_strategy
+                ),
+            }
+        )
         selected = select_frame_bundle(
             frames=frames,
             settings=frame_settings,
@@ -750,7 +776,9 @@ class ViewerRuntimeCoordinator:
                 key=lambda item: (item.captured_at_ms, item.frame_id),
             )
             trigger_ids = set(trigger_frame_ids)
-            forced = [item for item in combined if item.frame_id in trigger_ids]
+            forced = [
+                item for item in combined if item.frame_id in trigger_ids
+            ][-frame_settings.frame_bundle_size :]
             remaining = frame_settings.frame_bundle_size - len(forced)
             ordinary = [
                 item for item in combined if item.frame_id not in trigger_ids

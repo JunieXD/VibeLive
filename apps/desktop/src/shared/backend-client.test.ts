@@ -34,8 +34,10 @@ describe('canonical desktop runtime spec', () => {
         window_batch_context_window_ms: 30_000,
         window_batch_max_frames: 5,
         frame_bundle: {
-          frame_bundle_size: 15,
+          frame_bundle_size: 5,
+          frame_window_ms: 30_000,
           frame_selection_strategy: 'change_peaks',
+          frame_similarity_threshold: 0.95,
           frame_quality: 82
         },
         viewer_visual_input_mode: 'direct_frames',

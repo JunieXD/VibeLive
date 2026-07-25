@@ -431,7 +431,7 @@ def _request() -> ViewerGenerationRequest:
         visual_input_mode=ViewerVisualInputMode.DIRECT_FRAMES,
         frame_bundle=FrameBundle(
             bundle_id="bundle",
-            settings=FrameBundleSettings(frame_bundle_size=15),
+            settings=FrameBundleSettings(frame_bundle_size=5),
             frames=[frame],
         ),
         viewer_private_state=ViewerPrivateState(),
