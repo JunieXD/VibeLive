@@ -206,7 +206,7 @@ def _wave(
     )
 
 
-def test_speaker_budgets_and_direct_targets_are_deterministic_and_fair() -> None:
+def test_screen_waves_select_all_eligible_viewers_and_keep_other_budgets() -> None:
     viewers = [
         _viewer(f"viewer-{index:02}", last_spoke_at_ms=None if index < 2 else index * 1_000)
         for index in range(10)
@@ -245,7 +245,20 @@ def test_speaker_budgets_and_direct_targets_are_deterministic_and_fair() -> None
     )
 
     assert len(user.selected_viewer_ids) == 6
-    assert len(screen.selected_viewer_ids) == 4
+    assert screen.selected_viewer_ids == [
+        "persona-fresh",
+        "viewer-00",
+        "viewer-01",
+        "viewer-02",
+        "viewer-03",
+        "viewer-04",
+        "viewer-05",
+        "viewer-06",
+        "viewer-07",
+        "viewer-08",
+        "viewer-09",
+        "persona-old",
+    ]
     assert system_audio.selected_viewer_ids == ["persona-fresh", "viewer-00"]
     assert ambient.selected_viewer_ids == ["persona-fresh", "viewer-00"]
     assert direct.selected_viewer_ids == ["viewer-09"]

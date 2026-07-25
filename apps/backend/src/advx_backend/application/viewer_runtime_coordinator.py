@@ -525,7 +525,8 @@ class ViewerRuntimeCoordinator:
             ):
                 budget = settings.viewer_ambient_speaker_budget
             else:
-                budget = settings.viewer_screen_speaker_budget
+                # A screen-only wave is the fallback: invite every eligible viewer.
+                budget = len(eligible)
             selected = [
                 viewer.viewer_instance_id
                 for viewer in sorted(eligible, key=least_recent)[:budget]
