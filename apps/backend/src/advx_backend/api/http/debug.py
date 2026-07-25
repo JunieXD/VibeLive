@@ -13,6 +13,7 @@ from advx_backend.contracts.debug import (
     AiCallQueryResponse,
     AiCallRole,
     AiCallStatus,
+    AiCallTrace,
     DebugRuntimeSnapshot,
     TraceQuery,
     TraceQueryResponse,
@@ -30,6 +31,8 @@ class DebugServiceApi(Protocol):
     def query(self, query: TraceQuery) -> TraceQueryResponse: ...
 
     def query_ai_calls(self, query: AiCallQuery) -> AiCallQueryResponse: ...
+
+    def get_ai_call(self, call_id: str) -> AiCallTrace | None: ...
 
     def query_ai_call_image(self, preview_id: str) -> AiCallImagePreview | None: ...
 
@@ -148,6 +151,22 @@ def create_debug_router(*, local_token: str) -> APIRouter:
                 },
             )
         return preview
+
+    @router.get("/ai-calls/{call_id}", response_model=AiCallTrace)
+    async def query_ai_call(
+        request: Request,
+        call_id: Annotated[str, Path(min_length=1, max_length=128)],
+    ) -> AiCallTrace:
+        trace = _debug_service(request).get_ai_call(call_id)
+        if trace is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "ai_call_not_found",
+                    "message": "The AI call is unavailable.",
+                },
+            )
+        return trace
 
     @router.get("/runtime/{session_id}", response_model=DebugRuntimeSnapshot)
     async def runtime_snapshot(

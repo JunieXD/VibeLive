@@ -20,6 +20,7 @@ from advx_backend.contracts.debug import (
     ObservationWaveTrace,
 )
 from advx_backend.contracts.protocol import PROTOCOL_VERSION_HEADER
+from advx_backend.contracts.viewer_runtime import ViewerRequestTriggerContext
 from advx_backend.domain.observation_wave import MAX_FRAME_BUNDLE_SIZE
 from advx_backend.infrastructure.logging.ai_call_store import AiCallStore
 from advx_backend.infrastructure.logging.trace_store import (
@@ -168,15 +169,18 @@ def test_jsonl_reload_marks_unfinished_calls_interrupted(tmp_path: Path) -> None
     first.upsert(ai_call("call-done", status=AiCallStatus.SUCCEEDED))
 
     reloaded = AiCallStore(path=path, clock_ms=lambda: 100)
-    calls = {item.call_id: item for item in reloaded.query().items}
+    pending = reloaded.get("call-pending")
+    done = reloaded.get("call-done")
 
-    assert calls["call-pending"].status is AiCallStatus.INTERRUPTED
-    assert calls["call-pending"].completed_at_ms == 100
-    assert calls["call-pending"].duration_ms == 90
-    assert calls["call-pending"].timeline[-1].detail == {
+    assert pending is not None
+    assert done is not None
+    assert pending.status is AiCallStatus.INTERRUPTED
+    assert pending.completed_at_ms == 100
+    assert pending.duration_ms == 90
+    assert pending.timeline[-1].detail == {
         "reason": "backend_restart"
     }
-    assert calls["call-done"].status is AiCallStatus.SUCCEEDED
+    assert done.status is AiCallStatus.SUCCEEDED
 
     loaded_again = AiCallStore(path=path, clock_ms=lambda: 200)
     assert loaded_again.query(
@@ -329,7 +333,19 @@ def test_upsert_rejects_namespaced_credentials_in_free_text() -> None:
 
 def test_debug_ai_calls_endpoint_exposes_filtered_traces() -> None:
     ai_store = AiCallStore()
-    ai_store.upsert(ai_call("call-1", status=AiCallStatus.SUCCEEDED))
+    trace = ai_call(
+        "call-1",
+        status=AiCallStatus.SUCCEEDED,
+        request=AiCallRequestSummary(input_preview={"summary": "kept in detail"}),
+    ).model_copy(
+        update={
+            "trigger_context": ViewerRequestTriggerContext(
+                triggers=["user_text"],
+                trigger_event_ids=["event-1"],
+            )
+        }
+    )
+    ai_store.upsert(trace)
     service = DebugService(TraceStore(), ai_call_store=ai_store)
     app = FastAPI()
     app.state.debug_service = service
@@ -352,6 +368,51 @@ def test_debug_ai_calls_endpoint_exposes_filtered_traces() -> None:
 
     assert response.status_code == 200
     assert response.json()["items"][0]["call_id"] == "call-1"
+    assert "request" not in response.json()["items"][0]
+    assert "response" not in response.json()["items"][0]
+    assert "timeline" not in response.json()["items"][0]
+    assert response.json()["items"][0]["trigger_context"] == {
+        "triggers": ["user_text"],
+        "trigger_event_ids": ["event-1"],
+        "trigger_frame_ids": [],
+        "screen_change_score": None,
+        "target_viewer_id": None,
+        "target_persona_id": None,
+        "target_ambiguous": False,
+        "selection_reason_codes": [],
+    }
+
+    detail_response = client.get(
+        "/debug/ai-calls/call-1",
+        headers={
+            "Authorization": f"Bearer {LOCAL_TOKEN}",
+            PROTOCOL_VERSION_HEADER: "3",
+        },
+    )
+
+    assert detail_response.status_code == 200
+    assert detail_response.json()["request"]["input_preview"] == {
+        "summary": "kept in detail"
+    }
+
+
+def test_debug_ai_call_detail_endpoint_returns_not_found_for_evicted_call() -> None:
+    service = DebugService(TraceStore(), ai_call_store=AiCallStore())
+    app = FastAPI()
+    app.state.debug_service = service
+    app.include_router(create_debug_router(local_token=LOCAL_TOKEN))
+    client = TestClient(app)
+
+    response = client.get(
+        "/debug/ai-calls/not-found",
+        headers={
+            "Authorization": f"Bearer {LOCAL_TOKEN}",
+            PROTOCOL_VERSION_HEADER: "3",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "ai_call_not_found"
 
 
 def test_debug_ai_call_image_endpoint_exposes_only_ephemeral_previews() -> None:

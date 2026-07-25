@@ -76,6 +76,8 @@ export type ProviderProbeResult = ProviderCapabilityProbeResult
 export type DebugTraceSummary = ViewerRequestTrace
 export type DebugTraceQueryResult = TraceQueryResponse
 export type AiCallTrace = import('@advx/contracts').components['schemas']['AiCallTrace']
+export type AiCallListItem =
+  import('@advx/contracts').components['schemas']['AiCallListItem']
 export type AiCallImagePreview =
   import('@advx/contracts').components['schemas']['AiCallImagePreview']
 export type AiCallQueryResponse =

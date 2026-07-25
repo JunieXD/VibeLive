@@ -4,6 +4,7 @@ import {
   ArrowUpFromLine,
   Braces,
   Check,
+  ChevronDown,
   Clock3,
   Copy,
   Image as ImageIcon,
@@ -12,8 +13,9 @@ import {
   Unplug,
   Zap
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import type {
+  AiCallListItem,
   AiCallQuery,
   AiCallRole,
   AiCallStatus,
@@ -225,6 +227,85 @@ function EmptyDetail(): React.JSX.Element {
     </div>
   )
 }
+
+function LoadingDetail(): React.JSX.Element {
+  return (
+    <div className="grid h-full min-h-64 place-items-center px-8 text-center text-xs text-[var(--text-dim)]">
+      <div>
+        <RefreshCw className="mx-auto mb-2 animate-spin" size={18} aria-hidden="true" />
+        正在读取 AI 调用详情
+      </div>
+    </div>
+  )
+}
+
+function DetailLoadError({ error }: { error: string }): React.JSX.Element {
+  return (
+    <div className="grid h-full min-h-64 place-items-center px-8 text-center" role="alert">
+      <div>
+        <Unplug className="mx-auto mb-2 text-[var(--danger)]" size={22} aria-hidden="true" />
+        <strong className="block text-xs text-[var(--text)]">调用详情读取失败</strong>
+        <p className="mb-0 mt-1 break-words text-[11px] leading-5 text-[var(--text-dim)]">{error}</p>
+      </div>
+    </div>
+  )
+}
+
+const AiCallListRow = memo(function AiCallListRow({
+  trace,
+  selected,
+  onSelect
+}: {
+  trace: AiCallListItem
+  selected: boolean
+  onSelect: (callId: string) => void
+}): React.JSX.Element {
+  const triggerLabel = trace.role === 'viewer' && trace.trigger_context
+    ? formatViewerTriggerLabels(trace.trigger_context.triggers)
+    : null
+
+  return (
+    <li className="border-b border-[var(--border)]">
+      <button
+        className={`grid w-full min-w-0 gap-2 px-3 py-3 text-left hover:bg-[var(--panel-raise)] ${selected ? 'bg-[var(--accent-soft)]' : 'bg-transparent'}`}
+        type="button"
+        aria-current={selected ? 'true' : undefined}
+        onClick={() => onSelect(trace.call_id)}
+      >
+        <span className="flex min-w-0 items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <strong className="truncate text-xs">{aiCallRoleLabels[trace.role]}</strong>
+            {triggerLabel && (
+              <span
+                className="max-w-32 truncate rounded-md bg-[var(--panel-raise)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-dim)]"
+                title={triggerLabel}
+              >
+                {triggerLabel}
+              </span>
+            )}
+          </span>
+          <time className="shrink-0 text-[10px] tabular-nums text-[var(--text-faint)]">
+            {formatTimestamp(trace.started_at_ms)}
+          </time>
+        </span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={`shrink-0 rounded-lg px-1.5 py-0.5 text-[10px] font-bold ${statusClasses[trace.status]}`}>
+            {aiCallStatusLabels[trace.status]}
+          </span>
+          <span className="truncate text-[11px] text-[var(--text-dim)]" title={trace.model_id}>
+            {trace.model_id}
+          </span>
+          <span className="ml-auto shrink-0 text-[10px] tabular-nums text-[var(--text-faint)]">
+            {formatDuration(trace.duration_ms)}
+          </span>
+        </span>
+        <code className="truncate font-mono text-[10px] text-[var(--text-faint)]" title={trace.correlation_id}>
+          {trace.correlation_id}
+        </code>
+      </button>
+    </li>
+  )
+})
 
 function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
   const correlations = collectCorrelationIds(trace)
@@ -442,7 +523,7 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
     role: role || undefined,
     status: status || undefined,
     correlationId: search.trim() || undefined,
-    limit: 250
+    limit: 50
   }), [currentSessionId, role, scope, search, status])
   const log = useAiCallLog({ enabled: active, query })
 
@@ -535,55 +616,35 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
               </div>
             </div>
           ) : (
-            <ol className="m-0 list-none p-0">
-              {log.items.map((trace) => {
-                const selected = trace.call_id === log.selectedCallId
-                const triggerLabel = trace.role === 'viewer' && trace.trigger_context
-                  ? formatViewerTriggerLabels(trace.trigger_context.triggers)
-                  : null
-                return (
-                  <li className="border-b border-[var(--border)]" key={trace.call_id}>
-                    <button
-                      className={`grid w-full min-w-0 gap-2 px-3 py-3 text-left hover:bg-[var(--panel-raise)] ${selected ? 'bg-[var(--accent-soft)]' : 'bg-transparent'}`}
-                      type="button"
-                      aria-current={selected ? 'true' : undefined}
-                      onClick={() => log.selectCall(trace.call_id)}
-                    >
-                      <span className="flex min-w-0 items-center justify-between gap-2">
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <strong className="truncate text-xs">{aiCallRoleLabels[trace.role]}</strong>
-                          {triggerLabel && (
-                            <span
-                              className="max-w-32 truncate rounded-md bg-[var(--panel-raise)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-dim)]"
-                              title={triggerLabel}
-                            >
-                              {triggerLabel}
-                            </span>
-                          )}
-                        </span>
-                        <time className="shrink-0 text-[10px] tabular-nums text-[var(--text-faint)]">
-                          {formatTimestamp(trace.started_at_ms)}
-                        </time>
-                      </span>
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className={`shrink-0 rounded-lg px-1.5 py-0.5 text-[10px] font-bold ${statusClasses[trace.status]}`}>
-                          {aiCallStatusLabels[trace.status]}
-                        </span>
-                        <span className="truncate text-[11px] text-[var(--text-dim)]" title={trace.model_id}>
-                          {trace.model_id}
-                        </span>
-                        <span className="ml-auto shrink-0 text-[10px] tabular-nums text-[var(--text-faint)]">
-                          {formatDuration(trace.duration_ms)}
-                        </span>
-                      </span>
-                      <code className="truncate font-mono text-[10px] text-[var(--text-faint)]" title={trace.correlation_id}>
-                        {trace.correlation_id}
-                      </code>
-                    </button>
-                  </li>
-                )
-              })}
-            </ol>
+            <>
+              <ol className="m-0 list-none p-0">
+                {log.items.map((trace) => (
+                  <AiCallListRow
+                    key={trace.call_id}
+                    trace={trace}
+                    selected={trace.call_id === log.selectedCallId}
+                    onSelect={log.selectCall}
+                  />
+                ))}
+              </ol>
+              {log.hasMore && (
+                <div className="border-t border-[var(--border)] p-2">
+                  <button
+                    className="flex h-8 w-full items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 text-[11px] font-bold text-[var(--text-dim)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-wait disabled:opacity-50"
+                    type="button"
+                    disabled={log.loadingMore || log.refreshing}
+                    onClick={() => void log.loadMore()}
+                  >
+                    {log.loadingMore ? (
+                      <RefreshCw className="animate-spin" size={14} aria-hidden="true" />
+                    ) : (
+                      <ChevronDown size={14} aria-hidden="true" />
+                    )}
+                    加载更多
+                  </button>
+                </div>
+              )}
+            </>
           )}
           {log.error && log.items.length > 0 && (
             <div className="sticky bottom-0 border-t border-[var(--danger-border)] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger-text)]" role="alert">
@@ -591,7 +652,15 @@ export function AiCallLog({ active, currentSessionId }: AiCallLogProps): React.J
             </div>
           )}
         </aside>
-        {log.selectedCall ? <CallDetail trace={log.selectedCall} /> : <EmptyDetail />}
+        {log.selectedCall ? (
+          <CallDetail trace={log.selectedCall} />
+        ) : log.detailError ? (
+          <DetailLoadError error={log.detailError} />
+        ) : log.selectedCallId ? (
+          <LoadingDetail />
+        ) : (
+          <EmptyDetail />
+        )}
       </div>
     </section>
   )

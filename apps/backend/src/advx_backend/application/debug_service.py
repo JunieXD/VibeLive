@@ -78,6 +78,9 @@ class DebugService:
     ) -> AiCallQueryResponse:
         return self._ai_call_store.query(query)
 
+    def get_ai_call(self, call_id: str) -> AiCallTrace | None:
+        return self._ai_call_store.get(call_id)
+
     def capture_ai_call_image(self, data_url: str) -> str | None:
         return self._ai_call_image_store.capture(data_url)
 

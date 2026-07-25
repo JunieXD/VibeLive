@@ -22,6 +22,7 @@ import type {
   AiCallQuery,
   AiCallImagePreview,
   AiCallQueryResponse,
+  AiCallTrace,
   AutoIngestResponse,
   CandidateCommitResponse,
   CompiledRuntimeSpec,
@@ -443,6 +444,10 @@ export class BackendClient {
     if (filters.limit !== undefined) query.set("limit", String(filters.limit));
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.request(`/debug/ai-calls${suffix}`, "GET");
+  }
+
+  async queryAiCall(callId: string): Promise<AiCallTrace> {
+    return this.request(`/debug/ai-calls/${encodeURIComponent(callId)}`, "GET");
   }
 
   async queryAiCallImage(previewId: string): Promise<AiCallImagePreview> {

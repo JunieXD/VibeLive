@@ -246,6 +246,34 @@ class AiCallTrace(DebugContractModel):
     redacted: Literal[True] = True
 
 
+class AiCallListItem(DebugContractModel):
+    """Compact AI call metadata used by the paginated log list."""
+
+    call_id: str = Field(min_length=1, max_length=128)
+    correlation_id: str = Field(min_length=1, max_length=128)
+    role: AiCallRole
+    status: AiCallStatus
+    model_id: str = Field(min_length=1, max_length=256)
+    trigger_context: ViewerRequestTriggerContext | None = None
+    started_at_ms: int = Field(ge=0)
+    updated_at_ms: int = Field(ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
+
+    @classmethod
+    def from_trace(cls, trace: AiCallTrace) -> "AiCallListItem":
+        return cls(
+            call_id=trace.call_id,
+            correlation_id=trace.correlation_id,
+            role=trace.role,
+            status=trace.status,
+            model_id=trace.model_id,
+            trigger_context=trace.trigger_context,
+            started_at_ms=trace.started_at_ms,
+            updated_at_ms=trace.updated_at_ms,
+            duration_ms=trace.duration_ms,
+        )
+
+
 class AiCallQuery(DebugContractModel):
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
     role: AiCallRole | None = None
@@ -256,7 +284,7 @@ class AiCallQuery(DebugContractModel):
 
 
 class AiCallQueryResponse(DebugContractModel):
-    items: list[AiCallTrace]
+    items: list[AiCallListItem]
     next_cursor: str | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 

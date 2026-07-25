@@ -4,6 +4,7 @@ import type {
   AiCallQuery,
   AiCallImagePreview,
   AiCallQueryResponse,
+  AiCallTrace,
   DebugTraceQueryResult,
   AutoIngestResponse,
   CandidateCommitResponse,
@@ -359,6 +360,7 @@ export type ControlApi = {
     cursor?: string
   ) => Promise<DebugTraceQueryResult>
   queryAiCalls: (query: AiCallQuery) => Promise<AiCallQueryResponse>
+  queryAiCall: (callId: string) => Promise<AiCallTrace>
   queryAiCallImage: (previewId: string) => Promise<AiCallImagePreview>
   submitUserText: (text: string, target?: TextSubmitTarget) => Promise<void>
   submitAudioSegment: (input: RealtimeAudioInput) => Promise<void>

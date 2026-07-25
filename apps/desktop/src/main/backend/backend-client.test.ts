@@ -98,6 +98,28 @@ describe("BackendClient runtime v2", () => {
     fetchMock.mockRestore();
   });
 
+  it("loads a single AI call detail through the token-protected debug endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ call_id: "call/a" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    const client = new BackendClient({
+      baseUrl: "http://127.0.0.1:9999",
+      localToken: "token"
+    });
+
+    await expect(client.queryAiCall("call/a")).resolves.toMatchObject({
+      call_id: "call/a"
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:9999/debug/ai-calls/call%2Fa"
+    );
+    fetchMock.mockRestore();
+  });
+
   it("treats an already-gone backend session as an idempotent stop", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

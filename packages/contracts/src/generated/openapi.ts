@@ -226,6 +226,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/debug/ai-calls/{call_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query Ai Call */
+        get: operations["query_ai_call_debug_ai_calls__call_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/debug/runtime/{session_id}": {
         parameters: {
             query?: never;
@@ -886,10 +903,31 @@ export interface components {
             /** Data Url */
             data_url: string;
         };
+        /**
+         * AiCallListItem
+         * @description Compact AI call metadata used by the paginated log list.
+         */
+        AiCallListItem: {
+            /** Call Id */
+            call_id: string;
+            /** Correlation Id */
+            correlation_id: string;
+            role: components["schemas"]["AiCallRole"];
+            status: components["schemas"]["AiCallStatus"];
+            /** Model Id */
+            model_id: string;
+            trigger_context?: components["schemas"]["ViewerRequestTriggerContext"] | null;
+            /** Started At Ms */
+            started_at_ms: number;
+            /** Updated At Ms */
+            updated_at_ms: number;
+            /** Duration Ms */
+            duration_ms?: number | null;
+        };
         /** AiCallQueryResponse */
         AiCallQueryResponse: {
             /** Items */
-            items: components["schemas"]["AiCallTrace"][];
+            items: components["schemas"]["AiCallListItem"][];
             /** Next Cursor */
             next_cursor?: string | null;
             /** Metadata */
@@ -3887,6 +3925,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiCallImagePreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_ai_call_debug_ai_calls__call_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "3";
+            };
+            path: {
+                call_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiCallTrace"];
                 };
             };
             /** @description Validation Error */

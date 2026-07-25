@@ -3,6 +3,16 @@ import type { AiCallTrace } from '../../../../shared/backend-client'
 type ViewerTriggerContext = NonNullable<AiCallTrace['trigger_context']>
 type ViewerTrigger = ViewerTriggerContext['triggers'][number]
 
+const timestampFormatter = new Intl.DateTimeFormat('zh-CN', {
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  fractionalSecondDigits: 3,
+  hour12: false
+})
+
 export const aiCallRoleLabels = {
   legacy_director: '旧版导演记录',
   viewer: '观众',
@@ -97,15 +107,7 @@ export function formatJson(value: unknown): string {
 
 export function formatTimestamp(timestampMs: number | null | undefined): string {
   if (timestampMs === null || timestampMs === undefined) return '—'
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    fractionalSecondDigits: 3,
-    hour12: false
-  }).format(new Date(timestampMs))
+  return timestampFormatter.format(new Date(timestampMs))
 }
 
 export function formatDuration(durationMs: number | null | undefined): string {
@@ -114,8 +116,8 @@ export function formatDuration(durationMs: number | null | undefined): string {
   return `${(durationMs / 1_000).toFixed(durationMs < 10_000 ? 2 : 1)} s`
 }
 
-export function retainSelectedCallId(
-  items: readonly AiCallTrace[],
+export function retainSelectedCallId<T extends { call_id: string }>(
+  items: readonly T[],
   selectedCallId: string | null
 ): string | null {
   if (selectedCallId && items.some((item) => item.call_id === selectedCallId)) {

@@ -10,6 +10,7 @@ from tempfile import NamedTemporaryFile
 from threading import RLock
 
 from advx_backend.contracts.debug import (
+    AiCallListItem,
     AiCallQuery,
     AiCallQueryResponse,
     AiCallStatus,
@@ -43,6 +44,7 @@ class AiCallStore:
         self._path = path
         self._clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
         self._items: OrderedDict[str, AiCallTrace] = OrderedDict()
+        self._ordered_items: tuple[AiCallTrace, ...] | None = None
         self._writes_since_compaction = 0
         self._lock = RLock()
         if path is not None:
@@ -58,6 +60,7 @@ class AiCallStore:
             if evicted:
                 self._items.popitem(last=False)
             self._items[trace.call_id] = trace
+            self._ordered_items = None
             if self._path is None:
                 return
             if evicted or self._writes_since_compaction >= self._max_items * 4:
@@ -68,17 +71,13 @@ class AiCallStore:
     def query(self, query: AiCallQuery | None = None) -> AiCallQueryResponse:
         with self._lock:
             query = query or AiCallQuery()
-            matching = sorted(
-                (
-                    item
-                    for item in self._items.values()
-                    if self._matches(item, query)
-                ),
-                key=self._sort_key,
-                reverse=True,
-            )
-            matched_count = len(matching)
             cursor_key = self._decode_cursor(query.cursor)
+            matching = [
+                item
+                for item in self._ordered_descending()
+                if self._matches(item, query)
+            ]
+            matched_count = len(matching)
             if cursor_key is not None:
                 matching = [
                     item for item in matching if self._sort_key(item) < cursor_key
@@ -90,7 +89,7 @@ class AiCallStore:
                 else None
             )
             response = AiCallQueryResponse(
-                items=page,
+                items=[AiCallListItem.from_trace(item) for item in page],
                 next_cursor=next_cursor,
                 metadata={
                     "retained": len(self._items),
@@ -101,6 +100,13 @@ class AiCallStore:
             )
             assert_redacted_artifact(response)
             return response
+
+    def get(self, call_id: str) -> AiCallTrace | None:
+        with self._lock:
+            trace = self._items.get(call_id)
+            if trace is not None:
+                assert_redacted_artifact(trace)
+            return trace
 
     def _load(self) -> None:
         assert self._path is not None
@@ -213,6 +219,17 @@ class AiCallStore:
     @staticmethod
     def _sort_key(trace: AiCallTrace) -> tuple[int, str]:
         return trace.started_at_ms, trace.call_id
+
+    def _ordered_descending(self) -> tuple[AiCallTrace, ...]:
+        if self._ordered_items is None:
+            self._ordered_items = tuple(
+                sorted(
+                    self._items.values(),
+                    key=self._sort_key,
+                    reverse=True,
+                )
+            )
+        return self._ordered_items
 
     @staticmethod
     def _encode_cursor(trace: AiCallTrace) -> str:

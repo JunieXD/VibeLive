@@ -1186,6 +1186,13 @@ export function registerDesktopIpc(
     assertControlSender(event);
     return backendClient.queryAiCalls(query);
   });
+  ipcMain.handle("backend:ai-call", (event, callId: string) => {
+    assertControlSender(event);
+    if (typeof callId !== "string" || !callId.trim() || callId.length > 128) {
+      throw new Error("AI 调用 ID 无效。");
+    }
+    return backendClient.queryAiCall(callId);
+  });
   ipcMain.handle("backend:ai-call-image", (event, previewId: string) => {
     assertControlSender(event);
     if (typeof previewId !== "string" || !previewId.trim() || previewId.length > 128) {
