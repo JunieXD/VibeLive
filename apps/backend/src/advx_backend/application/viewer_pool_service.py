@@ -14,6 +14,105 @@ from advx_backend.domain.viewer import (
     ViewerPrivateState,
 )
 
+_GIVEN_NAMES = (
+    "阿北",
+    "阿沐",
+    "小陈",
+    "小林",
+    "阿澈",
+    "桃子",
+    "柚子",
+    "小七",
+    "小满",
+    "阿禾",
+    "南风",
+    "可乐",
+)
+_NICKNAMES = (
+    "土豆",
+    "青柠",
+    "泡芙",
+    "栗子",
+    "团子",
+    "番茄",
+    "豆花",
+    "布丁",
+    "年糕",
+    "汽水",
+    "键帽",
+    "耳机",
+)
+_STATES = (
+    "熬夜",
+    "路过",
+    "排队",
+    "潜水",
+    "摸鱼",
+    "掉线",
+    "手慢",
+    "蹲点",
+    "观战",
+    "等开局",
+    "看回放",
+    "刚上线",
+)
+_GAME_WORDS = (
+    "排位",
+    "残局",
+    "补枪",
+    "守点",
+    "烟雾",
+    "压枪",
+    "爆头",
+    "开麦",
+    "观战",
+    "练枪",
+    "上分",
+    "回防",
+)
+_ROLES = (
+    "练习生",
+    "研究员",
+    "观察员",
+    "路人",
+    "替补",
+    "记录员",
+    "队友",
+    "摸鱼员",
+    "气氛组",
+    "小助手",
+    "爱好者",
+    "玩家",
+)
+_OBJECTS = (
+    "耳机",
+    "键盘",
+    "鼠标",
+    "手柄",
+    "汽水",
+    "外设",
+    "显示器",
+    "弹幕",
+    "盒饭",
+    "键帽",
+    "背包",
+    "充电线",
+)
+_HANDLES = (
+    "momo",
+    "nono",
+    "kira",
+    "vivi",
+    "zero",
+    "mika",
+    "niko",
+    "mimi",
+    "yoyo",
+    "kiwi",
+    "sora",
+    "nana",
+)
+
 
 class ViewerPoolModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -82,6 +181,7 @@ class ViewerPoolService:
             session_seed=session_seed,
         )
         viewers: list[ViewerInstance] = []
+        usernames: set[str] = set()
         for creation_ordinal, persona_id in enumerate(persona_slots, start=1):
             persona = personas.get(persona_id)
             if persona is None:
@@ -95,6 +195,7 @@ class ViewerPoolService:
                     persona=persona,
                     ordinal=creation_ordinal,
                     created_at_ms=spec.room.updated_at_ms,
+                    used_usernames=usernames,
                 )
             )
 
@@ -317,6 +418,7 @@ class ViewerPoolService:
             persona=persona,
             ordinal=ordinal,
             created_at_ms=created_at_ms,
+            used_usernames={viewer.username for viewer in current.viewers},
         )
 
     @staticmethod
@@ -375,10 +477,12 @@ class ViewerPoolService:
         persona: PersonaTemplate,
         ordinal: int,
         created_at_ms: int,
+        used_usernames: set[str],
     ) -> ViewerInstance:
         seed = f"{session_seed}\x00{session_id}\x00{ordinal}\x00viewer-v2"
         digest = hashlib.sha256(seed.encode("utf-8")).digest()
-        username = self._username(digest, ordinal)
+        username = self._unique_username(self._username(digest, ordinal), used_usernames)
+        used_usernames.add(username)
         return ViewerInstance(
             viewer_instance_id=f"viewer-{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:24]}",
             room_id=room_id,
@@ -413,38 +517,37 @@ class ViewerPoolService:
 
     @staticmethod
     def _username(digest: bytes, ordinal: int) -> str:
-        prefixes = (
-            "夜航",
-            "像素",
-            "青柠",
-            "回声",
-            "慢热",
-            "晴窗",
-            "白噪",
-            "纸飞机",
-            "小行星",
-            "半拍",
-            "路过",
-            "云端",
-        )
-        suffixes = (
-            "观测员",
-            "玩家",
-            "电台",
-            "存档",
-            "频道",
-            "信号",
-            "汽水",
-            "耳机",
-            "胶片",
-            "坐标",
-            "弹簧",
-            "方块",
-        )
-        prefix = prefixes[digest[0] % len(prefixes)]
-        suffix = suffixes[digest[1] % len(suffixes)]
-        number = (int.from_bytes(digest[2:4], "big") + ordinal) % 100
-        return f"{prefix}{suffix}{number:02d}"
+        template = digest[0] % 6
+        if template == 0:
+            return _GIVEN_NAMES[digest[1] % len(_GIVEN_NAMES)]
+        if template == 1:
+            return f"小{_NICKNAMES[digest[1] % len(_NICKNAMES)]}"
+        if template == 2:
+            return (
+                f"{_STATES[digest[1] % len(_STATES)]}"
+                f"{_ROLES[digest[2] % len(_ROLES)]}"
+            )
+        if template == 3:
+            return (
+                f"{_GAME_WORDS[digest[1] % len(_GAME_WORDS)]}"
+                f"{_ROLES[digest[2] % len(_ROLES)]}"
+            )
+        if template == 4:
+            return (
+                f"{_GIVEN_NAMES[digest[1] % len(_GIVEN_NAMES)]}的"
+                f"{_OBJECTS[digest[2] % len(_OBJECTS)]}"
+            )
+        number = (int.from_bytes(digest[3:5], "big") + ordinal) % 100
+        return f"{_HANDLES[digest[1] % len(_HANDLES)]}_{number:02d}"
+
+    @staticmethod
+    def _unique_username(username: str, used_usernames: set[str]) -> str:
+        if username not in used_usernames:
+            return username
+        suffix = 2
+        while f"{username}_{suffix}" in used_usernames:
+            suffix += 1
+        return f"{username}_{suffix}"
 
     @staticmethod
     def _unit(digest: bytes, offset: int) -> float:

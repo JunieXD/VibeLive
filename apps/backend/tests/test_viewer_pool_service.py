@@ -113,6 +113,52 @@ def test_persona_counts_are_exact_for_pool_reconciliation_and_replacements() -> 
     assert replacement.persona_id == "skeptic"
 
 
+def test_usernames_are_deterministic_and_unique_within_a_session() -> None:
+    spec = _spec(target=32)
+    first = ViewerPoolService(id_generator=_UnusedIdGenerator()).create_pool(
+        room_id="room-1",
+        session_id="session-1",
+        audience_epoch=1,
+        session_seed="session-1",
+        spec=spec,
+    )
+    second = ViewerPoolService(id_generator=_UnusedIdGenerator()).create_pool(
+        room_id="room-1",
+        session_id="session-1",
+        audience_epoch=1,
+        session_seed="session-1",
+        spec=spec,
+    )
+
+    first_usernames = [viewer.username for viewer in first.viewers]
+    assert first_usernames == [viewer.username for viewer in second.viewers]
+    assert len(first_usernames) == len(set(first_usernames))
+    assert all(1 <= len(username) <= 64 for username in first_usernames)
+    assert all(viewer.display_name == viewer.username for viewer in first.viewers)
+
+
+def test_username_uses_livestream_name_templates() -> None:
+    names = [
+        ViewerPoolService._username(bytes([template, 0, 0, 0, 0]), ordinal=1)
+        for template in range(6)
+    ]
+
+    assert names == [
+        "阿北",
+        "小土豆",
+        "熬夜练习生",
+        "排位练习生",
+        "阿北的耳机",
+        "momo_01",
+    ]
+
+
+def test_username_collision_uses_a_stable_suffix() -> None:
+    assert ViewerPoolService._unique_username(
+        "momo_33", {"momo_33", "momo_33_2"}
+    ) == "momo_33_3"
+
+
 def _spec(*, target: int) -> CanonicalRuntimeSpec:
     persona = PersonaTemplate(
         persona_id="curious",
