@@ -392,7 +392,10 @@ class ViewerAudienceService:
             return viewer.model_copy(
                 update={
                     "private_state": private_state,
-                    "viewer_sequence": request.viewer_sequence,
+                    "viewer_sequence": max(
+                        viewer.viewer_sequence,
+                        request.viewer_sequence,
+                    ),
                     "behavior_revision": viewer.behavior_revision + 1,
                 }
             )
@@ -423,7 +426,10 @@ class ViewerAudienceService:
             return viewer.model_copy(
                 update={
                     "private_state": private_state,
-                    "viewer_sequence": request.viewer_sequence,
+                    "viewer_sequence": max(
+                        viewer.viewer_sequence,
+                        request.viewer_sequence,
+                    ),
                     "behavior_revision": viewer.behavior_revision + 1,
                 }
             )

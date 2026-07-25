@@ -44,6 +44,7 @@ class RuntimeStateStore:
     def __init__(self) -> None:
         self._states: dict[str, CommittedRuntime] = {}
         self._claimed_sequences: dict[str, dict[str, int]] = {}
+        self._issued_sequences: dict[str, dict[str, set[int]]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._effect_locks: dict[str, asyncio.Lock] = {}
         self._effect_owners: dict[str, asyncio.Task[object]] = {}
@@ -99,6 +100,7 @@ class RuntimeStateStore:
                         accepting_results=False,
                     )
                 self._claimed_sequences.pop(session_id, None)
+                self._issued_sequences.pop(session_id, None)
 
     async def start_session(self, session_id: str) -> None:
         del session_id
@@ -221,6 +223,8 @@ class RuntimeStateStore:
                 if viewer_sequence != current + 1:
                     return False
                 claims[viewer_instance_id] = viewer_sequence
+                issued = self._issued_sequences.setdefault(session_id, {})
+                issued.setdefault(viewer_instance_id, set()).add(viewer_sequence)
                 return True
 
     @asynccontextmanager
@@ -336,10 +340,11 @@ class RuntimeStateStore:
             return False
         if viewer_sequence is None:
             return False
-        claimed = self._claimed_sequences.get(session_id, {}).get(
-            viewer_instance_id
+        issued = self._issued_sequences.get(session_id, {}).get(
+            viewer_instance_id,
+            set(),
         )
-        return claimed == viewer_sequence
+        return viewer_sequence in issued
 
     async def update_viewer(
         self,
@@ -386,6 +391,10 @@ class RuntimeStateStore:
                 )
                 if not self._viewer_is_active(next_viewer):
                     self._claimed_sequences.get(session_id, {}).pop(
+                        viewer_instance_id,
+                        None,
+                    )
+                    self._issued_sequences.get(session_id, {}).pop(
                         viewer_instance_id,
                         None,
                     )
@@ -457,6 +466,9 @@ class RuntimeStateStore:
             viewer.viewer_instance_id: viewer.viewer_sequence
             for viewer in state.pool.viewers
         }
+        self._issued_sequences[state.session_id] = {
+            viewer.viewer_instance_id: set() for viewer in state.pool.viewers
+        }
 
     def _replace_state_locked(self, state: CommittedRuntime) -> None:
         current = self._states[state.session_id]
@@ -482,6 +494,9 @@ class RuntimeStateStore:
         )
         self._states[state.session_id] = normalized
         self._claimed_sequences[state.session_id] = claims
+        self._issued_sequences[state.session_id] = {
+            viewer.viewer_instance_id: set() for viewer in state.pool.viewers
+        }
 
     @staticmethod
     def _retained_viewer_ids(

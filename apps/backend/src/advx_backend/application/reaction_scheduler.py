@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from advx_backend.application.ports.generation import SessionTaskScope
@@ -101,6 +101,9 @@ class _SessionSchedule:
     worker: asyncio.Task[None] | None = None
     pending: _ScheduledObservation | None = None
     running: _ScheduledObservation | None = None
+    preserved: dict[asyncio.Task[None], _ScheduledObservation] = field(
+        default_factory=dict
+    )
 
 
 class LatestWinsReactionScheduler:
@@ -151,6 +154,48 @@ class LatestWinsReactionScheduler:
                 self._sessions.move_to_end(observation.session_id)
 
             priority = self._priority(observation)
+            if priority == 3:
+                scheduled = _ScheduledObservation(
+                    observation=observation,
+                    completions=[completion],
+                    merge_window_ms=merge_window_ms,
+                    merge_deadline_ms=self._clock.now_ms() + merge_window_ms,
+                )
+                started = asyncio.Event()
+                try:
+                    task = await self._session_tasks.start_task(
+                        observation.session_id,
+                        lambda: self._run_preserved(
+                            observation.session_id,
+                            schedule,
+                            scheduled,
+                            started,
+                        ),
+                        name=(
+                            f"reaction-preserved:{observation.session_id}:"
+                            f"{observation.observation_id}"
+                        ),
+                    )
+                except asyncio.CancelledError:
+                    self._resolve(completion, None)
+                    self._remove_if_idle(observation.session_id, schedule)
+                    raise
+                except Exception as error:
+                    logger.info(
+                        "reaction scheduler rejected observation",
+                        extra={
+                            "session_id": observation.session_id,
+                            "observation_id": observation.observation_id,
+                            "error_type": type(error).__name__,
+                        },
+                    )
+                    self._resolve(completion, None)
+                    self._remove_if_idle(observation.session_id, schedule)
+                else:
+                    schedule.preserved[task] = scheduled
+                    started.set()
+                return completion
+
             queue_behind_running = False
             running_priority = (
                 None
@@ -309,18 +354,30 @@ class LatestWinsReactionScheduler:
             if schedule is None:
                 return
 
-            for scheduled in (schedule.pending, schedule.running):
+            for scheduled in (
+                schedule.pending,
+                schedule.running,
+                *schedule.preserved.values(),
+            ):
                 if scheduled is not None:
                     self._resolve_all(scheduled.completions, None)
             schedule.pending = None
             schedule.running = None
             worker = schedule.worker
             schedule.worker = None
+            preserved = tuple(schedule.preserved)
+            schedule.preserved.clear()
 
         current_task = asyncio.current_task()
-        if worker is not None and worker is not current_task and not worker.done():
-            worker.cancel()
-            await asyncio.gather(worker, return_exceptions=True)
+        tasks = tuple(
+            task
+            for task in (worker, *preserved)
+            if task is not None and task is not current_task and not task.done()
+        )
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def wait_for_idle(self, session_id: str | None = None) -> None:
         """Wait for currently scheduled work; primarily useful to lifecycle adapters."""
@@ -329,18 +386,54 @@ class LatestWinsReactionScheduler:
             async with self._lock:
                 if session_id is None:
                     workers = tuple(
-                        schedule.worker
+                        task
                         for schedule in self._sessions.values()
-                        if schedule.worker is not None
+                        for task in (
+                            *((schedule.worker,) if schedule.worker is not None else ()),
+                            *schedule.preserved,
+                        )
                     )
                 else:
                     schedule = self._sessions.get(session_id)
                     workers = (
-                        () if schedule is None or schedule.worker is None else (schedule.worker,)
+                        ()
+                        if schedule is None
+                        else (
+                            *((schedule.worker,) if schedule.worker is not None else ()),
+                            *schedule.preserved,
+                        )
                     )
             if not workers:
                 return
             await asyncio.gather(*workers, return_exceptions=True)
+
+    async def _run_preserved(
+        self,
+        session_id: str,
+        schedule: _SessionSchedule,
+        scheduled: _ScheduledObservation,
+        started: asyncio.Event,
+    ) -> None:
+        await started.wait()
+        task = asyncio.current_task()
+        assert task is not None
+        try:
+            if scheduled.merge_window_ms:
+                remaining_ms = scheduled.merge_deadline_ms - self._clock.now_ms()
+                if remaining_ms > 0:
+                    await asyncio.sleep(remaining_ms / 1_000)
+            result = await self._execute(scheduled)
+            async with self._lock:
+                still_current = (
+                    self._sessions.get(session_id) is schedule
+                    and schedule.preserved.get(task) is scheduled
+                )
+            self._resolve_all(scheduled.completions, result if still_current else None)
+        finally:
+            async with self._lock:
+                if schedule.preserved.get(task) is scheduled:
+                    schedule.preserved.pop(task, None)
+                self._remove_if_idle(session_id, schedule)
 
     async def _run_session(
         self,
@@ -653,6 +746,7 @@ class LatestWinsReactionScheduler:
             schedule.worker is None
             and schedule.pending is None
             and schedule.running is None
+            and not schedule.preserved
             and self._sessions.get(session_id) is schedule
         ):
             self._sessions.pop(session_id, None)
