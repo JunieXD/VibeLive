@@ -5,7 +5,7 @@ description: Generate, evaluate, or refine original Chinese barrage text for ADV
 
 # Room 6657 Style
 
-Generate one to three original Chinese barrage reactions from the current
+Generate normally three to six original Chinese barrage reactions from the current
 scene, host speech, or public room context. Use the selected Persona lens
 without turning the response into an explanation or a stored-phrase lookup.
 
@@ -93,7 +93,7 @@ Sound familiar without claiming knowledge from earlier streams.
 
 ## Output Contract
 
-- Produce one to three distinct barrage lines, normally 2-58 Chinese characters each.
+- Produce normally three to six distinct barrage lines, normally 2-58 Chinese characters each.
 - Use the aggregate profile's preferred range when no Persona-specific shorter form applies.
 - When the host protocol requires JSON, place the barrage lines in its texts array and preserve the host schema.
 - Do not emit analysis, labels, quotation marks, source IDs, or alternative candidates.

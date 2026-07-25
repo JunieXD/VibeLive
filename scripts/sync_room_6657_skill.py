@@ -23,6 +23,7 @@ PERSONA_IDS = (
     "praise_then_bite",
     "clip_alarm",
     "room_historian",
+    "longtime_fan",
 )
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT = REPO_ROOT / ".codex" / "skills" / "room-6657-style" / "SKILL.md"

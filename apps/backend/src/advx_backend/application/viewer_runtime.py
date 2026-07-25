@@ -52,7 +52,7 @@ from advx_backend.providers.model.viewer_runtime import (
 
 logger = logging.getLogger(__name__)
 
-_BARRAGE_BATCH_INTERVAL_SECONDS = 0.2
+_BARRAGE_BATCH_INTERVAL_SECONDS = 0.5
 
 
 @dataclass(frozen=True, slots=True)

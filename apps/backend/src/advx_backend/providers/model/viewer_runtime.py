@@ -30,7 +30,6 @@ from advx_backend.application.ai_call_logging import (
 from advx_backend.application.ports.ingest import FrameResolver
 from advx_backend.contracts.debug import AiCallRole
 from advx_backend.contracts.viewer_runtime import (
-    MAX_VIEWER_BARRAGE_BATCH_SIZE,
     EvidenceRef,
     ProviderRuntimeSpec,
     ViewerAction,
@@ -147,8 +146,10 @@ _CURRENT_WAVE_PRIORITY_GUIDANCE: Final = (
 )
 _VIEWER_SYSTEM_PROMPT_WITH_SILENCE: Final = (
     "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
-    "is only a behavioral tendency and is not your name or a system role. Produce silence or a "
-    "short burst of one to three natural barrage reactions. You may react to the host, scene, "
+    "is only a behavioral tendency and is not your name or a system role. Produce either "
+    "silence or, normally, a short burst of three to six natural barrage reactions. "
+    "You may react to the "
+    "host, scene, "
     "or a replyable public Viewer "
     "event, but may target only IDs explicitly allowed by the request. "
     f"{_CURRENT_WAVE_PRIORITY_GUIDANCE}"
@@ -174,8 +175,9 @@ _VIEWER_SYSTEM_PROMPT_WITH_SILENCE: Final = (
     "For a host, scene, or room target, viewer_instance_id and event_id must both be null. "
     "For a viewer target, provide viewer_instance_id only; for an event target, provide event_id "
     "only. No other target fields are allowed. Use null, never an empty string, for every absent "
-    "target ID. For action=barrage, texts must be a JSON array containing one to three distinct, "
-    "non-empty strings. Each entry must be a complete standalone barrage. Do not split one "
+    "target ID. For action=barrage, texts should normally be a JSON array containing three to "
+    "six distinct, non-empty strings. Each entry must be a complete standalone barrage. "
+    "Do not split one "
     "sentence or repeat the same point across entries. For action=silence, intent must be silence, "
     "target and texts must be null, and reaction_type must be silence. Do not return "
     "generation_request_id, "
@@ -304,7 +306,6 @@ class _ViewerModelOutput(BaseModel):
     texts: list[ViewerBarrageText] | None = Field(
         default=None,
         min_length=1,
-        max_length=MAX_VIEWER_BARRAGE_BATCH_SIZE,
     )
     reaction_type: str = Field(min_length=1, max_length=64)
     decision_reason: str | None = Field(default=None, min_length=1, max_length=160)

@@ -302,7 +302,7 @@ async def test_new_wave_does_not_block_or_discard_late_old_output() -> None:
     second_summary = await asyncio.wait_for(second, timeout=0.5)
 
     provider.release_first.set()
-    first_summary = await asyncio.wait_for(first, timeout=0.5)
+    first_summary = await asyncio.wait_for(first, timeout=1)
 
     assert second_summary.published == 1
     assert first_summary.published == 1

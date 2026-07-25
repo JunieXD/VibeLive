@@ -455,7 +455,6 @@ class ViewerAction(StrEnum):
     SILENCE = "silence"
 
 
-MAX_VIEWER_BARRAGE_BATCH_SIZE = 3
 MAX_VIEWER_BARRAGE_TEXT_LENGTH = 160
 ViewerBarrageText = Annotated[str, Field(min_length=1, max_length=4_000)]
 
@@ -482,7 +481,6 @@ class ViewerGenerationResponse(RuntimeContractModel):
     texts: list[ViewerBarrageText] | None = Field(
         default=None,
         min_length=1,
-        max_length=MAX_VIEWER_BARRAGE_BATCH_SIZE,
     )
     reaction_type: str = Field(min_length=1, max_length=64)
     decision_reason: str | None = Field(default=None, min_length=1, max_length=160)

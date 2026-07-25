@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "mode_id": "room-6657",
-  "source_skill_sha256": "40eb756c08958cf07da64f0e664c0c8381589f2f3f8f1f5e1819c0e9e28570f1",
+  "source_skill_sha256": "b25e32ec10765c4150c17525259228dd8699c896e4b4222331582ebfac85f062",
   "directives": [
     "Anchor the reaction in the current scene, host speech, or public room context before adding abstraction; never recite a meme without a visible trigger.",
     "Express one complete reaction action per barrage; avoid background explanation, summaries, and assistant-like commentary.",
