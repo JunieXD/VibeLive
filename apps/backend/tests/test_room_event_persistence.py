@@ -213,6 +213,7 @@ async def test_microphone_voice_is_durable_and_recoverable(
             "started_at_ms": 100,
             "ended_at_ms": 200,
             "utterance_id": "microphone-1",
+            "turn_id": "turn-1",
             "revision": 1,
         },
     )
@@ -223,6 +224,7 @@ async def test_microphone_voice_is_durable_and_recoverable(
     )
     assert row is not None
     assert json.loads(row.content_json)["payload"]["audio_source"] == "microphone"
+    assert json.loads(row.content_json)["payload"]["turn_id"] == "turn-1"
     assert await event_store.load_for_recovery(
         room_id="room-1",
         session_id=started.session_id,
@@ -249,6 +251,7 @@ async def test_system_audio_transcript_is_durable_context_not_user_voice(
             "started_at_ms": 100,
             "ended_at_ms": 200,
             "utterance_id": "system-audio-1",
+            "turn_id": "turn-1",
             "revision": 1,
         },
     )
@@ -261,6 +264,7 @@ async def test_system_audio_transcript_is_durable_context_not_user_voice(
     content = json.loads(row.content_json)
     assert content["source_type"] == "system_event"
     assert content["source_id"] == "system-audio"
+    assert content["payload"]["turn_id"] == "turn-1"
     assert await event_store.load_for_recovery(
         room_id="room-1",
         session_id=started.session_id,

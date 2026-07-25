@@ -324,6 +324,7 @@ async def test_coordinated_turn_waits_for_system_final_and_schedules_once() -> N
     await asyncio.sleep(0.01)
 
     assert [event.source_id for event in room.events] == ["host", "system-audio"]
+    assert [event.payload["turn_id"] for event in room.events] == ["turn-1", "turn-1"]
     assert len(scheduler.observations) == 1
     assert context.calls[0]["trigger_event_ids"] == ("voice-1", "voice-2")
 

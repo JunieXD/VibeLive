@@ -49,6 +49,7 @@ class _UserVoicePayload(_PayloadModel):
     started_at_ms: int | None = Field(default=None, ge=0)
     ended_at_ms: int | None = Field(default=None, ge=0)
     utterance_id: str | None = None
+    turn_id: str | None = None
     revision: int | None = Field(default=None, ge=0)
     target_resolver_id: str | None = None
     target_ambiguous: bool | None = None
@@ -139,6 +140,7 @@ class _SystemEventPayload(_PayloadModel):
     started_at_ms: int | None = Field(default=None, ge=0)
     ended_at_ms: int | None = Field(default=None, ge=0)
     utterance_id: str | None = None
+    turn_id: str | None = None
 
 
 class PersistentRuntimeRoomEventStore:
