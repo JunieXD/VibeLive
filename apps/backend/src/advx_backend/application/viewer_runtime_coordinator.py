@@ -568,8 +568,7 @@ class ViewerRuntimeCoordinator:
             ):
                 budget = settings.viewer_ambient_speaker_budget
             else:
-                # Keep screen-only waves cheap while distributing opportunities across viewers.
-                budget = (len(eligible) + 3) // 4
+                budget = settings.viewer_screen_speaker_budget
                 session_seed = getattr(committed.pool, "session_seed", wave.session_id)
                 ordered_eligible = sorted(
                     eligible,

@@ -32,6 +32,7 @@ export function compileAudienceRuntimeSnapshot(
       highlightResponseRange: [...mode.highlightResponseRange],
       ambience: mode.ambience,
       visualSettings: { ...mode.visualSettings },
+      dispatchSettings: { ...mode.dispatchSettings },
       baseActivity: [...mode.normalResponseRange],
       burstLimit: [...mode.highlightResponseRange]
     },

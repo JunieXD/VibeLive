@@ -48,6 +48,7 @@ export function duplicateModeAsCustom(
     name: customName.trim(),
     builtIn: false,
     personaCounts: { ...source.personaCounts },
+    dispatchSettings: { ...source.dispatchSettings },
     personaOverrides: Object.fromEntries(
       Object.entries(source.personaOverrides).map(([id, override]) => [
         id,
@@ -98,6 +99,15 @@ export function canonicalModeContent(mode: AudienceMode): string {
       frame_selection_strategy: mode.visualSettings.frameSelectionStrategy,
       frame_max_dimension: mode.visualSettings.frameMaxDimension,
       frame_quality: mode.visualSettings.frameQuality
+    },
+    dispatch_settings: {
+      user_speaker_budget: mode.dispatchSettings.userSpeakerBudget,
+      screen_speaker_budget: mode.dispatchSettings.screenSpeakerBudget,
+      ambient_speaker_budget: mode.dispatchSettings.ambientSpeakerBudget,
+      max_in_flight_viewer_requests: mode.dispatchSettings.maxInFlightViewerRequests,
+      viewer_queue_capacity: mode.dispatchSettings.viewerQueueCapacity,
+      ambient_tick_cooldown_ms: mode.dispatchSettings.ambientTickCooldownMs,
+      max_consecutive_ambient_waves: mode.dispatchSettings.maxConsecutiveAmbientWaves
     }
   })}\n`
 }
@@ -134,6 +144,7 @@ function normalizeModeAliases(mode: AudienceMode): AudienceMode {
     normalResponseRange: [...mode.normalResponseRange],
     highlightResponseRange: [...mode.highlightResponseRange],
     visualSettings: { ...mode.visualSettings },
+    dispatchSettings: { ...mode.dispatchSettings },
     baseActivity: [...mode.normalResponseRange],
     burstLimit: [...mode.highlightResponseRange]
   }

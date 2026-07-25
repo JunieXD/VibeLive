@@ -11,7 +11,6 @@ import type {
 } from '@advx/contracts'
 import {
   createPersonaTemplate,
-  totalViewerCount,
   type AudienceMode,
   type AudienceWorkspaceState,
   type PersonaOverride,
@@ -143,6 +142,7 @@ export function compileCanonicalRuntimeSpec(
     'documentVersion' in persona ? persona : createPersonaTemplate(persona)
   )
   const visual = activeMode.visualSettings
+  const dispatch = activeMode.dispatchSettings
   const windowBatch = visual.barrageGenerationMode === 'window_batch'
   const spec: CanonicalRuntimeSpec = {
     protocol_version: 3,
@@ -181,22 +181,22 @@ export function compileCanonicalRuntimeSpec(
       window_batch_context_window_ms: 30_000,
       window_batch_max_frames: 5,
       viewer_visual_input_mode: windowBatch ? 'direct_frames' : visual.viewerVisualInputMode,
-      max_in_flight_viewer_requests: Math.min(6, totalViewerCount(activeMode)),
+      max_in_flight_viewer_requests: dispatch.maxInFlightViewerRequests,
       viewer_request_ttl_ms: 0,
-      viewer_queue_capacity: 64,
+      viewer_queue_capacity: dispatch.viewerQueueCapacity,
       observation_merge_window_ms: 1_000,
       public_context_window_ms: windowBatch ? 30_000 : 60_000,
       public_context_max_events: 48,
       replyable_event_window_ms: 30_000,
       max_replyable_events: 8,
-      viewer_user_speaker_budget: 6,
-      viewer_screen_speaker_budget: 4,
-      viewer_ambient_speaker_budget: 2,
+      viewer_user_speaker_budget: dispatch.userSpeakerBudget,
+      viewer_screen_speaker_budget: dispatch.screenSpeakerBudget,
+      viewer_ambient_speaker_budget: dispatch.ambientSpeakerBudget,
       max_direct_frame_age_ms: 30_000,
       screen_change_threshold: 0.2,
       screen_change_cooldown_ms: 5_000,
-      ambient_tick_cooldown_ms: 30_000,
-      max_consecutive_ambient_waves: 1
+      ambient_tick_cooldown_ms: dispatch.ambientTickCooldownMs,
+      max_consecutive_ambient_waves: dispatch.maxConsecutiveAmbientWaves
     }
   }
   const canonicalJson = canonicalJsonStringify(spec)

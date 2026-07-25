@@ -23,11 +23,6 @@ type ModeToolbarProps = {
   onDeleteMode(): void
 }
 
-function clampActivityValue(value: string, maximum = 32): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? Math.min(maximum, Math.max(0, Math.trunc(parsed))) : 0
-}
-
 function clampNumber(value: string, minimum: number, maximum: number): number {
   const parsed = Number(value)
   return Number.isFinite(parsed)
@@ -67,6 +62,12 @@ export function ModeToolbar({
 }: ModeToolbarProps): React.JSX.Element {
   const windowBatch = activeMode.visualSettings.barrageGenerationMode === 'window_batch'
   const viewerCount = totalViewerCount(activeMode)
+  const dispatch = activeMode.dispatchSettings
+  const patchDispatchSettings = (
+    change: Partial<AudienceMode['dispatchSettings']>
+  ): void => {
+    onPatchMode({ dispatchSettings: { ...dispatch, ...change } })
+  }
   return (
     <header className={cx('aw-mode-toolbar')}>
       <div className={cx('aw-mode-main')}>
@@ -107,10 +108,12 @@ export function ModeToolbar({
         </div>
       </div>
       <div className={cx('aw-mode-controls')}>
-        <span className={cx('aw-mode-summary')} title="在线人数 · 普通响应 · 高光响应">
-          在线 {viewerCount} · 普通 {activeMode.normalResponseRange[0]}–
-          {activeMode.normalResponseRange[1]} · 高光 {activeMode.highlightResponseRange[0]}–
-          {activeMode.highlightResponseRange[1]}
+        <span
+          className={cx('aw-mode-summary')}
+          title="在线人数 · 文本/语音每波 · 画面每波 · 系统音频/静默每波"
+        >
+          在线 {viewerCount} · 文本 {dispatch.userSpeakerBudget} · 画面{' '}
+          {dispatch.screenSpeakerBudget} · 静默 {dispatch.ambientSpeakerBudget}
         </span>
         <Popover
           title="模式参数"
@@ -122,98 +125,98 @@ export function ModeToolbar({
           }
         >
           <div className={cx('aw-popover-section')}>
-            <h4>响应规模</h4>
-            <label data-audience-range>
-              <span>普通响应</span>
-              <div className={cx('aw-range-pair')}>
-                <input
-                  type="number"
-                  min={0}
-                  max={viewerCount}
-                  value={activeMode.normalResponseRange[0]}
-                  onChange={(event) =>
-                    onPatchMode({
-                      normalResponseRange: [
-                        Math.min(
-                          clampActivityValue(
-                            event.target.value,
-                            viewerCount
-                          ),
-                          activeMode.normalResponseRange[1]
-                        ),
-                        activeMode.normalResponseRange[1]
-                      ]
-                    })
-                  }
-                />
-                <b>至</b>
-                <input
-                  type="number"
-                  min={0}
-                  max={viewerCount}
-                  value={activeMode.normalResponseRange[1]}
-                  onChange={(event) =>
-                    onPatchMode({
-                      normalResponseRange: [
-                        activeMode.normalResponseRange[0],
-                        Math.max(
-                          clampActivityValue(
-                            event.target.value,
-                            viewerCount
-                          ),
-                          activeMode.normalResponseRange[0]
-                        )
-                      ]
-                    })
-                  }
-                />
-              </div>
+            <h4>发言调度</h4>
+            <label>
+              <span>文本/语音每波</span>
+              <input
+                type="number"
+                min={0}
+                max={32}
+                value={dispatch.userSpeakerBudget}
+                onChange={(event) => patchDispatchSettings({
+                  userSpeakerBudget: clampNumber(event.target.value, 0, 32)
+                })}
+              />
             </label>
-            <label data-audience-range>
-              <span>高光响应</span>
-              <div className={cx('aw-range-pair')}>
-                <input
-                  type="number"
-                  min={0}
-                  max={viewerCount}
-                  value={activeMode.highlightResponseRange[0]}
-                  onChange={(event) =>
-                    onPatchMode({
-                      highlightResponseRange: [
-                        Math.min(
-                          clampActivityValue(
-                            event.target.value,
-                            viewerCount
-                          ),
-                          activeMode.highlightResponseRange[1]
-                        ),
-                        activeMode.highlightResponseRange[1]
-                      ]
-                    })
-                  }
-                />
-                <b>至</b>
-                <input
-                  type="number"
-                  min={0}
-                  max={viewerCount}
-                  value={activeMode.highlightResponseRange[1]}
-                  onChange={(event) =>
-                    onPatchMode({
-                      highlightResponseRange: [
-                        activeMode.highlightResponseRange[0],
-                        Math.max(
-                          clampActivityValue(
-                            event.target.value,
-                            viewerCount
-                          ),
-                          activeMode.highlightResponseRange[0]
-                        )
-                      ]
-                    })
-                  }
-                />
-              </div>
+            <label>
+              <span>画面变化每波</span>
+              <input
+                type="number"
+                min={0}
+                max={32}
+                value={dispatch.screenSpeakerBudget}
+                onChange={(event) => patchDispatchSettings({
+                  screenSpeakerBudget: clampNumber(event.target.value, 0, 32)
+                })}
+              />
+            </label>
+            <label>
+              <span>系统音频/静默每波</span>
+              <input
+                type="number"
+                min={0}
+                max={32}
+                value={dispatch.ambientSpeakerBudget}
+                onChange={(event) => patchDispatchSettings({
+                  ambientSpeakerBudget: clampNumber(event.target.value, 0, 32)
+                })}
+              />
+            </label>
+          </div>
+          <div className={cx('aw-popover-section')}>
+            <h4>运行限流</h4>
+            <label>
+              <span>并发请求</span>
+              <input
+                type="number"
+                min={1}
+                max={32}
+                value={dispatch.maxInFlightViewerRequests}
+                onChange={(event) => patchDispatchSettings({
+                  maxInFlightViewerRequests: clampNumber(event.target.value, 1, 32)
+                })}
+              />
+            </label>
+            <label>
+              <span>队列容量</span>
+              <input
+                type="number"
+                min={1}
+                max={65_536}
+                value={dispatch.viewerQueueCapacity}
+                onChange={(event) => patchDispatchSettings({
+                  viewerQueueCapacity: clampNumber(event.target.value, 1, 65_536)
+                })}
+              />
+            </label>
+            <label>
+              <span>静默间隔 ms</span>
+              <input
+                type="number"
+                min={1}
+                max={Number.MAX_SAFE_INTEGER}
+                step={1000}
+                value={dispatch.ambientTickCooldownMs}
+                onChange={(event) => patchDispatchSettings({
+                  ambientTickCooldownMs: clampNumber(
+                    event.target.value,
+                    1,
+                    Number.MAX_SAFE_INTEGER
+                  )
+                })}
+              />
+            </label>
+            <label>
+              <span>连续静默波数</span>
+              <input
+                type="number"
+                min={0}
+                max={32}
+                value={dispatch.maxConsecutiveAmbientWaves}
+                onChange={(event) => patchDispatchSettings({
+                  maxConsecutiveAmbientWaves: clampNumber(event.target.value, 0, 32)
+                })}
+              />
             </label>
           </div>
           <div className={cx('aw-popover-section')}>

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import {
   BASE_PERSONAS,
   BUILT_IN_MODES,
+  DEFAULT_DISPATCH_SETTINGS,
   allocateViewerCounts,
   activateMode,
   compileViewerPool,
@@ -145,6 +146,9 @@ describe('audience presets and modes', () => {
     expect(copied.modes.at(-1)?.personaCounts).not.toBe(
       copied.modes.find((mode) => mode.id === 'room-6657')?.personaCounts
     )
+    expect(copied.modes.at(-1)?.dispatchSettings).not.toBe(
+      copied.modes.find((mode) => mode.id === 'room-6657')?.dispatchSettings
+    )
     expect(copied.modes.at(-1)?.personaOverrides.reaction_qmark?.traits).not.toBe(
       copied.modes.find((mode) => mode.id === 'room-6657')
         ?.personaOverrides.reaction_qmark?.traits
@@ -269,7 +273,7 @@ describe('workspace persistence', () => {
     expect(parsed.ok).toBe(true)
     if (!parsed.ok) return
     expect(parsed.migratedFromVersion).toBe(1)
-    expect(parsed.workspace.version).toBe(4)
+    expect(parsed.workspace.version).toBe(5)
     expect(parsed.workspace.modeState.modes.map(totalViewerCount))
       .toEqual([24, 28, 16, 14, 24, 14, 18, 16, 16, 18, 16, 18])
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
@@ -298,7 +302,7 @@ describe('workspace persistence', () => {
       expect(parsed.ok).toBe(true)
       if (!parsed.ok) continue
       expect(parsed.migratedFromVersion).toBe(sourceVersion)
-      expect(parsed.workspace.version).toBe(4)
+      expect(parsed.workspace.version).toBe(5)
       expect(parsed.workspace.modeState.modes.map(totalViewerCount))
         .toEqual([24, 28, 16, 14, 24, 14, 18, 16, 16, 18, 16, 18])
     }
@@ -338,6 +342,22 @@ describe('workspace persistence', () => {
       .toEqual(BUILT_IN_MODES.slice(0, 6).map((mode) => mode.name))
     expect(parsed.workspace.modeState.modes.map((mode) => mode.id))
       .toEqual(BUILT_IN_MODES.map((mode) => mode.id))
+  })
+
+  it('migrates v4 dispatch defaults without changing mode content', () => {
+    const legacy = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    legacy.version = 4
+    for (const mode of legacy.modeState.modes) delete mode.dispatchSettings
+
+    const parsed = parseAudienceWorkspaceState(legacy)
+
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.migratedFromVersion).toBe(4)
+    expect(parsed.workspace.version).toBe(5)
+    expect(parsed.workspace.modeState.modes[0].dispatchSettings).toEqual(
+      DEFAULT_DISPATCH_SETTINGS
+    )
   })
 
   it('upgrades an untouched cross-scene mode without replacing a revised mode', () => {

@@ -73,6 +73,13 @@ describe('ModeToolbar barrage generation mode', () => {
       expect(markup).toContain(
         'type="number" min="1" max="30000" step="500" disabled="" value="30000"'
       )
+      expect(markup).toContain('发言调度')
+      expect(markup).toContain('文本/语音每波')
+      expect(markup).toContain('画面变化每波')
+      expect(markup).toContain('系统音频/静默每波')
+      expect(markup).toContain('运行限流')
+      expect(markup).toContain('并发请求')
+      expect(markup).toContain('队列容量')
     } finally {
       Object.defineProperty(globalThis, 'document', {
         configurable: true,

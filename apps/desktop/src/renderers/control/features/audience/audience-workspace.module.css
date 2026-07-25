@@ -332,7 +332,7 @@
 
 .aw-popover-section label {
   display: grid;
-  grid-template-columns: 60px minmax(0, 1fr);
+  grid-template-columns: 82px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   color: var(--text-faint);

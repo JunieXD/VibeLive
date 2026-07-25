@@ -514,16 +514,21 @@ def _wave(
     )
 
 
-def test_screen_waves_select_a_deterministic_quarter_and_keep_other_budgets() -> None:
+def test_waves_honor_configured_speaker_budgets() -> None:
     viewers = [
         _viewer(f"viewer-{index:02}", last_spoke_at_ms=None if index < 2 else index * 1_000)
         for index in range(10)
     ]
     viewers.append(_viewer("persona-old", persona_id="target", last_spoke_at_ms=20_000))
     viewers.append(_viewer("persona-fresh", persona_id="target", last_spoke_at_ms=None))
+    settings = RuntimeSettings(
+        viewer_user_speaker_budget=9,
+        viewer_screen_speaker_budget=7,
+        viewer_ambient_speaker_budget=8,
+    )
     committed = SimpleNamespace(
         pool=SimpleNamespace(viewers=viewers, session_seed="screen-selection-seed"),
-        spec=SimpleNamespace(settings=RuntimeSettings()),
+        spec=SimpleNamespace(settings=settings),
     )
     coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
 
@@ -543,14 +548,14 @@ def test_screen_waves_select_a_deterministic_quarter_and_keep_other_budgets() ->
         wave=_wave(ObservationTrigger.SCREEN_CHANGE),
         committed=SimpleNamespace(
             pool=SimpleNamespace(viewers=viewers, session_seed="other-screen-selection-seed"),
-            spec=SimpleNamespace(settings=RuntimeSettings()),
+            spec=SimpleNamespace(settings=settings),
         ),
     )
     single_viewer_screen = coordinator._decide_speakers(
         wave=_wave(ObservationTrigger.SCREEN_CHANGE),
         committed=SimpleNamespace(
             pool=SimpleNamespace(viewers=[viewers[0]], session_seed="screen-selection-seed"),
-            spec=SimpleNamespace(settings=RuntimeSettings()),
+            spec=SimpleNamespace(settings=settings),
         ),
     )
     system_audio = coordinator._decide_speakers(
@@ -592,20 +597,45 @@ def test_screen_waves_select_a_deterministic_quarter_and_keep_other_budgets() ->
         committed=committed,
     )
 
-    assert len(user.selected_viewer_ids) == 6
-    assert len(screen.selected_viewer_ids) == 3
+    assert len(user.selected_viewer_ids) == 9
+    assert len(screen.selected_viewer_ids) == 7
     assert set(screen.selected_viewer_ids).issubset(
         {viewer.viewer_instance_id for viewer in viewers}
     )
     assert screen.selected_viewer_ids == repeated_screen.selected_viewer_ids
     assert screen.selected_viewer_ids != alternative_screen.selected_viewer_ids
     assert single_viewer_screen.selected_viewer_ids == ["viewer-00"]
-    assert system_audio.selected_viewer_ids == ["persona-fresh", "viewer-00"]
-    assert ambient.selected_viewer_ids == ["persona-fresh", "viewer-00"]
-    assert len(mixed_window.selected_viewer_ids) == 6
-    assert len(dual_asr_window.selected_viewer_ids) == 6
+    assert len(system_audio.selected_viewer_ids) == 8
+    assert len(ambient.selected_viewer_ids) == 8
+    assert len(mixed_window.selected_viewer_ids) == 9
+    assert len(dual_asr_window.selected_viewer_ids) == 9
     assert direct.selected_viewer_ids == ["viewer-09"]
     assert persona.selected_viewer_ids == ["persona-fresh"]
+
+
+def test_user_speaker_budget_can_select_all_twenty_eight_online_viewers() -> None:
+    viewers = [_viewer(f"viewer-{index:02}") for index in range(28)]
+    committed = SimpleNamespace(
+        pool=SimpleNamespace(viewers=viewers, session_seed="all-viewers-selection-seed"),
+        spec=SimpleNamespace(
+            settings=RuntimeSettings(
+                viewer_user_speaker_budget=32,
+                viewer_screen_speaker_budget=32,
+                viewer_ambient_speaker_budget=32,
+            )
+        ),
+    )
+    coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
+
+    decision = coordinator._decide_speakers(
+        wave=_wave(ObservationTrigger.USER_TEXT),
+        committed=committed,
+    )
+
+    assert len(decision.selected_viewer_ids) == 28
+    assert set(decision.selected_viewer_ids) == {
+        viewer.viewer_instance_id for viewer in viewers
+    }
 
 
 def test_system_audio_transcript_is_a_real_observation_trigger() -> None:

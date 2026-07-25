@@ -494,7 +494,7 @@ class BackendRuntime:
             ),
             clock=self.clock,
             id_generator=self.id_generator,
-            max_in_flight=12,
+            max_in_flight=32,
             trace_recorder=self.debug_service,
             behavior_state_sink=self.viewer_audience_service,
         )

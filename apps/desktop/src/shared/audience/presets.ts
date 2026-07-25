@@ -1,5 +1,6 @@
 import { createPersonaTemplate } from './canonical'
 import type {
+  AudienceDispatchSettings,
   AudienceMode,
   AudienceVisualSettings,
   PersonaOverride,
@@ -222,6 +223,7 @@ function createMode(
     highlightResponseRange,
     ambience,
     visualSettings: DEFAULT_VISUAL_SETTINGS,
+    dispatchSettings: { ...DEFAULT_DISPATCH_SETTINGS },
     baseActivity: normalResponseRange,
     burstLimit: highlightResponseRange
   }
@@ -262,6 +264,16 @@ export const DEFAULT_VISUAL_SETTINGS: AudienceVisualSettings = {
   frameSelectionStrategy: 'change_peaks',
   frameMaxDimension: 1280,
   frameQuality: 0.82
+}
+
+export const DEFAULT_DISPATCH_SETTINGS: AudienceDispatchSettings = {
+  userSpeakerBudget: 6,
+  screenSpeakerBudget: 4,
+  ambientSpeakerBudget: 2,
+  maxInFlightViewerRequests: 6,
+  viewerQueueCapacity: 64,
+  ambientTickCooldownMs: 30_000,
+  maxConsecutiveAmbientWaves: 1
 }
 
 export const BUILT_IN_MODES: readonly AudienceMode[] = [

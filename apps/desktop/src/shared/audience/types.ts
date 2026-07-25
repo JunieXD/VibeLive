@@ -1,4 +1,4 @@
-export const AUDIENCE_WORKSPACE_VERSION = 4 as const
+export const AUDIENCE_WORKSPACE_VERSION = 5 as const
 export const PERSONA_DOCUMENT_VERSION = 2 as const
 
 export type PersonaTemplate = {
@@ -69,6 +69,16 @@ export type AudienceVisualSettings = {
   readonly frameQuality: number
 }
 
+export type AudienceDispatchSettings = {
+  readonly userSpeakerBudget: number
+  readonly screenSpeakerBudget: number
+  readonly ambientSpeakerBudget: number
+  readonly maxInFlightViewerRequests: number
+  readonly viewerQueueCapacity: number
+  readonly ambientTickCooldownMs: number
+  readonly maxConsecutiveAmbientWaves: number
+}
+
 export type AudienceMode = {
   readonly id: string
   readonly namespaceId: string
@@ -82,6 +92,7 @@ export type AudienceMode = {
   readonly highlightResponseRange: readonly [minimum: number, maximum: number]
   readonly ambience: AudienceAmbience
   readonly visualSettings: AudienceVisualSettings
+  readonly dispatchSettings: AudienceDispatchSettings
   /** @deprecated Renderer-only compatibility alias for normalResponseRange. */
   readonly baseActivity: readonly [minimum: number, maximum: number]
   /** @deprecated Renderer-only compatibility alias for highlightResponseRange. */
@@ -172,6 +183,7 @@ export type AudienceRuntimeSnapshot = {
     | 'highlightResponseRange'
     | 'ambience'
     | 'visualSettings'
+    | 'dispatchSettings'
     | 'baseActivity'
     | 'burstLimit'
   > & { readonly viewerCount: number }

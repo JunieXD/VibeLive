@@ -119,6 +119,53 @@ describe('canonical desktop runtime spec', () => {
     })
   })
 
+  it('compiles active-mode dispatch settings instead of fixed request caps', () => {
+    const workspace = createInitialAudienceWorkspace()
+    const activeMode = workspace.modeState.modes[0]
+    const dispatchWorkspace = {
+      ...workspace,
+      modeState: {
+        ...workspace.modeState,
+        modes: workspace.modeState.modes.map((mode) =>
+          mode.id === activeMode.id
+            ? {
+                ...mode,
+                dispatchSettings: {
+                  userSpeakerBudget: 28,
+                  screenSpeakerBudget: 27,
+                  ambientSpeakerBudget: 26,
+                  maxInFlightViewerRequests: 25,
+                  viewerQueueCapacity: 512,
+                  ambientTickCooldownMs: 4_000,
+                  maxConsecutiveAmbientWaves: 24
+                }
+              }
+            : mode
+        )
+      }
+    }
+
+    const compiled = compileCanonicalRuntimeSpec(dispatchWorkspace, {
+      configRevision: 5,
+      provider: {
+        providerProfileId: 'profile-a',
+        viewerModel: 'viewer-model',
+        memoryModel: 'memory-model',
+        visualSummaryModel: 'summary-model'
+      }
+    })
+
+    expect(compiled.spec.settings).toMatchObject({
+      viewer_user_speaker_budget: 28,
+      viewer_screen_speaker_budget: 27,
+      viewer_ambient_speaker_budget: 26,
+      max_in_flight_viewer_requests: 25,
+      viewer_queue_capacity: 512,
+      ambient_tick_cooldown_ms: 4_000,
+      max_consecutive_ambient_waves: 24
+    })
+  })
+
   it('sorts object keys recursively without reordering arrays', () => {
     expect(canonicalJsonStringify({ z: { b: 1, a: 2 }, a: [3, { y: 4, x: 5 }] }))
       .toBe('{"a":[3,{"x":5,"y":4}],"z":{"a":2,"b":1}}')

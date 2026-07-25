@@ -1,7 +1,13 @@
 import { clonePersonaTemplate, createPersonaTemplate } from './canonical'
 import { validatePersona } from './persona-markdown'
-import { BASE_PERSONAS, BUILT_IN_MODES, DEFAULT_VISUAL_SETTINGS } from './presets'
+import {
+  BASE_PERSONAS,
+  BUILT_IN_MODES,
+  DEFAULT_DISPATCH_SETTINGS,
+  DEFAULT_VISUAL_SETTINGS
+} from './presets'
 import type {
+  AudienceDispatchSettings,
   AudienceMode,
   AudienceVisualSettings,
   AudienceWorkspaceState,
@@ -13,6 +19,7 @@ const STABLE_ID_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/
 const MODE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const MAX_FRAME_BUNDLE_SIZE = 5
 const MAX_FRAME_WINDOW_MS = 30_000
+type AudienceWorkspaceSourceVersion = 1 | 2 | 3 | 4 | 5
 const BUILT_IN_MODE_MIGRATIONS = new Map([
   ['room-6657', { fromRevision: 1, toRevision: 2 }],
   ['music-live-room', { fromRevision: 1, toRevision: 2 }],
@@ -35,7 +42,7 @@ export type AudienceWorkspaceParseResult =
   | {
       readonly ok: true
       readonly workspace: AudienceWorkspaceState
-      readonly migratedFromVersion?: 1 | 2 | 3
+      readonly migratedFromVersion?: 1 | 2 | 3 | 4
       readonly legacyMemes?: readonly LegacyLocalMeme[]
     }
   | { readonly ok: false; readonly issues: readonly string[] }
@@ -48,8 +55,14 @@ export type LegacyLocalMeme = {
 
 export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspaceParseResult {
   if (!isRecord(value)) return { ok: false, issues: ['workspace must be an object'] }
-  if (value.version !== 1 && value.version !== 2 && value.version !== 3 && value.version !== 4) {
-    return { ok: false, issues: ['version must be 1, 2, 3 or 4'] }
+  if (
+    value.version !== 1 &&
+    value.version !== 2 &&
+    value.version !== 3 &&
+    value.version !== 4 &&
+    value.version !== 5
+  ) {
+    return { ok: false, issues: ['version must be 1, 2, 3, 4 or 5'] }
   }
   const sourceVersion = value.version
   const issues: string[] = []
@@ -83,12 +96,12 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
 
   validateReferences(personas, modes, activeModeId, issues)
   if (issues.length > 0) return { ok: false, issues }
-  const migratedFromVersion: 1 | 2 | 3 | undefined = sourceVersion === 4
+  const migratedFromVersion: 1 | 2 | 3 | 4 | undefined = sourceVersion === 5
     ? undefined
     : sourceVersion
   return {
     ok: true,
-    workspace: { version: 4, personas, modeState: { modes, activeModeId } },
+    workspace: { version: 5, personas, modeState: { modes, activeModeId } },
     ...(migratedFromVersion === undefined ? {} : { migratedFromVersion }),
     ...(legacyMemes.length > 0 ? { legacyMemes } : {})
   }
@@ -129,7 +142,7 @@ function parseLegacyMemes(value: unknown, issues: string[]): LegacyLocalMeme[] {
 
 function parsePersonas(
   value: unknown,
-  sourceVersion: 1 | 2 | 3 | 4,
+  sourceVersion: AudienceWorkspaceSourceVersion,
   issues: string[]
 ): PersonaTemplate[] {
   const builtInIds = new Set(BASE_PERSONAS.map((persona) => persona.id))
@@ -149,7 +162,7 @@ function parsePersonas(
 function parsePersona(
   value: unknown,
   path: string,
-  sourceVersion: 1 | 2 | 3 | 4,
+  sourceVersion: AudienceWorkspaceSourceVersion,
   issues: string[]
 ): PersonaTemplate | null {
   if (!isRecord(value)) return fail(path, 'must be an object', issues)
@@ -176,7 +189,7 @@ function parsePersona(
 function parseMode(
   value: unknown,
   path: string,
-  sourceVersion: 1 | 2 | 3 | 4,
+  sourceVersion: AudienceWorkspaceSourceVersion,
   issues: string[]
 ): AudienceMode | null {
   if (!isRecord(value)) return fail(path, 'must be an object', issues)
@@ -222,7 +235,7 @@ function parseMode(
           issues
         )
         : 0
-  const personaCounts = sourceVersion === 4
+  const personaCounts = sourceVersion >= 4
     ? parsePersonaCounts(value.personaCounts, path, issues)
     : allocateLegacyPersonaCounts(
         legacyPersonaIds,
@@ -256,6 +269,9 @@ function parseMode(
   const visualSettings = isLegacyVisualDefault(parsedVisualSettings)
     ? { ...DEFAULT_VISUAL_SETTINGS }
     : parsedVisualSettings
+  const dispatchSettings = sourceVersion < 5
+    ? { ...DEFAULT_DISPATCH_SETTINGS }
+    : parseDispatchSettings(value.dispatchSettings, `${path}.dispatchSettings`, issues)
 
   if (issues.some((issue) => issue.startsWith(path))) return null
   return {
@@ -271,6 +287,7 @@ function parseMode(
     highlightResponseRange,
     ambience: value.ambience as AudienceMode['ambience'],
     visualSettings,
+    dispatchSettings,
     baseActivity: normalResponseRange,
     burstLimit: highlightResponseRange
   }
@@ -489,6 +506,68 @@ function parseVisualSettings(
   }
 }
 
+function parseDispatchSettings(
+  value: unknown,
+  path: string,
+  issues: string[]
+): AudienceDispatchSettings {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object`)
+    return { ...DEFAULT_DISPATCH_SETTINGS }
+  }
+  return {
+    userSpeakerBudget: boundedInteger(
+      value.userSpeakerBudget,
+      `${path}.userSpeakerBudget`,
+      0,
+      32,
+      issues
+    ),
+    screenSpeakerBudget: boundedInteger(
+      value.screenSpeakerBudget,
+      `${path}.screenSpeakerBudget`,
+      0,
+      32,
+      issues
+    ),
+    ambientSpeakerBudget: boundedInteger(
+      value.ambientSpeakerBudget,
+      `${path}.ambientSpeakerBudget`,
+      0,
+      32,
+      issues
+    ),
+    maxInFlightViewerRequests: boundedInteger(
+      value.maxInFlightViewerRequests,
+      `${path}.maxInFlightViewerRequests`,
+      1,
+      32,
+      issues
+    ),
+    viewerQueueCapacity: boundedInteger(
+      value.viewerQueueCapacity,
+      `${path}.viewerQueueCapacity`,
+      1,
+      65_536,
+      issues
+    ),
+    ambientTickCooldownMs: boundedInteger(
+      value.ambientTickCooldownMs,
+      `${path}.ambientTickCooldownMs`,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      issues
+    ),
+    maxConsecutiveAmbientWaves: boundedInteger(
+      value.maxConsecutiveAmbientWaves,
+      `${path}.maxConsecutiveAmbientWaves`,
+      0,
+      32,
+      issues
+    )
+  }
+}
+
 function legacyFrameBundleSize(value: unknown): number | null {
   if (
     typeof value !== 'number' ||
@@ -628,6 +707,7 @@ function cloneAudienceMode(mode: AudienceMode): AudienceMode {
     normalResponseRange: [...mode.normalResponseRange],
     highlightResponseRange: [...mode.highlightResponseRange],
     visualSettings: { ...mode.visualSettings },
+    dispatchSettings: { ...mode.dispatchSettings },
     baseActivity: [...mode.baseActivity],
     burstLimit: [...mode.burstLimit]
   }
