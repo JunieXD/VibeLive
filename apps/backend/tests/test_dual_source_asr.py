@@ -104,6 +104,7 @@ def _ingest(
     publisher: _Publisher | None = None,
     clock: _Clock | None = None,
     voice_turn_silence_ms: int = 1,
+    voice_trigger_cooldown_ms: int = 0,
     coordinated_turn_timeout_ms: int = 50,
 ) -> IngestService:
     service = IngestService(
@@ -115,6 +116,7 @@ def _ingest(
         session_tasks=_SessionTasks(),
         clock=clock or _Clock(),
         voice_turn_silence_ms=voice_turn_silence_ms,
+        voice_trigger_cooldown_ms=voice_trigger_cooldown_ms,
         coordinated_turn_timeout_ms=coordinated_turn_timeout_ms,
         transcript_publisher=publisher,
     )
@@ -327,6 +329,84 @@ async def test_coordinated_turn_waits_for_system_final_and_schedules_once() -> N
     assert [event.payload["turn_id"] for event in room.events] == ["turn-1", "turn-1"]
     assert len(scheduler.observations) == 1
     assert context.calls[0]["trigger_event_ids"] == ("voice-1", "voice-2")
+
+
+@pytest.mark.asyncio
+async def test_microphone_trigger_cooldown_accumulates_and_flushes_once() -> None:
+    context = _Context()
+    scheduler = _Scheduler()
+    ingest = _ingest(
+        asr=object(),
+        context=context,
+        scheduler=scheduler,
+        voice_trigger_cooldown_ms=50,
+    )
+
+    for index, text in enumerate(("第一句", "第二句", "第三句"), start=1):
+        await ingest._handle_transcript(
+            "session",
+            TranscriptSegment(
+                session_id="session",
+                source=AudioSource.MICROPHONE,
+                text=text,
+                started_at_ms=index,
+                ended_at_ms=index,
+                final=True,
+                utterance_id=f"mic-{index}",
+            ),
+        )
+        await asyncio.sleep(0.01)
+        if index == 1:
+            assert len(scheduler.observations) == 1
+
+    assert len(scheduler.observations) == 1
+    await asyncio.sleep(0.05)
+
+    assert len(scheduler.observations) == 2
+    assert context.calls[0]["trigger_event_ids"] == ("voice-1",)
+    assert context.calls[1]["trigger_event_ids"] == ("voice-2", "voice-3")
+
+
+@pytest.mark.asyncio
+async def test_microphone_trigger_cooldown_does_not_delay_window_batch_mode() -> None:
+    context = _Context()
+    scheduler = _Scheduler()
+    ingest = _ingest(
+        asr=object(),
+        context=context,
+        scheduler=scheduler,
+        voice_trigger_cooldown_ms=1_000,
+    )
+
+    async def window_batch_schedule(session_id: str) -> tuple[bool, int]:
+        assert session_id == "session"
+        return True, 50
+
+    ingest._window_batch_schedule = window_batch_schedule
+    timer = asyncio.create_task(ingest._run_window_batch_timer("session"))
+    try:
+        for index, text in enumerate(("第一句", "第二句"), start=1):
+            await ingest._handle_transcript(
+                "session",
+                TranscriptSegment(
+                    session_id="session",
+                    source=AudioSource.MICROPHONE,
+                    text=text,
+                    started_at_ms=index,
+                    ended_at_ms=index,
+                    final=True,
+                    utterance_id=f"mic-{index}",
+                ),
+            )
+            await asyncio.sleep(0.01)
+
+        await asyncio.sleep(0.05)
+
+        assert len(scheduler.observations) == 1
+        assert context.calls[0]["trigger_event_ids"] == ("voice-1", "voice-2")
+    finally:
+        timer.cancel()
+        await asyncio.gather(timer, return_exceptions=True)
 
 
 @pytest.mark.asyncio

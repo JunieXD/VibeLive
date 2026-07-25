@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 _COORDINATED_TURN_TIMEOUT_MS = 70_000
 _SCREEN_CHANGE_TRIGGER_THRESHOLD = 0.2
 _SCREEN_TRIGGER_COOLDOWN_MS = 5_000
+_VOICE_TRIGGER_COOLDOWN_MS = 5_000
 _WINDOW_BATCH_MODE_POLL_MS = 250
 
 
@@ -143,6 +144,17 @@ class _WindowBatchDelta:
         return bool(self.event_ids or self.frame_ids)
 
 
+@dataclass(slots=True)
+class _VoiceCooldownDelta:
+    event_ids: OrderedDict[str, None] = field(default_factory=OrderedDict)
+    targets: set[tuple[str, str]] = field(default_factory=set)
+    user_context: dict[str, str] = field(default_factory=dict)
+    turn_ids: set[str] = field(default_factory=set)
+
+    def has_trigger(self) -> bool:
+        return bool(self.event_ids)
+
+
 class IngestService:
     """Accept bounded media inputs and turn public inputs into observations."""
 
@@ -161,6 +173,7 @@ class IngestService:
         max_final_transcript_attempts: int = 3,
         final_transcript_retry_backoff_ms: int = 25,
         voice_turn_silence_ms: int = 1_500,
+        voice_trigger_cooldown_ms: int = _VOICE_TRIGGER_COOLDOWN_MS,
         coordinated_turn_timeout_ms: int = 3_000,
         ambient_enabled: Callable[[str], Awaitable[bool]] | None = None,
         screen_trigger_settings: Callable[[str], Awaitable[tuple[float, int]]] | None = None,
@@ -180,6 +193,8 @@ class IngestService:
             raise ValueError("final_transcript_retry_backoff_ms must not be negative")
         if voice_turn_silence_ms < 1:
             raise ValueError("voice_turn_silence_ms must be positive")
+        if voice_trigger_cooldown_ms < 0:
+            raise ValueError("voice_trigger_cooldown_ms must be non-negative")
         if coordinated_turn_timeout_ms < voice_turn_silence_ms:
             raise ValueError(
                 "coordinated_turn_timeout_ms must not be shorter than voice_turn_silence_ms"
@@ -200,6 +215,7 @@ class IngestService:
         self._max_final_transcript_attempts = max_final_transcript_attempts
         self._final_transcript_retry_backoff_ms = final_transcript_retry_backoff_ms
         self._voice_turn_silence_ms = voice_turn_silence_ms
+        self._voice_trigger_cooldown_ms = voice_trigger_cooldown_ms
         self._coordinated_turn_timeout_ms = coordinated_turn_timeout_ms
         self._ambient_enabled = ambient_enabled
         self._screen_trigger_settings = screen_trigger_settings
@@ -221,10 +237,13 @@ class IngestService:
         self._timestamp_floors: dict[tuple[IngestInputKind, AudioSource | None], int] = {}
         self._pending_audio_ids: dict[AudioSource, str] = {}
         self._last_trigger_at_ms: int | None = None
+        self._last_voice_trigger_at_ms: int | None = None
         self._result_task: asyncio.Task[None] | None = None
         self._ambient_task: asyncio.Task[None] | None = None
         self._window_batch_task: asyncio.Task[None] | None = None
+        self._voice_cooldown_task: asyncio.Task[None] | None = None
         self._window_batch_delta = _WindowBatchDelta()
+        self._voice_cooldown_delta = _VoiceCooldownDelta()
         self._window_batch_processed_event_ids: OrderedDict[str, None] = OrderedDict()
         self._window_batch_processed_frame_ids: OrderedDict[str, None] = OrderedDict()
         self._lock = asyncio.Lock()
@@ -308,6 +327,8 @@ class IngestService:
             self._ambient_task = None
             window_batch_task = self._window_batch_task
             self._window_batch_task = None
+            voice_cooldown_task = self._voice_cooldown_task
+            self._voice_cooldown_task = None
             self._active_session_id = None
             self._reset_tracking()
             result_task = self._result_task
@@ -330,6 +351,9 @@ class IngestService:
         if window_batch_task is not None:
             window_batch_task.cancel()
             await asyncio.gather(window_batch_task, return_exceptions=True)
+        if voice_cooldown_task is not None:
+            voice_cooldown_task.cancel()
+            await asyncio.gather(voice_cooldown_task, return_exceptions=True)
         try:
             await self._scheduler.cancel_session(session_id)
         finally:
@@ -1080,7 +1104,7 @@ class IngestService:
                 "coordinated ASR turn degraded after required system audio timed out",
                 extra={"session_id": session_id, "turn_id": turn_id},
             )
-            await self._schedule_observation(
+            await self._schedule_voice_observation(
                 session_id,
                 trigger_event_ids=event_ids,
                 target_viewer_id=target_viewer_id,
@@ -1120,7 +1144,7 @@ class IngestService:
                 event_ids = tuple(turn.event_ids)
                 target_viewer_id = turn.target_viewer_id
                 target_persona_id = turn.target_persona_id
-            await self._schedule_observation(
+            await self._schedule_voice_observation(
                 session_id,
                 trigger_event_ids=event_ids,
                 target_viewer_id=target_viewer_id,
@@ -1215,7 +1239,7 @@ class IngestService:
                 event_ids = tuple(turn.event_ids)
                 target_viewer_id = turn.target_viewer_id
                 target_persona_id = turn.target_persona_id
-            await self._schedule_observation(
+            await self._schedule_voice_observation(
                 session_id,
                 trigger_event_ids=event_ids,
                 target_viewer_id=target_viewer_id,
@@ -1362,6 +1386,159 @@ class IngestService:
                     "error_type": type(error).__name__,
                 },
             )
+
+    async def _schedule_voice_observation(
+        self,
+        session_id: str,
+        *,
+        trigger_event_ids: tuple[str, ...],
+        target_viewer_id: str | None = None,
+        target_persona_id: str | None = None,
+        user_context: dict[str, str] | None = None,
+    ) -> bool:
+        window_batch_enabled, _ = await self._window_batch_settings(session_id)
+        if window_batch_enabled or self._voice_trigger_cooldown_ms == 0:
+            return await self._schedule_observation(
+                session_id,
+                trigger_event_ids=trigger_event_ids,
+                target_viewer_id=target_viewer_id,
+                target_persona_id=target_persona_id,
+                user_context=user_context,
+            )
+
+        task_to_cancel: asyncio.Task[None] | None = None
+        scheduled_delta: _VoiceCooldownDelta | None = None
+        now_ms = self._clock.now_ms()
+        async with self._lock:
+            if self._active_session_id != session_id:
+                return False
+            last_trigger_at_ms = self._last_voice_trigger_at_ms
+            if last_trigger_at_ms is None:
+                self._last_voice_trigger_at_ms = now_ms
+            elif now_ms < last_trigger_at_ms + self._voice_trigger_cooldown_ms:
+                self._accumulate_voice_cooldown_delta(
+                    self._voice_cooldown_delta,
+                    trigger_event_ids=trigger_event_ids,
+                    target_viewer_id=target_viewer_id,
+                    target_persona_id=target_persona_id,
+                    user_context=user_context,
+                )
+                if self._voice_cooldown_task is None:
+                    deadline_ms = last_trigger_at_ms + self._voice_trigger_cooldown_ms
+                    self._voice_cooldown_task = asyncio.create_task(
+                        self._flush_voice_cooldown(session_id, deadline_ms),
+                        name=f"ingest-voice-cooldown:{session_id}",
+                    )
+                return True
+            else:
+                scheduled_delta = self._voice_cooldown_delta
+                self._voice_cooldown_delta = _VoiceCooldownDelta()
+                self._accumulate_voice_cooldown_delta(
+                    scheduled_delta,
+                    trigger_event_ids=trigger_event_ids,
+                    target_viewer_id=target_viewer_id,
+                    target_persona_id=target_persona_id,
+                    user_context=user_context,
+                )
+                task_to_cancel = self._voice_cooldown_task
+                self._voice_cooldown_task = None
+                self._last_voice_trigger_at_ms = now_ms
+
+        if task_to_cancel is not None and task_to_cancel is not asyncio.current_task():
+            task_to_cancel.cancel()
+        if scheduled_delta is not None:
+            return await self._schedule_voice_cooldown_delta(session_id, scheduled_delta)
+        return await self._schedule_observation(
+            session_id,
+            trigger_event_ids=trigger_event_ids,
+            target_viewer_id=target_viewer_id,
+            target_persona_id=target_persona_id,
+            user_context=user_context,
+        )
+
+    async def _flush_voice_cooldown(self, session_id: str, deadline_ms: int) -> None:
+        try:
+            remaining_ms = max(0, deadline_ms - self._clock.now_ms())
+            if remaining_ms:
+                await asyncio.sleep(remaining_ms / 1_000)
+            async with self._lock:
+                if (
+                    self._active_session_id != session_id
+                    or self._voice_cooldown_task is not asyncio.current_task()
+                ):
+                    return
+                delta = self._voice_cooldown_delta
+                self._voice_cooldown_delta = _VoiceCooldownDelta()
+                self._voice_cooldown_task = None
+                if not delta.has_trigger():
+                    return
+                self._last_voice_trigger_at_ms = self._clock.now_ms()
+            await self._schedule_voice_cooldown_delta(session_id, delta)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "voice cooldown could not schedule an observation",
+                extra={"session_id": session_id},
+            )
+
+    async def _schedule_voice_cooldown_delta(
+        self,
+        session_id: str,
+        delta: _VoiceCooldownDelta,
+    ) -> bool:
+        target_viewer_id, target_persona_id = self._target_from_accumulated_targets(
+            delta.targets
+        )
+        return await self._schedule_observation(
+            session_id,
+            trigger_event_ids=tuple(delta.event_ids),
+            target_viewer_id=target_viewer_id,
+            target_persona_id=target_persona_id,
+            user_context=delta.user_context or None,
+        )
+
+    def _accumulate_voice_cooldown_delta(
+        self,
+        delta: _VoiceCooldownDelta,
+        *,
+        trigger_event_ids: tuple[str, ...],
+        target_viewer_id: str | None,
+        target_persona_id: str | None,
+        user_context: dict[str, str] | None,
+    ) -> None:
+        for event_id in trigger_event_ids:
+            delta.event_ids[event_id] = None
+        self._trim_ordered_ids(delta.event_ids)
+        if target_viewer_id is not None:
+            target = ("viewer", target_viewer_id)
+            if target in delta.targets or len(delta.targets) < 2:
+                delta.targets.add(target)
+        if target_persona_id is not None:
+            target = ("persona", target_persona_id)
+            if target in delta.targets or len(delta.targets) < 2:
+                delta.targets.add(target)
+        if user_context is None:
+            return
+        for key, value in user_context.items():
+            if key == "turn_id":
+                if value in delta.turn_ids or len(delta.turn_ids) < 2:
+                    delta.turn_ids.add(value)
+            else:
+                delta.user_context[key] = value
+        if len(delta.turn_ids) == 1:
+            delta.user_context["turn_id"] = next(iter(delta.turn_ids))
+        else:
+            delta.user_context.pop("turn_id", None)
+
+    @staticmethod
+    def _target_from_accumulated_targets(
+        targets: set[tuple[str, str]],
+    ) -> tuple[str | None, str | None]:
+        if len(targets) != 1:
+            return None, None
+        kind, target = next(iter(targets))
+        return (target, None) if kind == "viewer" else (None, target)
 
     async def _schedule_observation(
         self,
@@ -1519,10 +1696,7 @@ class IngestService:
     def _window_batch_target(
         delta: _WindowBatchDelta,
     ) -> tuple[str | None, str | None]:
-        if len(delta.targets) != 1:
-            return None, None
-        kind, target = next(iter(delta.targets))
-        return (target, None) if kind == "viewer" else (None, target)
+        return IngestService._target_from_accumulated_targets(delta.targets)
 
     def _remember_window_batch_id(
         self,
@@ -1881,6 +2055,8 @@ class IngestService:
         self._timestamp_floors.clear()
         self._pending_audio_ids.clear()
         self._last_trigger_at_ms = None
+        self._last_voice_trigger_at_ms = None
         self._window_batch_delta = _WindowBatchDelta()
+        self._voice_cooldown_delta = _VoiceCooldownDelta()
         self._window_batch_processed_event_ids.clear()
         self._window_batch_processed_frame_ids.clear()
