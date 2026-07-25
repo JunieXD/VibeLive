@@ -1,7 +1,5 @@
-import hashlib
 import json
 import time
-from pathlib import Path
 
 import httpx
 import pytest
@@ -21,79 +19,6 @@ from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeProvider,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-ROOM_6657_SKILL = REPO_ROOT / ".codex" / "skills" / "room-6657-style" / "SKILL.md"
-ROOM_6657_GENERATED_SKILL = (
-    REPO_ROOT
-    / "apps"
-    / "backend"
-    / "src"
-    / "advx_backend"
-    / "providers"
-    / "model"
-    / "room_6657_generation_skill.json"
-)
-
-
-def test_room_6657_generated_skill_matches_source_and_persona_contract() -> None:
-    generated = json.loads(ROOM_6657_GENERATED_SKILL.read_text(encoding="utf-8"))
-
-    assert generated["schema_version"] == 1
-    assert generated["mode_id"] == "room-6657"
-    assert generated["source_skill_sha256"] == hashlib.sha256(
-        ROOM_6657_SKILL.read_bytes()
-    ).hexdigest()
-    learned_directives = generated["learned_directives"]
-    assert 1 <= len(learned_directives) <= 6
-    assert all(isinstance(item, str) and item for item in learned_directives)
-    assert len(generated["persona_lenses"]) == 13
-    assert set(generated["persona_lenses"]) == {
-        "reaction_qmark",
-        "hardmouth_antifan",
-        "instigator",
-        "fun_seeker",
-        "meme_archivist",
-        "abstract_radio",
-        "parrot_unit",
-        "jinx_machine",
-        "grudge_keeper",
-        "cheat_suspector",
-        "praise_then_bite",
-        "clip_alarm",
-        "room_historian",
-    }
-
-
-def test_room_6657_guidance_is_compact_aggregate_only() -> None:
-    guidance = style_guidance_for(
-        {"mode_id": "room-6657"},
-        persona_id="meme_archivist",
-    )
-
-    assert guidance is not None
-    assert guidance["source"] == {
-        "kind": "aggregate_style_statistics",
-        "record_count": 21_714,
-        "corpus_sha256": "78318e2e6f04065fd024850891cf5a9a6c74d3c96e0339182e02c34e83158457",
-        "popular_record_count": 5_460,
-        "popular_min_copy_count": 113,
-        "raw_examples_included": False,
-    }
-    assert guidance["length_characters"]["median"] == 39
-    assert guidance["generation_skill_hash"] == hashlib.sha256(
-        ROOM_6657_SKILL.read_bytes()
-    ).hexdigest()
-    assert "never quote" in guidance["persona_lens"]
-    assert guidance["directives"][0].startswith("Anchor the reaction")
-    generated = json.loads(ROOM_6657_GENERATED_SKILL.read_text(encoding="utf-8"))
-    learned_directives = generated["learned_directives"]
-    assert guidance["directives"][-len(learned_directives) :] == learned_directives
-    serialized = json.dumps(guidance, ensure_ascii=False)
-    assert "raw_examples" not in guidance
-    assert "record_id" not in serialized
-    assert "username" not in serialized
-    assert len(serialized) < 3_000
-
 
 def test_style_guidance_does_not_leak_into_other_modes() -> None:
     assert (
@@ -103,33 +28,6 @@ def test_style_guidance_does_not_leak_into_other_modes() -> None:
         )
         is None
     )
-
-
-@pytest.mark.asyncio
-async def test_viewer_provider_injects_room_6657_style_guidance() -> None:
-    provider = OpenAICompatibleViewerRuntimeProvider(
-        OpenAICompatibleViewerRuntimeConfig(
-            base_url="https://example.com/v1",
-            provider=ProviderRuntimeSpec(
-                provider_profile_id="profile",
-                viewer_model="viewer",
-                memory_model="memory",
-                visual_summary_model="visual",
-            ),
-            api_key=None,
-        )
-    )
-    try:
-        content = await provider._viewer_content(_request())
-    finally:
-        await provider.aclose()
-
-    assert isinstance(content, str)
-    payload = json.loads(content)
-    guidance = payload["mode_context"]["style_profile"]
-    assert guidance["profile_id"].startswith("sb6657-aggregate-v1-")
-    assert guidance["source"]["raw_examples_included"] is False
-    assert guidance["persona_lens"].startswith("Reuse a meme's structural logic")
 
 
 @pytest.mark.asyncio

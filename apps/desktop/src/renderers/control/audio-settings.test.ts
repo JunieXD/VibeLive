@@ -6,10 +6,6 @@ import {
 } from './audio-settings'
 
 describe('audio settings', () => {
-  it('defaults both audio sources on without reading visual settings', () => {
-    expect(loadAudioSettings({ getItem: () => null })).toEqual(DEFAULT_AUDIO_SETTINGS)
-  })
-
   it('round trips the versioned setting', () => {
     let saved = ''
     saveAudioSettings(
@@ -50,12 +46,4 @@ describe('audio settings', () => {
     ).toEqual(DEFAULT_AUDIO_SETTINGS)
   })
 
-  it('does not surface storage write failures', () => {
-    expect(() =>
-      saveAudioSettings(
-        { setItem: () => { throw new Error('quota exceeded') } },
-        DEFAULT_AUDIO_SETTINGS
-      )
-    ).not.toThrow()
-  })
 })

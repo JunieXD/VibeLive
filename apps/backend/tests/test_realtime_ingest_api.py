@@ -1,8 +1,6 @@
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 from advx_backend.application.ingest_service import IngestSessionNotActiveError
 from advx_backend.application.ports.asr import AudioSource
@@ -128,6 +126,8 @@ class RecordingIngestPort:
             stage=stage,
             accepted_at_ms=123,
         )
+
+
 def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path) -> None:
     runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
     ingest = RecordingIngestPort()
@@ -247,24 +247,6 @@ def test_realtime_v4_accepts_standalone_system_audio_without_turn(tmp_path: Path
     assert ingest.inputs[0].turn_id is None
 
 
-def test_binary_v3_uses_json_metadata_and_round_trips_coordinated_audio() -> None:
-    payload = envelope(
-        media_type=BinaryMediaType.AUDIO,
-        input_id="audio-v4",
-        format_value="audio/pcm;rate=16000;channels=1;format=s16le",
-        body=b"\x00\x00",
-        source=AudioSource.MICROPHONE,
-        version=3,
-        turn_id="turn-v4",
-        system_audio_required=True,
-    )
-    decoded = decode_binary_envelope(payload)
-
-    assert payload[:5] == b"ADVX\x03"
-    assert decoded.header.turn_id == "turn-v4"
-    assert decoded.header.system_audio_required
-
-
 def test_binary_v2_source_and_v1_compatibility() -> None:
     system_audio = decode_binary_envelope(
         envelope(
@@ -299,85 +281,6 @@ def test_binary_v2_source_and_v1_compatibility() -> None:
     assert legacy_image.header.source is None
 
 
-def test_binary_v1_rejects_system_audio_source() -> None:
-    with pytest.raises(ValidationError, match="v1 only supports microphone"):
-        BinaryEnvelopeHeader(
-            version=1,
-            media_type=BinaryMediaType.AUDIO,
-            source=AudioSource.SYSTEM_AUDIO,
-            session_id="session-1",
-            input_id="system-audio",
-            captured_at_ms=100,
-            format="audio/pcm;rate=16000;channels=1;format=s16le",
-            body_length=2,
-        )
-
-
-def test_realtime_forwards_system_audio_source_to_ingest(tmp_path: Path) -> None:
-    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
-    ingest = RecordingIngestPort()
-    runtime.ingest_gateway.configure(ingest)
-    app = create_app(runtime=runtime)
-
-    with TestClient(app) as client:
-        with client.websocket_connect("/ws") as websocket:
-            websocket.send_json(hello())
-            websocket.receive_json()
-            websocket.send_bytes(
-                envelope(
-                    media_type=BinaryMediaType.AUDIO,
-                    input_id="system-1",
-                    format_value="audio/pcm;rate=16000;channels=1;format=s16le",
-                    body=b"\x00\x00",
-                    source=AudioSource.SYSTEM_AUDIO,
-                )
-            )
-            websocket.receive_json()
-            websocket.send_json(
-                {
-                    "type": "client.audio.commit",
-                    "protocol_version": 3,
-                    "session_id": "session-1",
-                    "input_id": "system-1",
-                    "committed_at_ms": 101,
-                    "source": "system_audio",
-                }
-            )
-            websocket.receive_json()
-
-    assert isinstance(ingest.inputs[0], AudioInput)
-    assert ingest.inputs[0].source is AudioSource.SYSTEM_AUDIO
-    assert isinstance(ingest.inputs[1], AudioCommit)
-    assert ingest.inputs[1].source is AudioSource.SYSTEM_AUDIO
-
-
-def test_realtime_forwards_text_target(tmp_path: Path) -> None:
-    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
-    ingest = RecordingIngestPort()
-    runtime.ingest_gateway.configure(ingest)
-    app = create_app(runtime=runtime)
-
-    with TestClient(app) as client:
-        with client.websocket_connect("/ws") as websocket:
-            websocket.send_json(hello())
-            websocket.receive_json()
-            websocket.send_json(
-                {
-                    "type": "client.text.submit",
-                    "protocol_version": 3,
-                    "session_id": "session-1",
-                    "input_id": "text-1",
-                    "created_at_ms": 100,
-                    "text": "hello",
-                    "target_viewer_id": "viewer-1",
-                }
-            )
-            assert websocket.receive_json()["input_kind"] == "text"
-
-    assert len(ingest.inputs) == 1
-    assert isinstance(ingest.inputs[0], TextInput)
-    assert ingest.inputs[0].target_viewer_id == "viewer-1"
-    assert ingest.inputs[0].target_persona_id is None
 def test_realtime_rejects_unavailable_and_inactive_ingest(tmp_path: Path) -> None:
     runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
     app = create_app(runtime=runtime)

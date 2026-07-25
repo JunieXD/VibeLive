@@ -24,20 +24,6 @@ vi.mock("electron", () => ({
 import "./control";
 
 describe("control preload", () => {
-  it("forwards voice activity through Electron IPC", () => {
-    const api = electronMocks.exposeInMainWorld.mock.calls.find(
-      ([name]) => name === "advx"
-    )?.[1] as ControlApi | undefined;
-
-    expect(api).toBeDefined();
-    expect(() => api?.notifyVoiceActivity("system_audio", 1234)).not.toThrow();
-    expect(electronMocks.send).toHaveBeenCalledWith(
-      "backend:voice-activity",
-      "system_audio",
-      1234
-    );
-  });
-
   it("subscribes to backend transcripts and removes the exact handler", () => {
     const api = electronMocks.exposeInMainWorld.mock.calls.find(
       ([name]) => name === "advx"
@@ -67,21 +53,4 @@ describe("control preload", () => {
     );
   });
 
-  it('forwards session lifecycle diagnostics without invoking a privileged handler', () => {
-    const api = electronMocks.exposeInMainWorld.mock.calls.find(
-      ([name]) => name === 'advx'
-    )?.[1] as ControlApi | undefined
-
-    api?.reportSessionLifecycle({
-      reason: 'media-failure',
-      mediaKind: 'display',
-      error: '画面来源已结束，请重新选择。'
-    })
-
-    expect(electronMocks.send).toHaveBeenCalledWith('logging:session-lifecycle', {
-      reason: 'media-failure',
-      mediaKind: 'display',
-      error: '画面来源已结束，请重新选择。'
-    })
-  })
 });

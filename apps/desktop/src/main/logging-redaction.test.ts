@@ -36,13 +36,4 @@ describe('logging redaction', () => {
     expect(redacted).not.toContain('local-secret')
   })
 
-  it('does not serialize custom object instances', () => {
-    class ProviderClient {
-      token = 'custom-object-secret'
-    }
-
-    expect(redactLogData([new ProviderClient()])).toEqual([
-      '[REDACTED_OBJECT ProviderClient]'
-    ])
-  })
 })

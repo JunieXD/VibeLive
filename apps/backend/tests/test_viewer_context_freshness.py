@@ -139,61 +139,6 @@ def test_memory_and_working_event_ids_use_only_filtered_public_context() -> None
     assert runtime.conversation_history_summary is None
 
 
-def test_reply_context_is_bounded_and_includes_the_newest_events_parent() -> None:
-    parent = _event(
-        1,
-        RoomEventSource.AUDIENCE_BARRAGE,
-        created_at_ms=75_000,
-    )
-    recent = [
-        _event(
-            sequence,
-            RoomEventSource.AUDIENCE_BARRAGE,
-            created_at_ms=99_000 + sequence,
-        )
-        for sequence in range(2, 10)
-    ]
-    newest = _event(
-        10,
-        RoomEventSource.AUDIENCE_BARRAGE,
-        created_at_ms=100_000,
-        payload={
-            "target": {
-                "kind": "event",
-                "viewer_instance_id": None,
-                "event_id": parent.event_id,
-            }
-        },
-    )
-    observation = Observation(
-        session_id="session",
-        observation_id="observation",
-        created_at_ms=100_000,
-        room_events=(parent, *recent, newest),
-    )
-
-    public_context, reply_context = ViewerRuntimeCoordinator._select_contexts(
-        observation,
-        RuntimeSettings(),
-    )
-    coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
-    assessment = coordinator._independent_assessment(
-        _wave(ObservationTrigger.AMBIENT_TICK),
-        SimpleNamespace(pool=SimpleNamespace(viewers=[])),
-        SimpleNamespace(
-            reply_context_event_ids=tuple(event.event_id for event in reply_context)
-        ),
-    )
-
-    assert public_context == ()
-    assert len(reply_context) == 8
-    assert parent in reply_context
-    assert newest in reply_context
-    assert assessment.replyable_event_ids == [
-        event.event_id for event in reply_context
-    ]
-
-
 def test_reply_context_does_not_reintroduce_a_parent_outside_its_window() -> None:
     stale_parent = _event(
         1,

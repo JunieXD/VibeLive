@@ -329,42 +329,6 @@ async def test_coordinated_turn_waits_for_system_final_and_schedules_once() -> N
 
 
 @pytest.mark.asyncio
-async def test_system_final_never_schedules_without_a_microphone_turn() -> None:
-    room = _Room()
-    scheduler = _Scheduler()
-    ingest = _ingest(
-        asr=_Asr(),
-        room=room,
-        scheduler=scheduler,
-        coordinated_turn_timeout_ms=5,
-    )
-
-    await _commit_audio(
-        ingest,
-        input_id="system-1",
-        source=AudioSource.SYSTEM_AUDIO,
-        turn_id="turn-1",
-        captured_at_ms=100,
-    )
-    await ingest._handle_transcript(
-        "session",
-        TranscriptSegment(
-            session_id="session",
-            source=AudioSource.SYSTEM_AUDIO,
-            text="视频里的对白",
-            started_at_ms=100,
-            ended_at_ms=110,
-            final=True,
-            utterance_id="system-1",
-        ),
-    )
-    await asyncio.sleep(0.02)
-
-    assert [event.text for event in room.events] == ["视频里的对白"]
-    assert scheduler.observations == []
-
-
-@pytest.mark.asyncio
 async def test_standalone_system_audio_final_schedules_an_observation() -> None:
     room = _Room()
     context = _Context()

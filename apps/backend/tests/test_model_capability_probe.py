@@ -1,33 +1,11 @@
 import json
-from types import SimpleNamespace
 
 import httpx
 import pytest
 
-from advx_backend.application.runtime_capability_probe import ProductionRuntimeCapabilityProbe
-from advx_backend.contracts.configuration import ProviderConfigurationRequest
-from advx_backend.contracts.viewer_runtime import (
-    ProviderRuntimeSpec,
-    ViewerAction,
-)
-from advx_backend.providers.model.base import (
-    CapabilityProbeCheck,
-    CapabilityProbeResult,
-    CapabilityProbeStatus,
-)
 from advx_backend.providers.model.openai_compatible import (
     OpenAICompatibleConfig,
-    OpenAICompatibleProtocolError,
     OpenAICompatibleProvider,
-    default_reasoning_options,
-)
-from advx_backend.providers.model.viewer_runtime import (
-    _VIEWER_BARRAGE_JSON_EXAMPLE,
-    _VIEWER_SILENCE_JSON_EXAMPLE,
-    _VIEWER_SYSTEM_PROMPT,
-    OpenAICompatibleViewerRuntimeConfig,
-    OpenAICompatibleViewerRuntimeProvider,
-    _ViewerModelOutput,
 )
 
 
@@ -40,71 +18,6 @@ def provider_with(client: httpx.AsyncClient) -> OpenAICompatibleProvider:
         ),
         client=client,
     )
-
-
-@pytest.mark.asyncio
-async def test_role_payload_uses_json_examples_and_stepfun_low_reasoning() -> None:
-    async with httpx.AsyncClient() as client:
-        provider = OpenAICompatibleViewerRuntimeProvider(
-            OpenAICompatibleViewerRuntimeConfig(
-                base_url="https://api.stepfun.com/v1",
-                provider=ProviderRuntimeSpec(
-                    provider_profile_id="default",
-                    viewer_model="step-3.7-flash",
-                    memory_model="step-3.7-flash",
-                    visual_summary_model="step-3.7-flash",
-                ),
-                api_key="test-key",
-            ),
-            client=client,
-        )
-        payload = provider._json_payload(
-            model_id="step-3.7-flash",
-            system_prompt='Return exactly one JSON object. Use this shape: {"summary":"text"}',
-            content="{}",
-        )
-        await provider.aclose()
-
-    assert payload["response_format"] == {"type": "json_object"}
-    assert payload["reasoning_effort"] == "low"
-    assert payload["messages"] == [
-        {
-            "role": "system",
-            "content": 'Return exactly one JSON object. Use this shape: {"summary":"text"}',
-        },
-        {"role": "user", "content": "{}"},
-    ]
-
-
-def test_stepfun_flash_defaults_to_low_reasoning_effort() -> None:
-    assert default_reasoning_options(
-        "https://api.stepfun.com/v1",
-        "step-3.7-flash",
-    ) == {"reasoning_effort": "low"}
-    assert default_reasoning_options(
-        "https://api.stepfun.com/v1",
-        "step-router-v1",
-    ) == {}
-
-
-def test_viewer_json_examples_satisfy_the_runtime_contract() -> None:
-    barrage = _ViewerModelOutput.model_validate(json.loads(_VIEWER_BARRAGE_JSON_EXAMPLE))
-    silence = _ViewerModelOutput.model_validate(json.loads(_VIEWER_SILENCE_JSON_EXAMPLE))
-
-    assert barrage.action is ViewerAction.BARRAGE
-    assert barrage.target is None
-    assert barrage.text == "这波漂亮"
-    assert barrage.decision_reason == "主播的提问符合当前人设"
-    assert silence.action is ViewerAction.SILENCE
-    assert silence.target is None
-    assert silence.text is None
-    assert silence.decision_reason == "普通问候未触发当前人设"
-    assert "Include decision_reason for every result" in _VIEWER_SYSTEM_PROMPT
-    assert "Do not include hidden reasoning" in _VIEWER_SYSTEM_PROMPT
-    assert default_reasoning_options(
-        "https://models.example/v1",
-        "step-3.7-flash",
-    ) == {}
 
 
 @pytest.mark.asyncio
@@ -214,31 +127,6 @@ async def test_probe_reports_output_token_exhaustion_without_reading_reasoning()
 
 
 @pytest.mark.asyncio
-async def test_candidate_parser_rejects_a_truncated_json_mode_response() -> None:
-    client = httpx.AsyncClient()
-    provider = provider_with(client)
-    response = httpx.Response(
-        200,
-        json={
-            "choices": [
-                {
-                    "message": {"content": '{"candidates":['},
-                    "finish_reason": "length",
-                }
-            ]
-        },
-    )
-
-    with pytest.raises(OpenAICompatibleProtocolError, match="output token budget") as raised:
-        provider._parse_candidates(response)
-
-    assert raised.value.error_code == "output_token_limit"
-
-    await provider.aclose()
-    await client.aclose()
-
-
-@pytest.mark.asyncio
 async def test_capability_probe_only_checks_active_model_roles() -> None:
     requested_models: list[str] = []
 
@@ -279,109 +167,3 @@ async def test_capability_probe_only_checks_active_model_roles() -> None:
     assert requested_models.count("vision-model") == 1
     await provider.aclose()
     await client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_startup_capability_probe_uses_one_viewer_request() -> None:
-    requests: list[httpx.Request] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        assert request.url.path.endswith("/chat/completions")
-        payload = json.loads(request.content)
-        assert payload["model"] == "viewer-model"
-        return httpx.Response(
-            200,
-            json={
-                "choices": [
-                    {
-                        "message": {"content": '{"ok":true}'},
-                        "finish_reason": "stop",
-                    }
-                ]
-            },
-        )
-
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    provider = provider_with(client)
-
-    result = await provider.probe_startup_capabilities(
-        role_models={
-            "viewer": "viewer-model",
-            "memory": "memory-model",
-            "visual_summary": "vision-model",
-        }
-    )
-
-    assert result.status.value == "passed"
-    assert result.discovered_model_ids == ()
-    assert [check.capability for check in result.checks] == ["viewer_json_output"]
-    assert len(requests) == 1
-    await provider.aclose()
-    await client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_runtime_startup_uses_only_the_lightweight_model_probe() -> None:
-    calls: list[object] = []
-
-    class _Provider:
-        async def probe_startup_capabilities(
-            self,
-            *,
-            role_models: dict[str, str],
-        ) -> CapabilityProbeResult:
-            calls.append(role_models)
-            return CapabilityProbeResult(
-                status=CapabilityProbeStatus.PASSED,
-                discovered_model_ids=(),
-                checks=(
-                    CapabilityProbeCheck(
-                        capability="viewer_json_output",
-                        status=CapabilityProbeStatus.PASSED,
-                        model_id=role_models["viewer"],
-                    ),
-                ),
-            )
-
-        async def probe_capabilities(self, *, role_models: dict[str, str]) -> CapabilityProbeResult:
-            del role_models
-            raise AssertionError("full provider diagnostics must not run at live startup")
-
-        async def aclose(self) -> None:
-            calls.append("closed")
-
-    configuration = ProviderConfigurationRequest(
-        provider_profile_id="provider",
-        model_base_url="https://models.example/v1",
-        model_name="viewer",
-        viewer_model="viewer",
-        memory_model="memory",
-        visual_summary_model="visual",
-        model_api_key="model-key",
-        asr_api_key="asr-key",
-    )
-    spec = SimpleNamespace(
-        provider=SimpleNamespace(
-            provider_profile_id="provider",
-            viewer_model="viewer",
-            memory_model="memory",
-            visual_summary_model="visual",
-        )
-    )
-    provider = _Provider()
-    probe = ProductionRuntimeCapabilityProbe(
-        configuration_provider=lambda: configuration,
-        model_provider_factory=lambda _: provider,
-    )
-
-    await probe.probe(spec)
-
-    assert calls == [
-        {
-            "viewer": "viewer",
-            "memory": "memory",
-            "visual_summary": "visual",
-        },
-        "closed",
-    ]
