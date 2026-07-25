@@ -791,45 +791,49 @@ class ViewerRuntime:
         item: _WorkItem,
         event: object,
     ) -> tuple[str, bool]:
-        async def commit_once() -> tuple[str, bool]:
+        async def commit_once() -> str:
             async with self._lock:
                 if self._expired(item.request) or not self._is_current(item):
-                    return "stale", False
+                    return "stale"
                 try:
                     await self._room_service.append_published_barrage(event)
                 except Exception:
-                    return "failed", False
-                delivery_failed = await self._deliver_realtime(item, event)
+                    return "failed"
                 await self._record_behavior_published(item.request, event)
-                return "published", delivery_failed
+                return "published"
 
-        async def commit_to_completion() -> tuple[str, bool]:
-            commit = asyncio.create_task(
-                commit_once(),
-                name=f"viewer-effect:{item.request.generation_request_id}",
+        async def commit_with_fence() -> str:
+            execute = getattr(self._session_fence, "execute_if_accepting", None)
+            if not callable(execute):
+                return await commit_once()
+            accepted, result = await execute(
+                room_id=item.request.room_id,
+                session_id=item.request.session_id,
+                audience_epoch=item.request.audience_epoch,
+                viewer_instance_id=item.request.viewer_instance_id,
+                viewer_sequence=item.request.viewer_sequence,
+                presence_revision=item.request.presence_revision,
+                moderation_revision=item.request.moderation_revision,
+                behavior_revision=None,
+                operation=commit_once,
             )
-            try:
-                return await asyncio.shield(commit)
-            except asyncio.CancelledError:
-                return await commit
+            if not accepted or result is None:
+                return "stale"
+            return result
 
-        execute = getattr(self._session_fence, "execute_if_accepting", None)
-        if not callable(execute):
-            return await commit_to_completion()
-        accepted, result = await execute(
-            room_id=item.request.room_id,
-            session_id=item.request.session_id,
-            audience_epoch=item.request.audience_epoch,
-            viewer_instance_id=item.request.viewer_instance_id,
-            viewer_sequence=item.request.viewer_sequence,
-            presence_revision=item.request.presence_revision,
-            moderation_revision=item.request.moderation_revision,
-            behavior_revision=None,
-            operation=commit_to_completion,
+        # The task that owns the session fence must perform the behavior update.
+        # Otherwise a child task can wait forever to re-enter its parent's fence.
+        commit = asyncio.create_task(
+            commit_with_fence(),
+            name=f"viewer-effect:{item.request.generation_request_id}",
         )
-        if not accepted or result is None:
-            return "stale", False
-        return result
+        try:
+            outcome = await asyncio.shield(commit)
+        except asyncio.CancelledError:
+            outcome = await commit
+        if outcome != "published":
+            return outcome, False
+        return "published", await self._deliver_realtime(item, event)
 
     async def _commit_silence(self, item: _WorkItem) -> bool:
         async with self._lock:

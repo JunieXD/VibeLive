@@ -460,6 +460,40 @@ class _Fence:
         return True
 
 
+class _TaskOwnedFence:
+    """Models the runtime effect boundary's task-owned reentrancy."""
+
+    def __init__(self) -> None:
+        self._owner = None
+        self.release_cross_task_update = asyncio.Event()
+        self.owner_updates = 0
+        self.cross_task_updates = 0
+
+    async def accepts(self, **scope: object) -> bool:
+        del scope
+        return True
+
+    async def execute_if_accepting(self, *, operation, **scope: object):
+        del scope
+        task = asyncio.current_task()
+        assert task is not None
+        if self._owner is task:
+            return True, await operation()
+        assert self._owner is None
+        self._owner = task
+        try:
+            return True, await operation()
+        finally:
+            self._owner = None
+
+    async def record_behavior_update(self) -> None:
+        if asyncio.current_task() is self._owner:
+            self.owner_updates += 1
+            return
+        self.cross_task_updates += 1
+        await self.release_cross_task_update.wait()
+
+
 class _Pipeline:
     def validate(self, *, request: object, response: object) -> object:
         del request
@@ -475,6 +509,20 @@ class _Sink:
 
     async def append_published_barrage(self, event: object) -> None:
         self.events.append(event)
+
+
+class _FenceBehaviorSink:
+    def __init__(self, fence: _TaskOwnedFence) -> None:
+        self._fence = fence
+        self.published_observation_ids: list[str] = []
+
+    async def record_published(self, request: object, event: object) -> None:
+        del event
+        await self._fence.record_behavior_update()
+        self.published_observation_ids.append(request.observation_id)
+
+    async def record_silence(self, request: object) -> None:
+        del request
 
 
 class _GatedProvider:
@@ -507,18 +555,24 @@ class _GatedProvider:
         )
 
 
-def _runtime(provider: object) -> tuple[ViewerRuntime, _Sink, _Sink]:
+def _runtime(
+    provider: object,
+    *,
+    fence: object | None = None,
+    behavior_state_sink: object | None = None,
+) -> tuple[ViewerRuntime, _Sink, _Sink]:
     publisher = _Sink()
     room = _Sink()
     runtime = ViewerRuntime(
         provider=provider,
         barrage_pipeline=_Pipeline(),
-        session_fence=_Fence(),
+        session_fence=_Fence() if fence is None else fence,
         publisher=publisher,
         room_service=room,
         clock=_Clock(),
         id_generator=_Ids(),
         max_in_flight=1,
+        behavior_state_sink=behavior_state_sink,
     )
     return runtime, publisher, room
 
@@ -542,6 +596,48 @@ async def test_system_audio_wave_calls_viewer_provider_and_publishes() -> None:
     ]
     assert len(publisher.events) == 1
     assert len(room.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_published_screen_waves_keep_behavior_update_in_fence_task() -> None:
+    provider = _GatedProvider()
+    fence = _TaskOwnedFence()
+    behavior = _FenceBehaviorSink(fence)
+    runtime, publisher, room = _runtime(
+        provider,
+        fence=fence,
+        behavior_state_sink=behavior,
+    )
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer(),))
+    context = _runtime_context()
+
+    async def dispatch_screen_wave(observation_id: str):
+        dispatch = asyncio.create_task(
+            runtime.dispatch(
+                wave=_wave(observation_id, ObservationTrigger.SCREEN_CHANGE),
+                decision=_decision(observation_id, "viewer-1"),
+                pool=pool,
+                runtime=context,
+            )
+        )
+        done, _ = await asyncio.wait({dispatch}, timeout=1)
+        if dispatch not in done:
+            fence.release_cross_task_update.set()
+            await asyncio.gather(dispatch, return_exceptions=True)
+            pytest.fail("published viewer behavior update waited on a different fence task")
+        return dispatch.result()
+
+    first = await dispatch_screen_wave("screen-1")
+    second = await dispatch_screen_wave("screen-2")
+
+    assert first.published == 1
+    assert second.published == 1
+    assert fence.owner_updates == 2
+    assert fence.cross_task_updates == 0
+    assert behavior.published_observation_ids == ["screen-1", "screen-2"]
+    assert len(publisher.events) == 2
+    assert len(room.events) == 2
 
 
 @pytest.mark.asyncio
