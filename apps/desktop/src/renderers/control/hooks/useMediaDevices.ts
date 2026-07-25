@@ -32,6 +32,7 @@ import {
   calculateMicrophoneLevel,
   describeMediaError,
   getDefaultDesktopSource,
+  smoothMicrophoneLevel,
   stopMediaStream
 } from '../media'
 import {
@@ -695,12 +696,13 @@ export function useMediaDevices({
         resetAudioSegment(channel)
         clearSystemAudioBuffer(channel)
       }
-      const meterSamples = new Uint8Array(analyser.fftSize)
+      const meterSamples = new Float32Array(analyser.fftSize)
       const measure = (): void => {
         if (channel.stream !== stream) return
-        analyser.getByteTimeDomainData(meterSamples)
-        channel.level = calculateMicrophoneLevel(meterSamples)
-        setLevel(channel.level)
+        analyser.getFloatTimeDomainData(meterSamples)
+        const targetLevel = calculateMicrophoneLevel(meterSamples)
+        channel.level = smoothMicrophoneLevel(channel.level, targetLevel)
+        setLevel(Math.round(channel.level))
         channel.meterFrame = requestAnimationFrame(measure)
       }
       measure()

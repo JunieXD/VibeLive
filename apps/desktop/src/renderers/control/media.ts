@@ -26,17 +26,34 @@ export function bindMediaStreamToVideo(
   else video.pause()
 }
 
-export function calculateMicrophoneLevel(samples: Uint8Array): number {
+const METER_FLOOR_DBFS = -60
+const METER_CEILING_DBFS = -12
+const METER_ATTACK = 0.65
+const METER_RELEASE = 0.18
+
+export function calculateMicrophoneLevel(samples: Float32Array): number {
   if (samples.length === 0) return 0
 
   let sumOfSquares = 0
   for (const sample of samples) {
-    const centered = (sample - 128) / 128
-    sumOfSquares += centered * centered
+    sumOfSquares += sample * sample
   }
 
   const rootMeanSquare = Math.sqrt(sumOfSquares / samples.length)
-  return Math.min(100, Math.round(rootMeanSquare * 320))
+  if (!Number.isFinite(rootMeanSquare) || rootMeanSquare <= 0) return 0
+
+  const decibels = 20 * Math.log10(rootMeanSquare)
+  const normalized =
+    (decibels - METER_FLOOR_DBFS) / (METER_CEILING_DBFS - METER_FLOOR_DBFS)
+  return Math.round(Math.min(1, Math.max(0, normalized)) * 100)
+}
+
+export function smoothMicrophoneLevel(previousLevel: number, targetLevel: number): number {
+  const previous = Math.min(100, Math.max(0, previousLevel))
+  const target = Math.min(100, Math.max(0, targetLevel))
+  const rate = target > previous ? METER_ATTACK : METER_RELEASE
+  const smoothed = previous + (target - previous) * rate
+  return smoothed < 0.5 ? 0 : smoothed
 }
 
 export function describeMediaError(error: unknown, kind: MediaKind): string {
