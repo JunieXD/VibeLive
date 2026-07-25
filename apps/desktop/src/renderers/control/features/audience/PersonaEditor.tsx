@@ -1,7 +1,12 @@
 import { FileText, RotateCcw, Save, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import type { Dispatch, SetStateAction } from 'react'
-import type { AudienceMode, Persona } from '../../../../shared/audience'
-import { serializePersonaMarkdown } from '../../../../shared/audience'
+import {
+  materializePersonaTemplate,
+  serializePersonaMarkdown,
+  type AudienceMode,
+  type Persona,
+  type PersonaContent
+} from '../../../../shared/audience'
 import { SelectDropdown } from '../../components/SelectDropdown'
 import { IconButton } from './IconButton'
 import { cx } from './styles'
@@ -64,7 +69,8 @@ export function PersonaEditor({
     )
   }
 
-  const update = (change: Partial<Persona>): void => setDraft({ ...draft, ...change })
+  const update = (change: Partial<Omit<PersonaContent, 'id'>>): void =>
+    setDraft(materializePersonaTemplate(draft, change))
   const participating = activeMode.personaIds.includes(draft.id) && draft.enabled
   const weight = activeMode.personaWeights[draft.id] ?? 1
 

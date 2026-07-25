@@ -2,6 +2,7 @@ import { Pencil, Plus, Search } from 'lucide-react'
 import {
   allocateViewerCounts,
   createPersonaTemplate,
+  materializePersonaTemplate,
   type AudienceMode,
   type Persona
 } from '../../../../shared/audience'
@@ -22,7 +23,7 @@ type PersonaListProps = {
 }
 
 function effectivePersona(base: Persona, mode: AudienceMode): Persona {
-  return { ...base, ...mode.personaOverrides[base.id], id: base.id }
+  return materializePersonaTemplate(base, mode.personaOverrides[base.id])
 }
 
 export function PersonaList({

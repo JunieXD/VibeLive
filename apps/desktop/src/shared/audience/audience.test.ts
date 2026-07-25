@@ -9,6 +9,7 @@ import {
   canonicalPersonaContent,
   createInitialAudienceWorkspace,
   duplicateModeAsCustom,
+  materializePersonaTemplate,
   parseAudienceWorkspaceState,
   parsePersonaMarkdown,
   resetBuiltInMode,
@@ -45,6 +46,21 @@ describe('audience presets and modes', () => {
       '逐字复刻外部语料'
     )
     expect(Object.keys(mode6657?.personaOverrides ?? {})).toHaveLength(13)
+
+    const reactionQmark = BASE_PERSONAS.find((persona) => persona.id === 'reaction_qmark')
+    expect(reactionQmark).toBeDefined()
+    const resolved = materializePersonaTemplate(
+      reactionQmark!,
+      mode6657?.personaOverrides.reaction_qmark
+    )
+    expect(resolved.speechStyle).toContain('1-8 字')
+    expect(resolved.contentHash).not.toBe(reactionQmark?.contentHash)
+    expect(validatePersona(resolved)).toEqual([])
+    expect(() => serializePersonaMarkdown(resolved)).not.toThrow()
+
+    const disabled = materializePersonaTemplate(resolved, { enabled: false })
+    expect(disabled.contentHash).not.toBe(resolved.contentHash)
+    expect(() => serializePersonaMarkdown(disabled)).not.toThrow()
   })
 
   it('activates exactly one mode and can copy/reset without mutating built-ins', () => {

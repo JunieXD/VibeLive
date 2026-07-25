@@ -4,6 +4,7 @@ import {
   BASE_PERSONAS,
   activateMode,
   duplicateModeAsCustom,
+  materializePersonaTemplate,
   parsePersonaMarkdown,
   resetBuiltInMode,
   reviseAudienceMode,
@@ -56,7 +57,7 @@ function createStableId(prefix: string): string {
 }
 
 function effectivePersona(base: Persona, mode: AudienceMode): Persona {
-  return { ...base, ...mode.personaOverrides[base.id], id: base.id }
+  return materializePersonaTemplate(base, mode.personaOverrides[base.id])
 }
 
 function personaOverride(base: Persona, next: Persona): PersonaOverride {
@@ -208,11 +209,13 @@ export function AudienceWorkspace({
     else personaOverrides[personaId] = override
     patchMode({ personaIds, personaWeights, personaOverrides })
     if (personaDraft?.id === personaId) {
-      setPersonaDraft({ ...personaDraft, enabled })
+      setPersonaDraft(materializePersonaTemplate(personaDraft, { enabled }))
       const parsedMarkdown = parsePersonaMarkdown(markdownDraft)
       if (parsedMarkdown.ok && parsedMarkdown.persona.id === personaId) {
         setMarkdownDraft(
-          serializePersonaMarkdown({ ...parsedMarkdown.persona, enabled })
+          serializePersonaMarkdown(
+            materializePersonaTemplate(parsedMarkdown.persona, { enabled })
+          )
         )
       }
     }

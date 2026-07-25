@@ -12,11 +12,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
+  materializePersonaTemplate,
   parseAudienceWorkspaceState,
   serializePersonaMarkdown,
   type AudienceWorkspaceState,
-  type LegacyLocalMeme,
-  type Persona
+  type LegacyLocalMeme
 } from "../../shared/audience";
 import {
   DEFAULT_ASR_BASE_URL,
@@ -464,19 +464,11 @@ function mergePersonaForMode(
   workspace: AudienceWorkspaceState,
   modeId: string,
   personaId: string
-): Persona {
+) {
   const base = workspace.personas.find((persona) => persona.id === personaId);
   const mode = workspace.modeState.modes.find((candidate) => candidate.id === modeId);
   if (!base || !mode) throw new Error(`无法生成模式 ${modeId} 的人格 ${personaId}`);
-  const override = mode.personaOverrides[personaId];
-  return {
-    ...base,
-    ...override,
-    traits: override?.traits ?? base.traits,
-    triggerPreferences: override?.triggerPreferences ?? base.triggerPreferences,
-    avoidPatterns: override?.avoidPatterns ?? base.avoidPatterns,
-    contentFlags: override?.contentFlags ?? base.contentFlags
-  };
+  return materializePersonaTemplate(base, mode.personaOverrides[personaId]);
 }
 
 async function materializePersonaDocuments(workspace: AudienceWorkspaceState): Promise<void> {

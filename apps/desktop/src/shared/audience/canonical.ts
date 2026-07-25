@@ -1,5 +1,6 @@
 import {
   PERSONA_DOCUMENT_VERSION,
+  type Persona,
   type PersonaContent,
   type PersonaTemplate
 } from './types'
@@ -44,6 +45,18 @@ export function createPersonaTemplate(input: PersonaTemplateInput): PersonaTempl
     contentHash: computePersonaContentHash(content),
     ...content
   }
+}
+
+export function materializePersonaTemplate(
+  persona: Persona,
+  patch: Partial<Omit<PersonaContent, 'id'>> = {}
+): PersonaTemplate {
+  return createPersonaTemplate({
+    ...persona,
+    ...patch,
+    id: persona.id,
+    revision: 'revision' in persona ? persona.revision : 1
+  })
 }
 
 export function revisePersonaTemplate(
