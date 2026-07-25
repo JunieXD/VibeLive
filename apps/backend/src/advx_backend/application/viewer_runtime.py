@@ -1667,11 +1667,38 @@ class ViewerRuntime:
         return "published", await self._deliver_realtime(item, event)
 
     async def _commit_silence(self, item: _WorkItem) -> bool:
-        async with self._lock:
-            if self._expired(item.request) or not self._is_current(item):
-                return False
-            await self._record_behavior_silence(item.request)
-            return True
+        async def commit_once() -> bool:
+            async with self._lock:
+                if self._expired(item.request) or not self._is_current(item):
+                    return False
+                await self._record_behavior_silence(item.request)
+                return True
+
+        async def commit_with_fence() -> bool:
+            execute = getattr(self._session_fence, "execute_if_accepting", None)
+            if not callable(execute):
+                return await commit_once()
+            accepted, result = await execute(
+                room_id=item.request.room_id,
+                session_id=item.request.session_id,
+                audience_epoch=item.request.audience_epoch,
+                viewer_instance_id=item.request.viewer_instance_id,
+                viewer_sequence=item.request.viewer_sequence,
+                presence_revision=item.request.presence_revision,
+                moderation_revision=item.request.moderation_revision,
+                behavior_revision=None,
+                operation=commit_once,
+            )
+            return accepted and result is True
+
+        behavior = asyncio.create_task(
+            commit_with_fence(),
+            name=f"viewer-silence:{item.request.generation_request_id}",
+        )
+        try:
+            return await asyncio.shield(behavior)
+        except asyncio.CancelledError:
+            return await behavior
 
     async def _deliver_realtime(
         self,

@@ -750,6 +750,7 @@ class _FenceBehaviorSink:
     def __init__(self, fence: _TaskOwnedFence) -> None:
         self._fence = fence
         self.published_observation_ids: list[str] = []
+        self.silenced_observation_ids: list[str] = []
 
     async def record_published(self, request: object, event: object) -> None:
         del event
@@ -757,7 +758,8 @@ class _FenceBehaviorSink:
         self.published_observation_ids.append(request.observation_id)
 
     async def record_silence(self, request: object) -> None:
-        del request
+        await self._fence.record_behavior_update()
+        self.silenced_observation_ids.append(request.observation_id)
 
 
 class _GatedProvider:
@@ -787,6 +789,17 @@ class _GatedProvider:
                     event_id=f"event-{request.observation_id}",
                 )
             ],
+        )
+
+
+class _SilenceProvider:
+    async def generate(self, request: object) -> ViewerGenerationResponse:
+        return ViewerGenerationResponse(
+            generation_request_id=request.generation_request_id,
+            viewer_instance_id=request.viewer_instance_id,
+            viewer_sequence=request.viewer_sequence,
+            action=ViewerAction.SILENCE,
+            reaction_type="silence",
         )
 
 
@@ -1240,6 +1253,35 @@ async def test_published_screen_waves_keep_behavior_update_in_fence_task() -> No
     assert behavior.published_observation_ids == ["screen-1", "screen-2"]
     assert len(publisher.events) == 2
     assert len(room.events) == 2
+
+
+@pytest.mark.asyncio
+async def test_silence_update_runs_inside_the_effect_fence_task() -> None:
+    fence = _TaskOwnedFence()
+    behavior = _FenceBehaviorSink(fence)
+    runtime, publisher, room = _runtime(
+        _SilenceProvider(),
+        fence=fence,
+        behavior_state_sink=behavior,
+    )
+    await runtime.start_session("session-1")
+
+    summary = await asyncio.wait_for(
+        runtime.dispatch(
+            wave=_wave("silence", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("silence", "viewer-1"),
+            pool=SimpleNamespace(viewers=(_viewer(),)),
+            runtime=_runtime_context(),
+        ),
+        timeout=0.2,
+    )
+
+    assert summary.silenced == 1
+    assert fence.owner_updates == 1
+    assert fence.cross_task_updates == 0
+    assert behavior.silenced_observation_ids == ["silence"]
+    assert publisher.events == []
+    assert room.events == []
 
 
 @pytest.mark.asyncio
