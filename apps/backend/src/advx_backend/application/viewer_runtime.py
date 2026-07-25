@@ -1230,7 +1230,7 @@ class ViewerRuntime:
                     and (
                         active.priority < priority
                         or active.dispatched_at_ms is None
-                        or self._has_user_trigger(wave)
+                        or self._has_user_text_trigger(wave)
                     )
                 ):
                     active.superseded_reason = self._supersede_reason(
@@ -1251,7 +1251,7 @@ class ViewerRuntime:
                     and (
                         work.priority < priority
                         or work.provider_dispatched_at_ms is None
-                        or self._has_user_trigger(wave)
+                        or self._has_user_text_trigger(wave)
                     )
                 ):
                     work.superseded_reason = self._supersede_reason(
@@ -1878,11 +1878,8 @@ class ViewerRuntime:
         return 1
 
     @staticmethod
-    def _has_user_trigger(wave: ObservationWave) -> bool:
-        return any(
-            trigger in {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
-            for trigger in wave.triggers
-        )
+    def _has_user_text_trigger(wave: ObservationWave) -> bool:
+        return ObservationTrigger.USER_TEXT in wave.triggers
 
     def _finalize_after_provider(self, item: _WorkItem, *, phase: str) -> str:
         if item.superseded_reason is not None:

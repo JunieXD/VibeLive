@@ -1266,6 +1266,37 @@ async def test_equal_priority_automatic_wave_does_not_cancel_inflight_result() -
 
 
 @pytest.mark.asyncio
+async def test_equal_priority_final_voice_wave_does_not_cancel_inflight_result() -> None:
+    provider = _GatedProvider()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer(),))
+    first = asyncio.create_task(
+        runtime.dispatch(
+            wave=_wave("wave-1", ObservationTrigger.FINAL_VOICE),
+            decision=_decision("wave-1", "viewer-1"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await provider.started.wait()
+
+    newer = await runtime.dispatch(
+        wave=_wave("wave-2", ObservationTrigger.FINAL_VOICE),
+        decision=_decision("wave-2"),
+        pool=pool,
+        runtime=_runtime_context(),
+    )
+    provider.release_old.set()
+    old = await first
+
+    assert newer.selected == 0
+    assert old.published == 1
+    assert len(publisher.events) == 1
+    assert len(room.events) == 1
+
+
+@pytest.mark.asyncio
 async def test_user_fence_rejects_pre_enqueue_old_per_viewer_work() -> None:
     provider = _GatedProvider()
     provider.release_old.set()
@@ -1652,6 +1683,49 @@ async def test_equal_priority_automatic_window_batch_finishes_before_latest() ->
     second = asyncio.create_task(
         runtime.dispatch_window_batch(
             wave=_wave("new", ObservationTrigger.SYSTEM_AUDIO),
+            decision=_decision("new", "viewer-1", "viewer-2"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await asyncio.sleep(0.01)
+
+    assert not provider.first_cancelled.is_set()
+    assert not first.done()
+    assert not second.done()
+    provider.release_first.set()
+    first_summary, second_summary = await asyncio.wait_for(
+        asyncio.gather(first, second),
+        timeout=0.2,
+    )
+
+    assert first_summary.published == 1
+    assert first_summary.silenced == 1
+    assert second_summary.published == 1
+    assert second_summary.silenced == 1
+    assert [event.text for event in publisher.events] == ["old", "new"]
+    assert [event.text for event in room.events] == ["old", "new"]
+
+
+@pytest.mark.asyncio
+async def test_equal_priority_final_voice_window_batch_finishes_before_latest() -> None:
+    provider = _CancellationResistantBatchProvider()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2")))
+
+    first = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("old", ObservationTrigger.FINAL_VOICE),
+            decision=_decision("old", "viewer-1", "viewer-2"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await provider.first_started.wait()
+    second = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("new", ObservationTrigger.FINAL_VOICE),
             decision=_decision("new", "viewer-1", "viewer-2"),
             pool=pool,
             runtime=_runtime_context(),
