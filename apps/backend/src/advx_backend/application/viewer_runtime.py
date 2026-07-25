@@ -202,6 +202,11 @@ class _OutputPaceState:
 
 
 @dataclass(slots=True)
+class _RequestPaceState:
+    next_start_at_ms: int | None = None
+
+
+@dataclass(slots=True)
 class _RequestContext:
     mode_context: dict[str, Any] = field(default_factory=dict)
     public_context_event_ids: list[str] = field(default_factory=list)
@@ -213,6 +218,10 @@ class _RequestContext:
 
 
 class _ViewerRequestExpired(TimeoutError):
+    pass
+
+
+class _ViewerRequestSuperseded(RuntimeError):
     pass
 
 
@@ -272,6 +281,7 @@ class ViewerRuntime:
         self._mailboxes: dict[str, _ViewerMailbox] = {}
         self._window_batches: dict[int, _WindowBatchWork] = {}
         self._output_states: dict[str, _OutputPaceState] = {}
+        self._request_pace_states: dict[str, _RequestPaceState] = {}
         self._sequences: dict[str, int] = {}
         self._sequence_epochs: dict[str, int] = {}
         self._lock = asyncio.Lock()
@@ -349,6 +359,7 @@ class ViewerRuntime:
             self._mailboxes.clear()
             self._window_batches.clear()
             self._output_states.clear()
+            self._request_pace_states.pop(session_id, None)
             self._lanes.clear()
             self._sequences.clear()
             self._sequence_epochs.clear()
@@ -1014,6 +1025,8 @@ class ViewerRuntime:
     ) -> WindowBatchGenerationResponse:
         if timeout_seconds <= 0:
             raise _ViewerRequestExpired("Window batch request TTL expired")
+        if not await self._wait_for_window_batch_request_turn(work):
+            raise _WindowBatchSuperseded
         async with self._lock:
             if not self._window_batch_is_current_locked(work):
                 raise _WindowBatchSuperseded
@@ -1518,6 +1531,12 @@ class ViewerRuntime:
                 item.completed_at_ms = self._clock.now_ms()
                 return self._finalize_superseded(item)
             raise
+        except _ViewerRequestSuperseded:
+            return (
+                self._finalize_superseded(item)
+                if item.superseded_reason is not None
+                else self._finalize_pre_dispatch(item)
+            )
         except _ViewerRequestExpired:
             item.completed_at_ms = self._clock.now_ms()
             self._record_trace(
@@ -2145,7 +2164,7 @@ class ViewerRuntime:
                 ),
             )
         except Exception as error:
-            if isinstance(error, _ViewerRequestExpired):
+            if isinstance(error, (_ViewerRequestExpired, _ViewerRequestSuperseded)):
                 raise
             if not self._is_transient(error) or self._expired(request):
                 raise
@@ -2192,6 +2211,8 @@ class ViewerRuntime:
     ) -> object:
         if timeout_seconds <= 0:
             raise _ViewerRequestExpired("Viewer request TTL expired")
+        if not await self._wait_for_request_turn(item):
+            raise _ViewerRequestSuperseded
         attempt = asyncio.create_task(self._provider.generate(item.request))
         if item.dispatched_at_ms is None:
             item.dispatched_at_ms = self._clock.now_ms()
@@ -2210,6 +2231,51 @@ class ViewerRuntime:
         attempt.cancel()
         attempt.add_done_callback(self._consume_task_result)
         raise _ViewerRequestExpired("Viewer provider attempt exceeded remaining TTL")
+
+    async def _wait_for_request_turn(self, item: _WorkItem) -> bool:
+        interval_ms = self._request_start_interval_ms(item.runtime)
+        async with self._lock:
+            if not self._is_current(item) or self._expired(item.request):
+                return False
+            delay_ms = self._reserve_request_start_locked(
+                session_id=item.request.session_id,
+                interval_ms=interval_ms,
+            )
+        if delay_ms:
+            await self._sleep(delay_ms / 1_000)
+        async with self._lock:
+            return self._is_current(item) and not self._expired(item.request)
+
+    async def _wait_for_window_batch_request_turn(self, work: _WindowBatchWork) -> bool:
+        runtime = work.items[0].runtime if work.items else None
+        interval_ms = self._request_start_interval_ms(runtime)
+        async with self._lock:
+            if not self._window_batch_is_current_locked(work):
+                return False
+            delay_ms = self._reserve_request_start_locked(
+                session_id=work.session_id,
+                interval_ms=interval_ms,
+            )
+        if delay_ms:
+            await self._sleep(delay_ms / 1_000)
+        async with self._lock:
+            return self._window_batch_is_current_locked(work)
+
+    def _reserve_request_start_locked(self, *, session_id: str, interval_ms: int) -> int:
+        state = self._request_pace_states.setdefault(session_id, _RequestPaceState())
+        now_ms = self._clock.now_ms()
+        start_at_ms = max(now_ms, state.next_start_at_ms or now_ms)
+        state.next_start_at_ms = start_at_ms + interval_ms
+        return start_at_ms - now_ms
+
+    @staticmethod
+    def _request_start_interval_ms(runtime: object | None) -> int:
+        spec = getattr(runtime, "canonical_runtime_spec", runtime)
+        settings = getattr(spec, "settings", None)
+        interval_ms = getattr(settings, "viewer_request_start_interval_ms", None)
+        if isinstance(interval_ms, int) and interval_ms >= 0:
+            return interval_ms
+        return 200
 
     @staticmethod
     def _consume_task_result(task: asyncio.Task[object]) -> None:

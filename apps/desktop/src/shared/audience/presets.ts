@@ -275,6 +275,7 @@ export const DEFAULT_DISPATCH_SETTINGS: AudienceDispatchSettings = {
   screenSpeakerBudget: 4,
   ambientSpeakerBudget: 2,
   maxInFlightViewerRequests: 12,
+  viewerRequestStartIntervalMs: 200,
   viewerQueueCapacity: 64,
   ambientTickCooldownMs: 30_000,
   maxConsecutiveAmbientWaves: 1

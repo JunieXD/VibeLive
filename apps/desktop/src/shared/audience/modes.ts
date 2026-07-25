@@ -105,6 +105,7 @@ export function canonicalModeContent(mode: AudienceMode): string {
       screen_speaker_budget: mode.dispatchSettings.screenSpeakerBudget,
       ambient_speaker_budget: mode.dispatchSettings.ambientSpeakerBudget,
       max_in_flight_viewer_requests: mode.dispatchSettings.maxInFlightViewerRequests,
+      viewer_request_start_interval_ms: mode.dispatchSettings.viewerRequestStartIntervalMs,
       viewer_queue_capacity: mode.dispatchSettings.viewerQueueCapacity,
       ambient_tick_cooldown_ms: mode.dispatchSettings.ambientTickCooldownMs,
       max_consecutive_ambient_waves: mode.dispatchSettings.maxConsecutiveAmbientWaves

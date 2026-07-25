@@ -62,6 +62,7 @@ class RuntimeSettings(RuntimeContractModel):
     frame_bundle: FrameBundleSettings = Field(default_factory=FrameBundleSettings)
     viewer_visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES
     max_in_flight_viewer_requests: int = Field(default=12, ge=1, le=32)
+    viewer_request_start_interval_ms: int = Field(default=200, ge=0, le=60_000)
     viewer_request_ttl_ms: int = Field(
         default=0,
         ge=0,

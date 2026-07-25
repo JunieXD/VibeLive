@@ -180,6 +180,19 @@ export function ModeToolbar({
               />
             </label>
             <label>
+              <span>请求发起间隔 ms</span>
+              <input
+                type="number"
+                min={0}
+                max={60_000}
+                step={100}
+                value={dispatch.viewerRequestStartIntervalMs}
+                onChange={(event) => patchDispatchSettings({
+                  viewerRequestStartIntervalMs: clampNumber(event.target.value, 0, 60_000)
+                })}
+              />
+            </label>
+            <label>
               <span>队列容量</span>
               <input
                 type="number"

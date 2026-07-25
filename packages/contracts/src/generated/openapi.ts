@@ -2140,6 +2140,11 @@ export interface components {
              */
             max_in_flight_viewer_requests: number;
             /**
+             * Viewer Request Start Interval Ms
+             * @default 200
+             */
+            viewer_request_start_interval_ms: number;
+            /**
              * Viewer Request Ttl Ms
              * @description Zero disables the Viewer request deadline.
              * @default 0

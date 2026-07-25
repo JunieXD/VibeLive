@@ -19,7 +19,7 @@ const STABLE_ID_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/
 const MODE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const MAX_FRAME_BUNDLE_SIZE = 5
 const MAX_FRAME_WINDOW_MS = 30_000
-type AudienceWorkspaceSourceVersion = 1 | 2 | 3 | 4 | 5
+type AudienceWorkspaceSourceVersion = 1 | 2 | 3 | 4 | 5 | 6
 const BUILT_IN_MODE_MIGRATIONS = new Map<
   string,
   { readonly fromRevisions: readonly number[]; readonly toRevision: number }
@@ -45,7 +45,7 @@ export type AudienceWorkspaceParseResult =
   | {
       readonly ok: true
       readonly workspace: AudienceWorkspaceState
-      readonly migratedFromVersion?: 1 | 2 | 3 | 4
+      readonly migratedFromVersion?: 1 | 2 | 3 | 4 | 5
       readonly legacyMemes?: readonly LegacyLocalMeme[]
     }
   | { readonly ok: false; readonly issues: readonly string[] }
@@ -63,9 +63,10 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
     value.version !== 2 &&
     value.version !== 3 &&
     value.version !== 4 &&
-    value.version !== 5
+    value.version !== 5 &&
+    value.version !== 6
   ) {
-    return { ok: false, issues: ['version must be 1, 2, 3, 4 or 5'] }
+    return { ok: false, issues: ['version must be 1, 2, 3, 4, 5 or 6'] }
   }
   const sourceVersion = value.version
   const issues: string[] = []
@@ -99,12 +100,12 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
 
   validateReferences(personas, modes, activeModeId, issues)
   if (issues.length > 0) return { ok: false, issues }
-  const migratedFromVersion: 1 | 2 | 3 | 4 | undefined = sourceVersion === 5
+  const migratedFromVersion: 1 | 2 | 3 | 4 | 5 | undefined = sourceVersion === 6
     ? undefined
     : sourceVersion
   return {
     ok: true,
-    workspace: { version: 5, personas, modeState: { modes, activeModeId } },
+    workspace: { version: 6, personas, modeState: { modes, activeModeId } },
     ...(migratedFromVersion === undefined ? {} : { migratedFromVersion }),
     ...(legacyMemes.length > 0 ? { legacyMemes } : {})
   }
@@ -272,7 +273,7 @@ function parseMode(
   const visualSettings = isLegacyVisualDefault(parsedVisualSettings)
     ? { ...DEFAULT_VISUAL_SETTINGS }
     : parsedVisualSettings
-  const dispatchSettings = sourceVersion < 5
+  const dispatchSettings = sourceVersion < 6
     ? { ...DEFAULT_DISPATCH_SETTINGS }
     : parseDispatchSettings(value.dispatchSettings, `${path}.dispatchSettings`, issues)
 
@@ -549,6 +550,13 @@ function parseDispatchSettings(
       `${path}.maxInFlightViewerRequests`,
       1,
       32,
+      issues
+    ),
+    viewerRequestStartIntervalMs: boundedInteger(
+      value.viewerRequestStartIntervalMs,
+      `${path}.viewerRequestStartIntervalMs`,
+      0,
+      60_000,
       issues
     ),
     viewerQueueCapacity: boundedInteger(
