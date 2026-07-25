@@ -474,6 +474,7 @@ export function AudienceWorkspace({
             onSearchChange={setPersonaSearch}
             onAdd={addCustomPersona}
             onChoose={choosePersona}
+            onViewerCountChange={setPersonaCount}
           />
         </div>
       ) : tab === 'memes' ? (

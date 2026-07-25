@@ -694,8 +694,7 @@
   grid-template-columns:
     minmax(220px, 0.9fr)
     minmax(220px, 1.35fr)
-    72px
-    34px
+    106px
     30px;
   align-items: center;
   gap: 16px;
@@ -782,14 +781,45 @@
 }
 
 .aw-persona-allocation {
-  color: var(--text-faint);
-  font-size: 11px;
+  display: grid;
+  grid-template-columns: 26px 38px 26px;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
-.aw-persona-allocation {
+.aw-persona-allocation .aw-icon-button {
+  width: 26px;
+  height: 26px;
+  flex-basis: 26px;
+}
+
+.aw-persona-count-input {
+  box-sizing: border-box;
+  width: 38px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
+  text-align: center;
+  appearance: textfield;
+}
+
+.aw-persona-count-input::-webkit-inner-spin-button,
+.aw-persona-count-input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.aw-persona-count-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .aw-switch {
@@ -1230,7 +1260,7 @@
   }
 
   .aw-persona-row {
-    grid-template-columns: minmax(220px, 1fr) 72px 34px 30px;
+    grid-template-columns: minmax(220px, 1fr) 106px 30px;
     gap: 12px;
   }
 
@@ -1261,11 +1291,7 @@
   }
 
   .aw-persona-row {
-    grid-template-columns: minmax(0, 1fr) 34px 30px;
-  }
-
-  .aw-persona-allocation {
-    display: none;
+    grid-template-columns: minmax(0, 1fr) 106px 30px;
   }
 
   .aw-editor-heading {

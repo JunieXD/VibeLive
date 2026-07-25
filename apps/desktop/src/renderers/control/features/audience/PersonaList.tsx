@@ -1,6 +1,7 @@
-import { Pencil, Plus, Search } from 'lucide-react'
+import { Minus, Pencil, Plus, Search } from 'lucide-react'
 import {
   materializePersonaTemplate,
+  totalViewerCount,
   type AudienceMode,
   type Persona
 } from '../../../../shared/audience'
@@ -16,6 +17,7 @@ type PersonaListProps = {
   onSearchChange(value: string): void
   onAdd(): void
   onChoose(personaId: string): void
+  onViewerCountChange(personaId: string, count: number): void
 }
 
 function effectivePersona(base: Persona, mode: AudienceMode): Persona {
@@ -30,8 +32,11 @@ export function PersonaList({
   structureLocked,
   onSearchChange,
   onAdd,
-  onChoose
+  onChoose,
+  onViewerCountChange
 }: PersonaListProps): React.JSX.Element {
+  const viewerTotal = totalViewerCount(activeMode)
+
   return (
     <aside className={cx('aw-directory')}>
       <div className={cx('aw-search-row')}>
@@ -49,6 +54,16 @@ export function PersonaList({
         {personas.map((persona) => {
           const resolved = effectivePersona(persona, activeMode)
           const viewerCount = activeMode.personaCounts[persona.id] ?? 0
+          const minimumViewerCount = viewerCount > 0 && viewerTotal === 1 ? 1 : 0
+          const maximumViewerCount = viewerCount + 32 - viewerTotal
+          const canDecrease = !structureLocked && viewerCount > 0 && viewerTotal > 1
+          const canIncrease = !structureLocked && viewerTotal < 32
+          const updateViewerCount = (value: number): void => {
+            const count = Number.isFinite(value)
+              ? Math.min(maximumViewerCount, Math.max(minimumViewerCount, Math.trunc(value)))
+              : minimumViewerCount
+            onViewerCountChange(persona.id, count)
+          }
           return (
             <article
               key={persona.id}
@@ -73,9 +88,38 @@ export function PersonaList({
               <div className={cx('aw-persona-preview')}>
                 <span>{resolved.behavior}</span>
               </div>
-              <span className={cx('aw-persona-allocation')}>
-                {viewerCount} 人
-              </span>
+              <div
+                className={cx('aw-persona-allocation')}
+                role="group"
+                aria-label={`${resolved.name}观众人数`}
+              >
+                <IconButton
+                  title={`减少${resolved.name}的观众人数`}
+                  disabled={!canDecrease}
+                  onClick={() => updateViewerCount(viewerCount - 1)}
+                >
+                  <Minus size={14} />
+                </IconButton>
+                <input
+                  className={cx('aw-persona-count-input')}
+                  type="number"
+                  min={minimumViewerCount}
+                  max={maximumViewerCount}
+                  step={1}
+                  inputMode="numeric"
+                  value={viewerCount}
+                  disabled={structureLocked}
+                  aria-label={`${resolved.name}观众人数`}
+                  onChange={(event) => updateViewerCount(Number(event.target.value))}
+                />
+                <IconButton
+                  title={`增加${resolved.name}的观众人数`}
+                  disabled={!canIncrease}
+                  onClick={() => updateViewerCount(viewerCount + 1)}
+                >
+                  <Plus size={14} />
+                </IconButton>
+              </div>
               <IconButton title={`编辑${resolved.name}`} onClick={() => onChoose(persona.id)}>
                 <Pencil size={14} />
               </IconButton>
@@ -84,7 +128,7 @@ export function PersonaList({
         })}
       </div>
       <footer className={cx('aw-viewer-allocation-total')}>
-        共 {Object.values(activeMode.personaCounts).reduce((total, count) => total + count, 0)} 人
+        共 {viewerTotal} 人
       </footer>
     </aside>
   )

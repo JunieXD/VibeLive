@@ -206,6 +206,24 @@ try {
   if (modeRanges.join(',') !== '6,10,20,28') {
     throw new Error(`Unexpected 6657 activity ranges: ${modeRanges.join(',')}`)
   }
+  const reactionQmarkCount = page.locator('input[aria-label="问号哥观众人数"]')
+  assert.equal(await reactionQmarkCount.inputValue(), '3')
+  await reactionQmarkCount.fill('4')
+  await page.waitForFunction(
+    () => document.querySelector('input[aria-label="问号哥观众人数"]')?.value === '4'
+  )
+  assert.equal(
+    (await page.locator('.aw-viewer-allocation-total').innerText()).trim(),
+    '共 29 人'
+  )
+  await page.getByRole('button', { name: '减少问号哥的观众人数', exact: true }).click()
+  await page.waitForFunction(
+    () => document.querySelector('input[aria-label="问号哥观众人数"]')?.value === '3'
+  )
+  assert.equal(
+    (await page.locator('.aw-viewer-allocation-total').innerText()).trim(),
+    '共 28 人'
+  )
 
   await page.getByRole('button', { name: '成长梗库', exact: true }).click()
   await page.getByText(
