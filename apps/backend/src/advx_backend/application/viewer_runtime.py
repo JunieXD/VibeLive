@@ -1231,16 +1231,14 @@ class ViewerRuntime:
                     and active.request.audience_epoch == wave.audience_epoch
                     and active.priority <= priority
                     and active.wave_generation != generation
-                    and (
-                        active.priority < priority
-                        or active.dispatched_at_ms is None
-                        or self._has_user_text_trigger(wave)
-                    )
                 ):
                     active.superseded_reason = self._supersede_reason(
                         priority,
                         active.priority,
                     )
+                    if active.dispatched_at_ms is not None:
+                        # Let the provider call finish, but prevent stale output from publishing.
+                        continue
                     if active.queued:
                         self._discard_item_locked(active)
                         active.ready.set()
@@ -1252,16 +1250,17 @@ class ViewerRuntime:
                     and work.audience_epoch == wave.audience_epoch
                     and work.priority <= priority
                     and work.wave_generation != generation
-                    and (
-                        work.priority < priority
-                        or work.provider_dispatched_at_ms is None
-                        or self._has_user_text_trigger(wave)
-                    )
                 ):
-                    work.superseded_reason = self._supersede_reason(
+                    reason = self._supersede_reason(
                         priority,
                         work.priority,
                     )
+                    if work.provider_dispatched_at_ms is not None:
+                        # Let the batch provider call finish, but fence every stale candidate.
+                        for item in work.items:
+                            item.superseded_reason = reason
+                        continue
+                    work.superseded_reason = reason
                     work.cancelled.set()
                     if work.queued:
                         self._discard_item_locked(work)
@@ -1881,12 +1880,17 @@ class ViewerRuntime:
             return 2
         return 1
 
-    @staticmethod
-    def _has_user_text_trigger(wave: ObservationWave) -> bool:
-        return ObservationTrigger.USER_TEXT in wave.triggers
-
     def _finalize_after_provider(self, item: _WorkItem, *, phase: str) -> str:
         if item.superseded_reason is not None:
+            if item.dispatched_at_ms is not None:
+                self._record_trace(
+                    item,
+                    status=TraceResponseStatus.STALE,
+                    accepted=False,
+                    reason=f"{item.superseded_reason}_after_provider",
+                    validation_codes=("superseded", "stale"),
+                )
+                return "stale"
             return self._finalize_superseded(item)
         expired = self._expired(item.request)
         self._record_trace(

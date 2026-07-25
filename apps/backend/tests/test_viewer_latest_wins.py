@@ -1278,7 +1278,7 @@ async def test_window_batch_calls_provider_once_and_reuses_trusted_publish_pipel
 
 
 @pytest.mark.asyncio
-async def test_equal_priority_automatic_wave_does_not_cancel_inflight_result() -> None:
+async def test_equal_priority_automatic_wave_finishes_without_publishing_stale_result() -> None:
     provider = _GatedProvider()
     runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
@@ -1303,13 +1303,13 @@ async def test_equal_priority_automatic_wave_does_not_cancel_inflight_result() -
     old = await first
 
     assert newer.selected == 0
-    assert old.published == 1
-    assert len(publisher.events) == 1
-    assert len(room.events) == 1
+    assert old.stale == 1
+    assert publisher.events == []
+    assert room.events == []
 
 
 @pytest.mark.asyncio
-async def test_equal_priority_final_voice_wave_does_not_cancel_inflight_result() -> None:
+async def test_equal_priority_final_voice_wave_finishes_without_publishing_stale_result() -> None:
     provider = _GatedProvider()
     runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
@@ -1334,9 +1334,9 @@ async def test_equal_priority_final_voice_wave_does_not_cancel_inflight_result()
     old = await first
 
     assert newer.selected == 0
-    assert old.published == 1
-    assert len(publisher.events) == 1
-    assert len(room.events) == 1
+    assert old.stale == 1
+    assert publisher.events == []
+    assert room.events == []
 
 
 @pytest.mark.asyncio
@@ -1670,7 +1670,7 @@ async def test_window_batch_terminal_counts_do_not_require_trace_recorder() -> N
 
 
 @pytest.mark.asyncio
-async def test_newer_window_batch_cancels_old_provider_with_zero_side_effects() -> None:
+async def test_higher_priority_window_batch_finishes_without_publishing_stale_results() -> None:
     provider = _CancellationResistantBatchProvider()
     runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
@@ -1678,7 +1678,7 @@ async def test_newer_window_batch_cancels_old_provider_with_zero_side_effects() 
 
     first = asyncio.create_task(
         runtime.dispatch_window_batch(
-            wave=_wave("old"),
+            wave=_wave("old", ObservationTrigger.SYSTEM_AUDIO),
             decision=_decision("old", "viewer-1", "viewer-2"),
             pool=pool,
             runtime=_runtime_context(),
@@ -1687,20 +1687,25 @@ async def test_newer_window_batch_cancels_old_provider_with_zero_side_effects() 
     await provider.first_started.wait()
     second = asyncio.create_task(
         runtime.dispatch_window_batch(
-            wave=_wave("new"),
+            wave=_wave("new", ObservationTrigger.USER_TEXT),
             decision=_decision("new", "viewer-1", "viewer-2"),
             pool=pool,
             runtime=_runtime_context(),
         )
     )
 
-    await asyncio.wait_for(provider.first_cancelled.wait(), timeout=0.2)
-    first_summary = await asyncio.wait_for(first, timeout=0.2)
-    second_summary = await asyncio.wait_for(second, timeout=0.2)
-    provider.release_first.set()
-    await asyncio.sleep(0)
+    await asyncio.sleep(0.01)
 
-    assert first_summary.superseded == 2
+    assert not provider.first_cancelled.is_set()
+    assert not first.done()
+    assert not second.done()
+    provider.release_first.set()
+    first_summary, second_summary = await asyncio.wait_for(
+        asyncio.gather(first, second),
+        timeout=0.2,
+    )
+
+    assert first_summary.stale == 2
     assert second_summary.published == 1
     assert second_summary.silenced == 1
     assert [event.text for event in publisher.events] == ["new"]
@@ -1708,7 +1713,7 @@ async def test_newer_window_batch_cancels_old_provider_with_zero_side_effects() 
 
 
 @pytest.mark.asyncio
-async def test_equal_priority_automatic_window_batch_finishes_before_latest() -> None:
+async def test_equal_priority_automatic_window_batch_finishes_stale_before_latest() -> None:
     provider = _CancellationResistantBatchProvider()
     runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
@@ -1742,16 +1747,15 @@ async def test_equal_priority_automatic_window_batch_finishes_before_latest() ->
         timeout=0.2,
     )
 
-    assert first_summary.published == 1
-    assert first_summary.silenced == 1
+    assert first_summary.stale == 2
     assert second_summary.published == 1
     assert second_summary.silenced == 1
-    assert [event.text for event in publisher.events] == ["old", "new"]
-    assert [event.text for event in room.events] == ["old", "new"]
+    assert [event.text for event in publisher.events] == ["new"]
+    assert [event.text for event in room.events] == ["new"]
 
 
 @pytest.mark.asyncio
-async def test_equal_priority_final_voice_window_batch_finishes_before_latest() -> None:
+async def test_equal_priority_final_voice_window_batch_finishes_stale_before_latest() -> None:
     provider = _CancellationResistantBatchProvider()
     runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
@@ -1785,12 +1789,11 @@ async def test_equal_priority_final_voice_window_batch_finishes_before_latest() 
         timeout=0.2,
     )
 
-    assert first_summary.published == 1
-    assert first_summary.silenced == 1
+    assert first_summary.stale == 2
     assert second_summary.published == 1
     assert second_summary.silenced == 1
-    assert [event.text for event in publisher.events] == ["old", "new"]
-    assert [event.text for event in room.events] == ["old", "new"]
+    assert [event.text for event in publisher.events] == ["new"]
+    assert [event.text for event in room.events] == ["new"]
 
 
 @pytest.mark.asyncio
@@ -1930,7 +1933,7 @@ async def test_mailbox_keeps_only_latest_pending_equal_priority_item() -> None:
         latest,
     )
 
-    assert first_summary.published == 1
+    assert first_summary.stale == 1
     assert second_summary.superseded == 1
     assert latest_summary.published == 1
     assert [request.observation_id for request in provider.requests] == [
@@ -1940,7 +1943,7 @@ async def test_mailbox_keeps_only_latest_pending_equal_priority_item() -> None:
 
 
 @pytest.mark.asyncio
-async def test_equal_priority_user_wave_still_cancels_inflight_result() -> None:
+async def test_equal_priority_user_wave_finishes_without_publishing_stale_result() -> None:
     provider = _GatedProvider()
     runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
@@ -1965,13 +1968,13 @@ async def test_equal_priority_user_wave_still_cancels_inflight_result() -> None:
     old = await first
 
     assert newer.selected == 0
-    assert old.superseded == 1
+    assert old.stale == 1
     assert publisher.events == []
     assert room.events == []
 
 
 @pytest.mark.asyncio
-async def test_higher_priority_wave_still_cancels_inflight_result() -> None:
+async def test_higher_priority_wave_finishes_without_publishing_stale_result() -> None:
     provider = _GatedProvider()
     runtime, publisher, room = _runtime(provider)
     await runtime.start_session("session-1")
@@ -1996,7 +1999,7 @@ async def test_higher_priority_wave_still_cancels_inflight_result() -> None:
     old = await first
 
     assert newer.selected == 0
-    assert old.superseded == 1
+    assert old.stale == 1
     assert publisher.events == []
     assert room.events == []
 
