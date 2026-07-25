@@ -282,6 +282,10 @@ def test_speaker_budgets_and_direct_targets_are_deterministic_and_fair() -> None
         wave=_wave(ObservationTrigger.SCREEN_CHANGE),
         committed=committed,
     )
+    system_audio = coordinator._decide_speakers(
+        wave=_wave(ObservationTrigger.SYSTEM_AUDIO),
+        committed=committed,
+    )
     ambient = coordinator._decide_speakers(
         wave=_wave(ObservationTrigger.AMBIENT_TICK),
         committed=committed,
@@ -297,9 +301,30 @@ def test_speaker_budgets_and_direct_targets_are_deterministic_and_fair() -> None
 
     assert len(user.selected_viewer_ids) == 6
     assert len(screen.selected_viewer_ids) == 4
+    assert system_audio.selected_viewer_ids == ["persona-fresh", "viewer-00"]
     assert ambient.selected_viewer_ids == ["persona-fresh", "viewer-00"]
     assert direct.selected_viewer_ids == ["viewer-09"]
     assert persona.selected_viewer_ids == ["persona-fresh"]
+
+
+def test_system_audio_transcript_is_a_real_observation_trigger() -> None:
+    event = _event(
+        1,
+        RoomEventSource.SYSTEM_EVENT,
+        created_at_ms=100_000,
+        payload={"event": "system_audio_transcript"},
+    )
+    observation = Observation(
+        session_id="session",
+        observation_id="observation-system-audio",
+        created_at_ms=100_000,
+        room_events=(event,),
+        trigger_event_ids=(event.event_id,),
+    )
+
+    assert ViewerRuntimeCoordinator._triggers(observation) == [
+        ObservationTrigger.SYSTEM_AUDIO
+    ]
 
 
 @pytest.mark.asyncio

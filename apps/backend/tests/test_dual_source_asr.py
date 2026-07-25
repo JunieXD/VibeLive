@@ -226,7 +226,11 @@ async def test_transcripts_room_events_and_realtime_are_source_isolated() -> Non
         "microphone",
         "system_audio",
     ]
-    assert len(scheduler.observations) == 1
+    assert len(scheduler.observations) == 2
+    assert {call["trigger_event_ids"] for call in context.calls} == {
+        ("voice-1",),
+        ("voice-2",),
+    }
     assert [event.final for event in publisher.events] == [False, True, False, True]
     assert ingest.partial_transcript_snapshot("session") is None
     assert (
@@ -358,6 +362,41 @@ async def test_system_final_never_schedules_without_a_microphone_turn() -> None:
 
     assert [event.text for event in room.events] == ["视频里的对白"]
     assert scheduler.observations == []
+
+
+@pytest.mark.asyncio
+async def test_standalone_system_audio_final_schedules_an_observation() -> None:
+    room = _Room()
+    context = _Context()
+    scheduler = _Scheduler()
+    ingest = _ingest(asr=_Asr(), room=room, context=context, scheduler=scheduler)
+
+    await ingest.submit_audio_and_commit(
+        AudioInput(
+            session_id="session",
+            input_id="system-standalone",
+            captured_at_ms=100,
+            format=AUDIO_FORMAT,
+            body=b"\x00\x00" * 160,
+            source=AudioSource.SYSTEM_AUDIO,
+        )
+    )
+    await ingest._handle_transcript(
+        "session",
+        TranscriptSegment(
+            session_id="session",
+            source=AudioSource.SYSTEM_AUDIO,
+            text="视频正在介绍下一道菜",
+            started_at_ms=100,
+            ended_at_ms=110,
+            final=True,
+            utterance_id="system-standalone",
+        ),
+    )
+
+    assert [event.text for event in room.events] == ["视频正在介绍下一道菜"]
+    assert len(scheduler.observations) == 1
+    assert context.calls[0]["trigger_event_ids"] == ("voice-1",)
 
 
 @pytest.mark.asyncio

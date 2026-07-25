@@ -1036,7 +1036,10 @@ class ViewerRuntime:
             for trigger in wave.triggers
         ):
             return 3
-        if ObservationTrigger.SCREEN_CHANGE in wave.triggers:
+        if (
+            ObservationTrigger.SYSTEM_AUDIO in wave.triggers
+            or ObservationTrigger.SCREEN_CHANGE in wave.triggers
+        ):
             return 2
         return 1
 

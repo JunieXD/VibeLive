@@ -56,7 +56,11 @@ class ViewerBehaviorService:
         direct_mention = 1.0 if wave.target_viewer_id == viewer.viewer_instance_id else 0.0
         persona_mention = 0.7 if wave.target_persona_id == viewer.persona_id else 0.0
         real_input = bool(
-            {ObservationTrigger.USER_TEXT, ObservationTrigger.FINAL_VOICE}
+            {
+                ObservationTrigger.USER_TEXT,
+                ObservationTrigger.FINAL_VOICE,
+                ObservationTrigger.SYSTEM_AUDIO,
+            }
             & set(wave.triggers)
         )
         emotional_activation = (

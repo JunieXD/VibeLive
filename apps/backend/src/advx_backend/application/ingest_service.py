@@ -1101,6 +1101,11 @@ class IngestService:
         target_persona_id: str | None,
     ) -> None:
         if source is AudioSource.SYSTEM_AUDIO:
+            await self._schedule_observation(
+                session_id,
+                trigger_event_ids=(event_id,),
+            )
+            await self._restart_ambient_timer(session_id)
             return
         previous_task: asyncio.Task[None] | None = None
         async with self._lock:

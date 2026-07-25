@@ -24,6 +24,7 @@ class ViewerVisualInputMode(StrEnum):
 class ObservationTrigger(StrEnum):
     USER_TEXT = "user_text"
     FINAL_VOICE = "final_voice"
+    SYSTEM_AUDIO = "system_audio"
     SCREEN_CHANGE = "screen_change"
     AMBIENT_TICK = "ambient_tick"
 
@@ -79,7 +80,7 @@ class ObservationWave(ObservationDomainModel):
     observation_id: str = Field(min_length=1, max_length=128)
     created_at_ms: int = Field(ge=0)
     deadline_at_ms: int = Field(gt=0)
-    triggers: list[ObservationTrigger] = Field(min_length=1, max_length=4)
+    triggers: list[ObservationTrigger] = Field(min_length=1, max_length=5)
     event_ids: list[str] = Field(default_factory=list, max_length=4_096)
     trigger_event_ids: list[str] = Field(default_factory=list, max_length=4_096)
     trigger_frame_ids: list[str] = Field(default_factory=list, max_length=120)

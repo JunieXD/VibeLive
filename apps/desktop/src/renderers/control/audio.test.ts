@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   AUDIO_MICROPHONE_SEGMENT_SECONDS,
+  AUDIO_SYSTEM_SEGMENT_SECONDS,
   concatenateFloat32,
   encodePcm16Mono,
   float32ToPcm16Le,
   resampleMono,
   shouldHardFlushMicrophoneSegment,
+  shouldFlushSystemAudioSegment,
   speechThresholds,
   updateNoiseFloor
 } from './audio'
@@ -22,6 +24,14 @@ describe('desktop realtime audio encoding', () => {
 
     expect(AUDIO_MICROPHONE_SEGMENT_SECONDS).toBe(30)
     expect(splits).toBe(3)
+  })
+
+  it('flushes continuous system speech every 8 seconds or after sentence silence', () => {
+    expect(AUDIO_SYSTEM_SEGMENT_SECONDS).toBe(8)
+    expect(shouldFlushSystemAudioSegment(1_000, 8_900, 9_000)).toBe(true)
+    expect(shouldFlushSystemAudioSegment(10_000, 10_100, 10_799)).toBe(false)
+    expect(shouldFlushSystemAudioSegment(10_000, 10_100, 10_900)).toBe(true)
+    expect(shouldFlushSystemAudioSegment(null, null, 20_000)).toBe(false)
   })
 
   it('concatenates captured chunks in order', () => {

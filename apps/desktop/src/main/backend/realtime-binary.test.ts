@@ -38,16 +38,22 @@ describe('ADVX-BIN/3 encoder', () => {
     expect([...encoded.slice(9 + headerLength)]).toEqual([1, 2])
   })
 
-  it('rejects atomic audio without a turn id', () => {
-    expect(() => encodeAtomicBinaryEnvelope({
+  it('allows standalone atomic audio without coordinated turn metadata', () => {
+    const encoded = encodeAtomicBinaryEnvelope({
       mediaType: 'audio',
-      source: 'microphone',
+      source: 'system_audio',
       sessionId: 'session-1',
       inputId: 'audio-1',
       capturedAtMs: 123,
       format: 'audio/pcm',
       body: new Uint8Array([1])
-    })).toThrow('turnId')
+    })
+    const view = new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength)
+    const headerLength = view.getUint32(5)
+    const header = JSON.parse(new TextDecoder().decode(encoded.slice(9, 9 + headerLength)))
+
+    expect(header.turn_id).toBeUndefined()
+    expect(header.system_audio_required).toBe(false)
   })
 })
 

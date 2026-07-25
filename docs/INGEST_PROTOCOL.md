@@ -54,9 +54,10 @@ Handler 会先校验会话、重复 `input_id`、消息大小和顺序，再调�
 `ingest.rejected`，不会因为单个坏输入直接关闭连接。只有 WebSocket frame/消息本身违反
 协议规则时才进入上一节的 `protocol.error` 关闭语义。
 
-v4 音频顺序为：客户端发送一条带 `microphone` 或 `system_audio` 来源、
-`turn_id` 和协调标记的 `ADVX-BIN/3` envelope；后端完成 push + commit 后只返回一次
-`committed` ACK。客户端不再发送 `client.audio.commit`。v3 兼容路径仍按
+v4 音频顺序为：客户端发送一条带 `microphone` 或 `system_audio` 来源的
+`ADVX-BIN/3` envelope；后端完成 push + commit 后只返回一次 `committed` ACK。
+独立系统声音片段不带 `turn_id`，只有需要把两路音频合并为同一语音轮次时才携带
+共享的 `turn_id` 和协调标记。客户端不再发送 `client.audio.commit`。v3 兼容路径仍按
 binary -> `received` ACK -> `client.audio.commit` -> `committed` ACK 执行。
 
 同一 `input_id`、时间、格式、正文和提交元数据的精确重试是幂等的；同一 `input_id`
@@ -68,6 +69,10 @@ binary -> `received` ACK -> `client.audio.commit` -> `committed` ACK 执行。
 `system_audio_required: true`。若麦克风 final 已完成而系统声音在 3 秒内没有完成，
 后端以 `system_audio_degraded: true` 仅用麦克风触发观察；迟到的系统声音仍持久化，
 但不会再次触发同一轮。
+
+没有麦克风轮次时，系统声音按语音活动独立分段：检测到约 0.8 秒停顿时提交，连续发声
+最长每 8 秒硬切一次。独立系统声音 final 立即形成 `system_audio` Observation，驱动
+Viewer 模型与弹幕；空转写只结束该片段，不调用模型。
 
 ## 3. 二进制 Envelope
 

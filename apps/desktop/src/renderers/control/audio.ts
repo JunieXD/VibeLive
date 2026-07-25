@@ -4,6 +4,7 @@ export const AUDIO_MIN_SPEECH_THRESHOLD = 0.015
 export const AUDIO_SPEECH_CONFIRMATION_MS = 200
 export const AUDIO_SYSTEM_BUFFER_SECONDS = 60
 export const AUDIO_SYSTEM_SNAPSHOT_SECONDS = 30
+export const AUDIO_SYSTEM_SEGMENT_SECONDS = 8
 export const AUDIO_MICROPHONE_SEGMENT_SECONDS = 30
 
 const AUDIO_NOISE_FLOOR_ALPHA = 0.08
@@ -21,6 +22,18 @@ export function shouldHardFlushMicrophoneSegment(
   return (
     segmentStartedAtMs !== null &&
     nowMs - segmentStartedAtMs >= AUDIO_MICROPHONE_SEGMENT_SECONDS * 1_000
+  )
+}
+
+export function shouldFlushSystemAudioSegment(
+  segmentStartedAtMs: number | null,
+  lastSpeechAtMs: number | null,
+  nowMs: number
+): boolean {
+  if (segmentStartedAtMs === null || lastSpeechAtMs === null) return false
+  return (
+    nowMs - segmentStartedAtMs >= AUDIO_SYSTEM_SEGMENT_SECONDS * 1_000 ||
+    nowMs - lastSpeechAtMs >= AUDIO_SENTENCE_SILENCE_SECONDS * 1_000
   )
 }
 

@@ -434,7 +434,16 @@ class LatestWinsReactionScheduler:
         }
         if trigger_sources & {RoomEventSource.USER_TEXT, RoomEventSource.USER_VOICE}:
             return 3
-        if observation.trigger_frame_ids or RoomEventSource.SCREEN_OBSERVATION in trigger_sources:
+        if (
+            observation.trigger_frame_ids
+            or RoomEventSource.SCREEN_OBSERVATION in trigger_sources
+            or any(
+                event.event_id in trigger_ids
+                and event.source_type is RoomEventSource.SYSTEM_EVENT
+                and event.payload.get("event") == "system_audio_transcript"
+                for event in observation.room_events
+            )
+        ):
             return 2
         return 1
 

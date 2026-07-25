@@ -99,8 +99,6 @@ class BinaryEnvelopeHeader(BaseModel):
         ):
             raise ValueError("image envelopes cannot have coordinated audio metadata")
         if self.media_type is BinaryMediaType.AUDIO:
-            if self.version == 3 and self.turn_id is None:
-                raise ValueError("binary envelope v3 audio requires a turn_id")
             if self.source is not AudioSource.MICROPHONE and self.system_audio_required:
                 raise ValueError("only microphone audio can require system audio")
             if self.system_audio_required and self.turn_id is None:

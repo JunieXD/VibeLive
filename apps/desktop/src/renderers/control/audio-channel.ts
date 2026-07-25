@@ -1,7 +1,10 @@
 import type { AudioSource } from '../../shared/contracts'
 import {
   AUDIO_SYSTEM_BUFFER_SECONDS,
-  AUDIO_SYSTEM_SNAPSHOT_SECONDS
+  AUDIO_SYSTEM_SNAPSHOT_SECONDS,
+  shouldFlushSystemAudioSegment,
+  speechThresholds,
+  updateNoiseFloor
 } from './audio'
 import type { VisualMode } from './visual'
 
@@ -34,6 +37,7 @@ export type AudioChannelState = {
   noiseFloor: number
   bufferedChunks: BufferedAudioChunk[]
   lastSystemAudioSubmittedAtMs: number | null
+  systemAudioSubmissionPending: boolean
   sendQueue: Promise<void>
   sequence: number
   ingestErrorReported: boolean
@@ -58,6 +62,7 @@ export function createAudioChannelState(source: AudioSource): AudioChannelState 
     noiseFloor: 0.003,
     bufferedChunks: [],
     lastSystemAudioSubmittedAtMs: null,
+    systemAudioSubmissionPending: false,
     sendQueue: Promise.resolve(),
     sequence: 0,
     ingestErrorReported: false,
@@ -84,6 +89,7 @@ export function resetSpeechGate(channel: AudioChannelState): void {
 export function clearSystemAudioBuffer(channel: AudioChannelState): void {
   channel.bufferedChunks = []
   channel.lastSystemAudioSubmittedAtMs = null
+  channel.systemAudioSubmissionPending = false
 }
 
 export function appendSystemAudioBuffer(
@@ -101,6 +107,39 @@ export function appendSystemAudioBuffer(
   channel.bufferedChunks = channel.bufferedChunks.flatMap((chunk) => trimChunk(chunk, cutoff))
 }
 
+export function observeSystemAudioChunk(
+  channel: AudioChannelState,
+  samples: Float32Array,
+  sampleRate: number,
+  level: number,
+  endedAtMs: number
+): boolean {
+  if (samples.length === 0 || sampleRate <= 0) return false
+  appendSystemAudioBuffer(channel, samples, sampleRate, endedAtMs)
+  const thresholds = speechThresholds(channel.noiseFloor)
+  if (channel.segmentStartedAt === null) {
+    channel.noiseFloor = updateNoiseFloor(channel.noiseFloor, level)
+    if (level >= thresholds.start) {
+      const durationMs = Math.max(
+        1,
+        Math.round((samples.length * 1_000) / sampleRate)
+      )
+      channel.segmentStartedAt = Math.max(0, endedAtMs - durationMs)
+      channel.lastSpeechAt = endedAtMs
+    }
+  } else if (level >= thresholds.continue) {
+    channel.lastSpeechAt = endedAtMs
+  }
+  return (
+    !channel.systemAudioSubmissionPending &&
+    shouldFlushSystemAudioSegment(
+      channel.segmentStartedAt,
+      channel.lastSpeechAt,
+      endedAtMs
+    )
+  )
+}
+
 export function pendingSystemAudioSnapshot(
   channel: AudioChannelState,
   endedAtMs: number,
@@ -112,6 +151,31 @@ export function pendingSystemAudioSnapshot(
     firstAvailableAtMs,
     endedAtMs - maximumDurationMs,
     microphoneStartedAtMs - 10_000,
+    channel.lastSystemAudioSubmittedAtMs ?? firstAvailableAtMs
+  )
+  const selected = channel.bufferedChunks.flatMap((chunk) => cropChunk(chunk, fromMs, endedAtMs))
+  if (selected.length === 0) return null
+  const sampleRate = selected[0].sampleRate
+  if (selected.some((chunk) => chunk.sampleRate !== sampleRate)) return null
+  return {
+    chunks: selected.map((chunk) => chunk.samples),
+    sampleRate,
+    capturedAtMs: selected[0].startedAtMs,
+    endedAtMs: selected.at(-1)?.endedAtMs ?? endedAtMs
+  }
+}
+
+export function pendingStandaloneSystemAudioSnapshot(
+  channel: AudioChannelState,
+  endedAtMs: number,
+  segmentStartedAtMs: number,
+  maximumDurationMs = AUDIO_SYSTEM_SNAPSHOT_SECONDS * 1_000
+): SystemAudioSnapshot | null {
+  const firstAvailableAtMs = channel.bufferedChunks[0]?.startedAtMs ?? endedAtMs
+  const fromMs = Math.max(
+    firstAvailableAtMs,
+    endedAtMs - maximumDurationMs,
+    segmentStartedAtMs - 500,
     channel.lastSystemAudioSubmittedAtMs ?? firstAvailableAtMs
   )
   const selected = channel.bufferedChunks.flatMap((chunk) => cropChunk(chunk, fromMs, endedAtMs))

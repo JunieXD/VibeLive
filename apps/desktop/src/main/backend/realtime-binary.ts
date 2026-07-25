@@ -91,10 +91,7 @@ export function encodeAtomicBinaryEnvelope(input: BinaryEnvelopeInput): Uint8Arr
     encodeText(value, field);
   }
   if (input.mediaType === "audio") {
-    if (input.turnId === undefined) {
-      throw new Error("Atomic audio needs a turnId.");
-    }
-    encodeText(input.turnId, "turnId");
+    if (input.turnId !== undefined) encodeText(input.turnId, "turnId");
   }
   if (
     input.mediaType === "audio" &&
@@ -114,7 +111,7 @@ export function encodeAtomicBinaryEnvelope(input: BinaryEnvelopeInput): Uint8Arr
     body_length: body.length,
     ...(input.mediaType === "audio"
       ? {
-          turn_id: input.turnId,
+          ...(input.turnId ? { turn_id: input.turnId } : {}),
           system_audio_required: input.systemAudioRequired ?? false
         }
       : {})

@@ -91,6 +91,36 @@ def _observation(
     )
 
 
+def test_system_audio_priority_is_between_user_and_ambient() -> None:
+    system_event = RoomEvent(
+        event_id="event-system",
+        session_id="session-1",
+        sequence=1,
+        source_type=RoomEventSource.SYSTEM_EVENT,
+        created_at_ms=100,
+        text="video dialogue",
+        payload={"event": "system_audio_transcript"},
+    )
+    system_audio = Observation(
+        session_id="session-1",
+        observation_id="system",
+        created_at_ms=100,
+        room_events=(system_event,),
+        trigger_event_ids=(system_event.event_id,),
+    )
+    ambient = Observation(
+        session_id="session-1",
+        observation_id="ambient",
+        created_at_ms=100,
+        user_context={"ambient": "true"},
+    )
+    user = _observation("user-priority", source=RoomEventSource.USER_TEXT)
+
+    assert LatestWinsReactionScheduler._priority(user) == 3
+    assert LatestWinsReactionScheduler._priority(system_audio) == 2
+    assert LatestWinsReactionScheduler._priority(ambient) == 1
+
+
 @pytest.mark.asyncio
 async def test_scheduler_honors_configured_one_second_merge(monkeypatch) -> None:
     real_sleep = asyncio.sleep
@@ -421,6 +451,27 @@ def _runtime(provider: object) -> tuple[ViewerRuntime, _Sink, _Sink]:
         max_in_flight=1,
     )
     return runtime, publisher, room
+
+
+@pytest.mark.asyncio
+async def test_system_audio_wave_calls_viewer_provider_and_publishes() -> None:
+    provider = _GatedProvider()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+
+    summary = await runtime.dispatch(
+        wave=_wave("system-wave", ObservationTrigger.SYSTEM_AUDIO),
+        decision=_decision("system-wave", "viewer-1"),
+        pool=SimpleNamespace(viewers=(_viewer(),)),
+        runtime=_runtime_context(),
+    )
+
+    assert summary.published == 1
+    assert [request.observation_id for request in provider.requests] == [
+        "system-wave"
+    ]
+    assert len(publisher.events) == 1
+    assert len(room.events) == 1
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,8 @@ import {
   clearSystemAudioBuffer,
   createAudioChannelState,
   markSystemAudioSubmitted,
+  observeSystemAudioChunk,
+  pendingStandaloneSystemAudioSnapshot,
   pendingSystemAudioSnapshot,
   releaseFailedLoopbackCapture,
   resetAudioSegment,
@@ -150,5 +152,58 @@ describe('audio channel state', () => {
     expect(snapshot?.capturedAtMs).toBe(72_000)
     expect(snapshot?.endedAtMs).toBe(100_000)
     expect(snapshot?.chunks.reduce((total, chunk) => total + chunk.length, 0)).toBe(28_000)
+  })
+
+  it('builds a standalone system window from only unsent audio with short pre-roll', () => {
+    const systemAudio = createAudioChannelState('system_audio')
+    for (let end = 10_000; end <= 40_000; end += 10_000) {
+      appendSystemAudioBuffer(systemAudio, new Float32Array(10_000), 1_000, end)
+    }
+    markSystemAudioSubmitted(systemAudio, 20_000)
+
+    const snapshot = pendingStandaloneSystemAudioSnapshot(
+      systemAudio,
+      38_000,
+      30_000
+    )
+
+    expect(snapshot?.capturedAtMs).toBe(29_500)
+    expect(snapshot?.endedAtMs).toBe(38_000)
+    expect(snapshot?.chunks.reduce((total, chunk) => total + chunk.length, 0)).toBe(8_500)
+  })
+
+  it('produces bounded non-overlapping windows during continuous system speech', () => {
+    const systemAudio = createAudioChannelState('system_audio')
+    const windows: Array<[number, number]> = []
+
+    for (let second = 1; second <= 45; second += 1) {
+      const shouldFlush = observeSystemAudioChunk(
+        systemAudio,
+        new Float32Array(1_000),
+        1_000,
+        0.2,
+        second * 1_000
+      )
+      if (!shouldFlush || systemAudio.segmentStartedAt === null) continue
+      const snapshot = pendingStandaloneSystemAudioSnapshot(
+        systemAudio,
+        second * 1_000,
+        systemAudio.segmentStartedAt
+      )
+      expect(snapshot).not.toBeNull()
+      if (snapshot === null) continue
+      windows.push([snapshot.capturedAtMs, snapshot.endedAtMs])
+      markSystemAudioSubmitted(systemAudio, snapshot.endedAtMs)
+      resetAudioSegment(systemAudio)
+    }
+
+    expect(windows).toEqual([
+      [0, 8_000],
+      [8_000, 16_000],
+      [16_000, 24_000],
+      [24_000, 32_000],
+      [32_000, 40_000]
+    ])
+    expect(windows.every(([start, end]) => end - start <= 8_000)).toBe(true)
   })
 })

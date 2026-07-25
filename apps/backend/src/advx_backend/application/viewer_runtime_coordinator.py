@@ -519,7 +519,10 @@ class ViewerRuntimeCoordinator:
                 for trigger in wave.triggers
             ):
                 budget = settings.viewer_user_speaker_budget
-            elif ObservationTrigger.AMBIENT_TICK in wave.triggers:
+            elif (
+                ObservationTrigger.SYSTEM_AUDIO in wave.triggers
+                or ObservationTrigger.AMBIENT_TICK in wave.triggers
+            ):
                 budget = settings.viewer_ambient_speaker_budget
             else:
                 budget = settings.viewer_screen_speaker_budget
@@ -760,6 +763,7 @@ class ViewerRuntimeCoordinator:
             in {
                 ObservationTrigger.USER_TEXT,
                 ObservationTrigger.FINAL_VOICE,
+                ObservationTrigger.SYSTEM_AUDIO,
                 ObservationTrigger.SCREEN_CHANGE,
             }
             for trigger in wave.triggers
@@ -1521,6 +1525,12 @@ class ViewerRuntimeCoordinator:
             triggers.append(ObservationTrigger.USER_TEXT)
         if RoomEventSource.USER_VOICE in sources:
             triggers.append(ObservationTrigger.FINAL_VOICE)
+        if any(
+            event.source_type is RoomEventSource.SYSTEM_EVENT
+            and event.payload.get("event") == "system_audio_transcript"
+            for event in delta_events
+        ):
+            triggers.append(ObservationTrigger.SYSTEM_AUDIO)
         if RoomEventSource.SCREEN_OBSERVATION in sources:
             triggers.append(ObservationTrigger.SCREEN_CHANGE)
         if observation.user_context.get("ambient") == "true":

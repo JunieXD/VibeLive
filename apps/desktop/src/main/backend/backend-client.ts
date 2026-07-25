@@ -700,9 +700,9 @@ export class BackendClient {
     const send = async (): Promise<void> => {
       const sessionId = this.requireRunningSession();
       const protocolVersion = this.requireRealtimeProtocolVersion();
-      const turnId = protocolVersion === 4 || input.systemAudioRequired
-        ? input.turnId ?? randomUUID()
-        : input.turnId;
+      const turnId = input.turnId ?? (
+        input.systemAudioRequired ? randomUUID() : undefined
+      );
       const encoded = protocolVersion === 4
         ? encodeAtomicBinaryEnvelope({
             mediaType: "audio",
@@ -726,7 +726,25 @@ export class BackendClient {
         });
       const socket = this.requireSocket();
       if (protocolVersion === 4) {
-        await this.sendWithIngestAck(socket, encoded, input.inputId, "committed");
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            await this.sendWithIngestAck(
+              this.requireSocket(),
+              encoded,
+              input.inputId,
+              "committed"
+            );
+            return;
+          } catch (error) {
+            if (
+              attempt === 1 ||
+              !(error instanceof BackendClientError) ||
+              error.code !== "ingest_timeout"
+            ) {
+              throw error;
+            }
+          }
+        }
         return;
       }
 

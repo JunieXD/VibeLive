@@ -218,6 +218,35 @@ def test_realtime_v4_negotiates_and_atomically_commits_audio(tmp_path: Path) -> 
     assert ingest.inputs[0].system_audio_required
 
 
+def test_realtime_v4_accepts_standalone_system_audio_without_turn(tmp_path: Path) -> None:
+    runtime = build_runtime(local_token=LOCAL_TOKEN, data_directory=tmp_path)
+    ingest = RecordingIngestPort()
+    runtime.ingest_gateway.configure(ingest)
+    app = create_app(runtime=runtime)
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws") as websocket:
+            websocket.send_json(hello(4))
+            websocket.receive_json()
+            websocket.send_bytes(
+                envelope(
+                    media_type=BinaryMediaType.AUDIO,
+                    input_id="system-standalone",
+                    format_value="audio/pcm;rate=16000;channels=1;format=s16le",
+                    body=b"\x00\x00",
+                    source=AudioSource.SYSTEM_AUDIO,
+                    version=3,
+                )
+            )
+            ack = websocket.receive_json()
+
+    assert ack["stage"] == "committed"
+    assert len(ingest.inputs) == 1
+    assert isinstance(ingest.inputs[0], AudioInput)
+    assert ingest.inputs[0].source is AudioSource.SYSTEM_AUDIO
+    assert ingest.inputs[0].turn_id is None
+
+
 def test_binary_v3_uses_json_metadata_and_round_trips_coordinated_audio() -> None:
     payload = envelope(
         media_type=BinaryMediaType.AUDIO,

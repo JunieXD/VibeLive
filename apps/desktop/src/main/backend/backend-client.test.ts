@@ -364,6 +364,96 @@ describe("BackendClient runtime v2", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps standalone v4 system audio outside a coordinated turn", async () => {
+    const client = new BackendClient({ localToken: "token" });
+    const send = vi.fn();
+    const bridge = client as unknown as {
+      session: {
+        sessionId: string;
+        state: "running";
+        startedAtMs: number;
+        updatedAtMs: number;
+        revision: number;
+      };
+      connection: "connected";
+      realtimeProtocolVersion: 4;
+      socket: { readyState: number; send(message: unknown): void };
+      waitForIngest(inputId: string, stage: "received" | "committed"): Promise<void>;
+    };
+    bridge.session = {
+      sessionId: "session-1",
+      state: "running",
+      startedAtMs: 1,
+      updatedAtMs: 1,
+      revision: 1
+    };
+    bridge.connection = "connected";
+    bridge.realtimeProtocolVersion = 4;
+    bridge.socket = { readyState: WebSocket.OPEN, send };
+    bridge.waitForIngest = async () => undefined;
+
+    await client.submitAudioSegment({
+      inputId: "system-standalone",
+      capturedAtMs: 11,
+      body: new Uint8Array([3, 4]),
+      source: "system_audio"
+    });
+
+    const binary = Buffer.from(send.mock.calls[0][0] as Uint8Array);
+    const headerLength = binary.readUInt32BE(5);
+    const header = JSON.parse(binary.subarray(9, 9 + headerLength).toString("utf8"));
+    expect(header).toMatchObject({
+      media_type: "audio",
+      source: "system_audio",
+      system_audio_required: false,
+      body_length: 2
+    });
+    expect(header.turn_id).toBeUndefined();
+  });
+
+  it("retries the exact atomic audio once after an ACK timeout", async () => {
+    const client = new BackendClient({ localToken: "token" });
+    const send = vi.fn();
+    const waitForIngest = vi.fn()
+      .mockRejectedValueOnce(new BackendClientError("ingest_timeout", "late ACK"))
+      .mockResolvedValueOnce(undefined);
+    const bridge = client as unknown as {
+      session: {
+        sessionId: string;
+        state: "running";
+        startedAtMs: number;
+        updatedAtMs: number;
+        revision: number;
+      };
+      connection: "connected";
+      realtimeProtocolVersion: 4;
+      socket: { readyState: number; send(message: unknown): void };
+      waitForIngest: typeof waitForIngest;
+    };
+    bridge.session = {
+      sessionId: "session-1",
+      state: "running",
+      startedAtMs: 1,
+      updatedAtMs: 1,
+      revision: 1
+    };
+    bridge.connection = "connected";
+    bridge.realtimeProtocolVersion = 4;
+    bridge.socket = { readyState: WebSocket.OPEN, send };
+    bridge.waitForIngest = waitForIngest;
+
+    await client.submitAudioSegment({
+      inputId: "system-timeout",
+      capturedAtMs: 11,
+      body: new Uint8Array([3, 4]),
+      source: "system_audio"
+    });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][0]).toBe(send.mock.calls[0][0]);
+    expect(waitForIngest).toHaveBeenCalledTimes(2);
+  });
+
   it("unregisters an ingest waiter when WebSocket send fails synchronously", async () => {
     const client = new BackendClient({ localToken: "token" });
     const bridge = client as unknown as {

@@ -1477,7 +1477,7 @@ export interface components {
          * ObservationTrigger
          * @enum {string}
          */
-        ObservationTrigger: "user_text" | "final_voice" | "screen_change" | "ambient_tick";
+        ObservationTrigger: "user_text" | "final_voice" | "system_audio" | "screen_change" | "ambient_tick";
         /**
          * ObservationWaveStatus
          * @enum {string}

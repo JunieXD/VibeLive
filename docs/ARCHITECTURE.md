@@ -181,7 +181,12 @@ class AsrProvider(Protocol):
 
 StepFun ASR API 一次提交一个有限音频段，不提供持续上传音频的双向流。`commit(source)` 只表示对应来源的当前音频段结束，不规定使用静音检测、固定窗口或其他分段算法。同一来源内串行处理已提交片段，不同来源可以并行；具体分段方式和时长需要通过延迟与准确率实测决定。
 
-每个最终转写会转换为来源为 `user_voice` 的 `RoomEvent`。主播麦克风使用 `source_id=host`，系统声音使用 `source_id=system-audio`，payload 同时保留 `audio_source`。用户从 React UI 发送的文字则由 Main/FastAPI 校验后转换为 `user_text` 事件；这些输入在触发观察时地位相同，但模型和控制台始终能区分来源。
+麦克风最终转写会转换为 `user_voice`，系统声音最终转写会转换为带
+`system_audio_transcript` 标记的 `system_event`。主播麦克风使用 `source_id=host`，
+系统声音使用 `source_id=system-audio`，payload 同时保留 `audio_source`。没有麦克风
+配对轮次时，系统声音约 0.8 秒静音切片、连续发声最长 8 秒硬切，并以独立
+`system_audio` trigger 驱动观察。用户从 React UI 发送的文字则由 Main/FastAPI 校验后
+转换为 `user_text` 事件；模型和控制台始终能区分来源。
 
 StepFun 的 endpoint、model、鉴权和 SSE 事件只存在于 Adapter 内。业务层和跨进程合同不出现供应商字段；如果当前 ASR API 延迟不能满足体验，可以新增双向流式 ASR Adapter，而不修改房间事件和 Audience Engine。
 
@@ -285,7 +290,7 @@ Viewer 的输入。已公开观众弹幕只在后续波的独立 reply context �
 `direct_frames` 让每个选中 Viewer 独立看到同一画面包；发送前删除超过 30 秒的普通帧，
 当前触发帧例外。`shared_summary` 只复用视觉摘要，不合并 Viewer 请求。
 
-正式触发源包括用户文字、最终语音、超过阈值且满足冷却的画面变化，以及连续模式下的
+正式触发源包括用户文字、麦克风最终语音、独立系统声音最终转写、超过阈值且满足冷却的画面变化，以及连续模式下的
 有界 ambient tick。相近输入在 1 秒窗口内合并成一波；新同优先级或更高优先级波取代旧波，
 低优先级画面或 ambient 不打断正在处理的用户输入。ASR 部分结果只用于 UI 和调试，最终
 转写以稳定 utterance ID 幂等入房间事件。AI 弹幕不能直接递归触发新波。

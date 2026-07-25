@@ -290,7 +290,7 @@
 
 - 状态：`Accepted`
 - 日期：2026-07-24
-- 决定：音频来源固定为 `microphone` 和 `system_audio`。Windows 系统声音使用 Electron loopback，首次默认开启并标记为推荐；两路音频使用独立缓冲、提交顺序和 StepFun Provider，不混音。partial 只用于控制台状态；麦克风 final 以 `user_voice`、系统声音 final 以带 `system_audio_transcript` 标记的 `system_event` 进入 Room，并按协调语音轮次策略触发观察。
+- 决定：音频来源固定为 `microphone` 和 `system_audio`。Windows 系统声音使用 Electron loopback，首次默认开启并标记为推荐；两路音频使用独立缓冲、提交顺序和 StepFun Provider，不混音。partial 只用于控制台状态；麦克风 final 以 `user_voice`、系统声音 final 以带 `system_audio_transcript` 标记的 `system_event` 进入 Room。与麦克风共享 `turn_id` 的系统声音按协调轮次触发；没有 `turn_id` 的独立系统声音 final 使用 `system_audio` 触发器直接开启观察。
 - 影响：主播麦克风使用 `source_id=host`，系统声音使用 `source_id=system-audio`；模型和界面都能区分来源。非 Windows 平台明确显示不支持，系统声音失败只降级该通道，不结束麦克风、画面或 Session。
 
 ### D-042：实时生成采用新鲜上下文和 Observation 级 latest-wins
@@ -319,6 +319,8 @@
 - 理由：消除 ACK waiter 泄漏、二阶段音频乱序、超大音频块和断线后的悬挂输入。
 - 影响：麦克风最长 30 秒硬切片；系统声音保留 60 秒环形缓冲、每轮最多取 30 秒。需要
   系统声音但 3 秒内未完成时以 mic-only 降级触发，迟到系统声音只持久化、不重复触发。
+  没有麦克风轮次时，系统声音在约 0.8 秒静音处切片，连续发声最长每 8 秒提交一次；
+  其 final 作为优先级 2 的真实输入触发 Viewer，候选预算使用 ambient 的 2 位上限。
 
 ## 4. 开放问题
 
