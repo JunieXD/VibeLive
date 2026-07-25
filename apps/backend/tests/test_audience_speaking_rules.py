@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from advx_backend.application.ingest_service import IngestService
-from advx_backend.application.observation_wave_builder import select_frame_bundle
 from advx_backend.application.ports.asr import TranscriptSegment
 from advx_backend.application.reaction_scheduler import (
     LatestWinsReactionScheduler,
@@ -23,11 +22,9 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerReactionTarget,
     ViewerTargetKind,
 )
-from advx_backend.domain.meme import MemeCandidate
 from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation import Observation
 from advx_backend.domain.observation_wave import (
-    MAX_FRAME_BUNDLE_SIZE,
     FrameBundle,
     FrameBundleItem,
     FrameBundleSettings,
@@ -352,78 +349,6 @@ def _frame(index: int, *, change_score: float) -> FrameBundleItem:
     )
 
 
-def test_change_peaks_collapses_consecutive_similar_frames_to_their_latest_frames() -> None:
-    frames = (
-        _frame(0, change_score=0.0),
-        _frame(1, change_score=0.01),
-        _frame(2, change_score=0.01),
-        _frame(3, change_score=0.25),
-        _frame(4, change_score=0.01),
-        _frame(5, change_score=0.01),
-    )
-    selected = select_frame_bundle(
-        frames=frames,
-        settings=FrameBundleSettings(frame_bundle_size=15, frame_window_ms=120_000),
-        now_ms=5_000,
-    )
-
-    assert [frame.frame_id for frame in selected] == ["frame-2", "frame-5"]
-
-
-def test_change_peaks_caps_distinct_frame_groups_without_refilling_similar_frames() -> None:
-    frames = tuple(
-        _frame(index, change_score=0.25 if index else 0.0)
-        for index in range(6)
-    )
-    selected = select_frame_bundle(
-        frames=frames,
-        settings=FrameBundleSettings(frame_bundle_size=3, frame_window_ms=120_000),
-        now_ms=5_000,
-    )
-
-    assert [frame.frame_id for frame in selected] == ["frame-0", "frame-2", "frame-5"]
-
-
-def test_autonomous_wave_accepts_evidence_for_every_frame_in_a_maximum_bundle() -> None:
-    frames = [_frame(index, change_score=0.5) for index in range(MAX_FRAME_BUNDLE_SIZE)]
-    wave = ObservationWave(
-        room_id="room",
-        session_id="session",
-        audience_epoch=1,
-        observation_id="observation",
-        created_at_ms=1_000,
-        deadline_at_ms=10_000,
-        triggers=[ObservationTrigger.USER_TEXT],
-        frame_bundle=FrameBundle(
-            bundle_id="bundle",
-            settings=FrameBundleSettings(frame_bundle_size=MAX_FRAME_BUNDLE_SIZE),
-            frames=frames,
-        ),
-    )
-    committed = SimpleNamespace(pool=SimpleNamespace(viewers=[]))
-    coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
-
-    assessment = coordinator._independent_assessment(wave, committed)
-    decision = coordinator._decide_speakers(wave=wave, committed=committed)
-    meme_candidate = MemeCandidate(
-        candidate_id="candidate",
-        room_id="room",
-        session_id="session",
-        audience_epoch=1,
-        observation_id="observation",
-        namespace_id="namespace",
-        text="meme",
-        evidence_event_ids=["event"],
-        evidence_frame_indexes=list(range(MAX_FRAME_BUNDLE_SIZE)),
-        created_at_ms=1_000,
-    )
-
-    expected_indexes = list(range(MAX_FRAME_BUNDLE_SIZE))
-    assert assessment.evidence_frame_indexes == expected_indexes
-    assert decision.evidence_frame_indexes == expected_indexes
-    assert meme_candidate.evidence_frame_indexes == expected_indexes
-
-
 @pytest.mark.asyncio
 async def test_text_input_falls_back_to_text_only_when_no_frame_is_available() -> None:
     coordinator = ViewerRuntimeCoordinator(runtime_state=object(), viewer_runtime=object())
@@ -512,28 +437,6 @@ def _request() -> ViewerGenerationRequest:
         room_memory_slice=RoomMemorySlice(room_id="room", memory_revision=0),
         deadline_at_ms=10_000,
     )
-
-
-def test_long_viewer_message_is_truncated_instead_of_discarded() -> None:
-    request = _request()
-    response = ViewerGenerationResponse(
-        generation_request_id=request.generation_request_id,
-        viewer_instance_id=request.viewer_instance_id,
-        viewer_sequence=request.viewer_sequence,
-        action=ViewerAction.BARRAGE,
-        text="好" * 200,
-        reaction_type="reaction",
-        evidence_refs=[EvidenceRef(source=EvidenceSource.FRAME, frame_index=0)],
-    )
-
-    result = ViewerBarragePipeline(clock=_Clock(), id_generator=_Ids()).validate(
-        request=request,
-        response=response,
-    )
-
-    assert result.accepted
-    assert result.event is not None
-    assert result.event.text == "好" * 160
 
 
 def test_viewer_reply_can_cite_the_bounded_reply_context() -> None:

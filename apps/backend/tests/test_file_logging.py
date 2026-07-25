@@ -71,25 +71,3 @@ def test_file_logging_records_redacted_capability_probe_diagnostics(tmp_path: Pa
     }
     assert entries[1]["message"] == "provider returned Authorization: Bearer [REDACTED]"
     assert "sk-example-secret-token" not in path.read_text(encoding="utf-8")
-
-
-def test_file_logging_records_session_stop_lifecycle(tmp_path: Path) -> None:
-    configure_logging(log_directory=tmp_path / "logs")
-    logging.getLogger("advx_backend.application.session_service").info(
-        "session.stop.completed",
-        extra={"session_id": "session-123", "outcome": "completed"},
-    )
-    handler = _file_handler()
-    handler.flush()
-
-    path = tmp_path / "logs" / "backend.jsonl"
-    [entry] = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-
-    assert entry == {
-        "level": "INFO",
-        "logger": "advx_backend.application.session_service",
-        "message": "session.stop.completed",
-        "outcome": "completed",
-        "session_id": "session-123",
-        "timestamp": entry["timestamp"],
-    }

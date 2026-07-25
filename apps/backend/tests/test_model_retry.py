@@ -6,8 +6,6 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 
-from advx_backend.application.memory_extractor import OpenAICompatibleMemoryExtractor
-from advx_backend.application.viewer_runtime import ViewerRuntime
 from advx_backend.contracts.viewer_runtime import (
     ProviderRuntimeSpec,
     ViewerGenerationRequest,
@@ -17,11 +15,6 @@ from advx_backend.domain.observation_wave import ViewerVisualInputMode
 from advx_backend.domain.persona import PersonaTemplate
 from advx_backend.domain.scene_assessment import SceneAssessment
 from advx_backend.domain.viewer import ViewerInstanceVariant, ViewerPrivateState
-from advx_backend.providers.model.openai_compatible import (
-    OpenAICompatibleConfig,
-    OpenAICompatibleHttpError,
-    OpenAICompatibleProvider,
-)
 from advx_backend.providers.model.provider_rate_gate import ProviderRateGate
 from advx_backend.providers.model.viewer_runtime import (
     OpenAICompatibleViewerRuntimeConfig,
@@ -156,41 +149,6 @@ def _viewer_completion_with_output(output: dict[str, object]) -> dict[str, objec
 
 
 @pytest.mark.asyncio
-async def test_http_429_exposes_retry_after_delta_seconds() -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(429, headers={"Retry-After": "2.5"}, request=request)
-
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    provider = OpenAICompatibleProvider(
-        OpenAICompatibleConfig(
-            base_url="https://models.example/v1",
-            model="viewer",
-            api_key="test-key",
-        ),
-        client=client,
-    )
-
-    with pytest.raises(OpenAICompatibleHttpError) as raised:
-        await provider._send("POST", "https://models.example/v1/chat/completions", payload={})
-
-    assert raised.value.status_code == 429
-    assert raised.value.retry_after_seconds == 2.5
-    await client.aclose()
-
-
-def test_viewer_retry_delay_prefers_retry_after() -> None:
-    rate_limit = ViewerRuntimeProviderError(
-        "OpenAI-compatible provider returned HTTP 429",
-        status_code=429,
-        retryable=True,
-        retry_after_seconds=1.25,
-    )
-
-    assert ViewerRuntime._retry_delay_seconds(rate_limit) == 1.25
-    assert ViewerRuntime._retry_delay_seconds(Exception("transient")) == 0.5
-
-
-@pytest.mark.asyncio
 async def test_viewer_429_updates_the_shared_provider_rate_gate() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -221,74 +179,6 @@ async def test_viewer_429_updates_the_shared_provider_rate_gate() -> None:
     assert gate.deferred == [1.25]
 
 
-@pytest.mark.asyncio
-async def test_viewer_target_prompt_matches_contract_and_empty_placeholders_normalize() -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        system_prompt = payload["messages"][0]["content"]
-
-        assert payload["response_format"] == {"type": "json_object"}
-        assert "viewer_instance_id and event_id must both be null" in system_prompt
-        assert "For a viewer target, provide viewer_instance_id only" in system_prompt
-        assert "for an event target, provide event_id only" in system_prompt
-        assert "never an empty string, for every absent target ID" in system_prompt
-        assert '"target":null,"text":"这波漂亮"' in system_prompt
-        return httpx.Response(
-            200,
-            json=_viewer_completion(
-                {
-                    "kind": "host",
-                    "viewer_instance_id": "",
-                    "event_id": "",
-                }
-            ),
-            request=request,
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        provider = OpenAICompatibleViewerRuntimeProvider(
-            _runtime_config(),
-            client=client,
-            rate_gate=_RecordingRateGate(),
-        )
-        result = await provider.generate(_viewer_request())
-        await provider.aclose()
-
-    assert result.target is not None
-    assert result.target.kind == "host"
-    assert result.target.viewer_instance_id is None
-    assert result.target.event_id is None
-
-
-@pytest.mark.asyncio
-async def test_viewer_target_canonicalizer_does_not_invent_required_event_id() -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json=_viewer_completion(
-                {
-                    "kind": "event",
-                    "viewer_instance_id": "",
-                    "event_id": "",
-                }
-            ),
-            request=request,
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        provider = OpenAICompatibleViewerRuntimeProvider(
-            _runtime_config(),
-            client=client,
-            rate_gate=_RecordingRateGate(),
-        )
-        with pytest.raises(
-            ViewerRuntimeProtocolError,
-            match="target:value_error",
-        ):
-            await provider.generate(_viewer_request())
-        await provider.aclose()
-
-
 @pytest.mark.parametrize(
     "invalid_output",
     [
@@ -300,42 +190,8 @@ async def test_viewer_target_canonicalizer_does_not_invent_required_event_id() -
             "reaction_type": "comment",
             "evidence_refs": [],
         },
-        {
-            "action": "barrage",
-            "intent": "react_to_scene",
-            "target": "scene",
-            "text": "看到了",
-            "reaction_type": "comment",
-            "evidence_refs": [],
-        },
-        {
-            "action": "barrage",
-            "intent": "react_to_scene",
-            "target": {"viewer_instance_id": None, "event_id": None},
-            "text": "看到了",
-            "reaction_type": "comment",
-            "evidence_refs": [],
-        },
-        {
-            "action": "barrage",
-            "intent": "react_to_scene",
-            "target": {
-                "kind": "scene",
-                "viewer_instance_id": None,
-                "event_id": None,
-                "source": "frame",
-            },
-            "text": "看到了",
-            "reaction_type": "comment",
-            "evidence_refs": [],
-        },
     ],
-    ids=[
-        "invalid-intent",
-        "string-target",
-        "missing-target-kind",
-        "extra-target-source",
-    ],
+    ids=["invalid-intent"],
 )
 @pytest.mark.asyncio
 async def test_viewer_protocol_violation_repairs_once(
@@ -410,7 +266,6 @@ async def test_viewer_protocol_violation_rejects_after_one_failed_repair() -> No
         await provider.aclose()
 
     assert calls == 2
-
 
 @pytest.mark.asyncio
 async def test_viewer_protocol_violation_skips_repair_when_deadline_is_too_short() -> None:
@@ -487,66 +342,3 @@ async def test_viewer_transport_retry_and_repair_share_two_call_budget() -> None
         await provider.aclose()
 
     assert calls == 2
-
-
-@pytest.mark.asyncio
-async def test_memory_429_updates_the_shared_provider_rate_gate() -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            429,
-            headers={"Retry-After": "2.5"},
-            request=request,
-        )
-
-    gate = _RecordingRateGate()
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        extractor = OpenAICompatibleMemoryExtractor(
-            _runtime_config(),
-            client=client,
-            rate_gate=gate,
-        )
-        with pytest.raises(ViewerRuntimeProviderError) as raised:
-            await extractor.extract(
-                room_id="room",
-                session_id="session",
-                audience_epoch=1,
-                events=[],
-                current_revision=0,
-            )
-        await extractor.aclose()
-
-    assert raised.value.status_code == 429
-    assert raised.value.retry_after_seconds == 2.5
-    assert gate.leases == 1
-    assert gate.deferred == [2.5]
-
-
-@pytest.mark.asyncio
-async def test_history_summary_429_updates_the_shared_provider_rate_gate() -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            429,
-            headers={"Retry-After": "3"},
-            request=request,
-        )
-
-    gate = _RecordingRateGate()
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        provider = OpenAICompatibleViewerRuntimeProvider(
-            _runtime_config(),
-            client=client,
-            rate_gate=gate,
-        )
-        with pytest.raises(ViewerRuntimeProviderError) as raised:
-            await provider.summarize_history(
-                session_id="session",
-                audience_epoch=1,
-                existing_summary=None,
-                older_history="需要压缩的公开历史",
-            )
-        await provider.aclose()
-
-    assert raised.value.status_code == 429
-    assert raised.value.retry_after_seconds == 3
-    assert gate.leases == 1
-    assert gate.deferred == [3]

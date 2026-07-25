@@ -1094,7 +1094,7 @@ uv run --project apps/backend ruff check apps/backend
 - [x] Provider 不可用时结果明确为 `BLOCKED`。
 - [x] 全部质量门通过。
 
-2026-07-24 验收说明：上面的已勾选项由当前 Windows 工作树的定向测试、全量质量门、recorded replay 和 Electron + FastAPI + Overlay smoke 共同证明。真实 StepFun 能力探测 `7/7` 通过，但最终实网运行的 12 次生产 Director 请求中有 7 次在 30 秒后被上游超时，未产生可绑定的 Viewer 调用，因此完整 credentialed E2E 保持未勾选，严格验证器以退出码 `2` 确认 `BLOCKED`。脱敏产物见 [`tests/e2e/cs2_viewer_runtime_live_stepfun_evidence.json`](../tests/e2e/cs2_viewer_runtime_live_stepfun_evidence.json)。macOS 权限、点击穿透、采集释放和打包启动未在本机验证。
+2026-07-24 验收说明：上面的已勾选项由当时 Windows 工作树的定向测试、全量质量门、recorded replay 和 Electron + FastAPI + Overlay smoke 共同证明。真实 StepFun 能力探测 `7/7` 通过，但最终实网运行的 12 次生产 Director 请求中有 7 次在 30 秒后被上游超时，未产生可绑定的 Viewer 调用，因此完整 credentialed E2E 保持未勾选。失败运行的验证器和脱敏产物已在测试减负时移除；如需恢复真实 Provider 验收，应重新实现可运行的 runner 并生成当前版本证据，不得复用历史结果。macOS 权限、点击穿透、采集释放和打包启动未在本机验证。
 
 ## 21. Out Of Scope
 

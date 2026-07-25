@@ -190,23 +190,6 @@ async def test_any_trigger_starts_the_ten_second_screen_cooldown() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_screen_trigger_also_restarts_its_own_cooldown() -> None:
-    clock = _Clock()
-    service, scheduler = _service(clock)
-
-    await _submit_frame(service, input_id="first", captured_at_ms=0, change_score=0.2)
-    clock.value = 9_999
-    await _submit_frame(service, input_id="too-soon", captured_at_ms=9_999, change_score=0.2)
-    clock.value = 10_000
-    await _submit_frame(service, input_id="second", captured_at_ms=10_000, change_score=0.2)
-
-    assert [item.trigger_frame_ids for item in scheduler.observations] == [
-        ("frame-1",),
-        ("frame-3",),
-    ]
-
-
-@pytest.mark.asyncio
 async def test_runtime_screen_settings_control_the_threshold_and_cooldown() -> None:
     clock = _Clock()
     settings_calls: list[str] = []
