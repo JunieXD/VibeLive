@@ -98,10 +98,28 @@ describe('ADVX-BIN/2 encoder', () => {
   })
 
   it('serializes validated visual change metadata into the image format', () => {
-    expect(formatImageMimeType('IMAGE/JPEG', 0.1256789))
-      .toBe('image/jpeg;advx-change-score=0.125679')
-    expect(() => formatImageMimeType('image/jpeg', Number.NaN)).toThrow('changeScore')
-    expect(() => formatImageMimeType('image/jpeg', 1.01)).toThrow('changeScore')
+    const visualSignature = 'A'.repeat(192)
+    const format = formatImageMimeType('IMAGE/JPEG', 0.1256789, visualSignature)
+
+    expect(format)
+      .toBe(`image/jpeg;advx-change-score=0.125679;advx-visual-signature=${visualSignature}`)
+    expect(() => formatImageMimeType('image/jpeg', Number.NaN, visualSignature))
+      .toThrow('changeScore')
+    expect(() => formatImageMimeType('image/jpeg', 1.01, visualSignature))
+      .toThrow('changeScore')
+    expect(() => formatImageMimeType('image/jpeg', 0, 'A'.repeat(191)))
+      .toThrow('visualSignature')
+
+    const encoded = encodeBinaryEnvelope({
+      mediaType: 'image',
+      sessionId: 's',
+      inputId: 'i',
+      capturedAtMs: 1,
+      format,
+      body: new Uint8Array([1])
+    })
+    expect(new DataView(encoded.buffer, encoded.byteOffset, encoded.byteLength).getUint16(19))
+      .toBe(format.length)
   })
 
   it('rejects invalid timestamps and empty media', () => {

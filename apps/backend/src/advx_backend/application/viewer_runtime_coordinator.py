@@ -17,6 +17,7 @@ from advx_backend.application.viewer_runtime import (
     ViewerDispatchSummary,
     ViewerRuntime,
 )
+from advx_backend.application.visual_signature import is_visual_signature
 from advx_backend.contracts.debug import ObservationWaveStatus
 from advx_backend.contracts.viewer_runtime import (
     BarrageGenerationMode,
@@ -114,6 +115,7 @@ class FrameMetadata:
     encoding: str
     content_hash: str
     change_score: float = 0.0
+    visual_signature: bytes | None = field(default=None, repr=False)
 
     def is_complete(self) -> bool:
         return (
@@ -123,7 +125,17 @@ class FrameMetadata:
             and len(self.content_hash) == 64
             and all(character in "0123456789abcdef" for character in self.content_hash)
             and 0 <= self.change_score <= 1
+            and (
+                self.visual_signature is None
+                or is_visual_signature(self.visual_signature)
+            )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedFrameSelection:
+    frames: tuple[FrameBundleItem, ...]
+    visual_signatures: Mapping[str, bytes] = field(repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -674,10 +686,11 @@ class ViewerRuntimeCoordinator:
         committed: CommittedRuntime,
     ) -> ObservationWave:
         settings = committed.spec.settings
-        frames = await self._resolve_frames(
+        resolved_frames = await self._resolve_frames(
             session_id=observation.session_id,
             frames=observation.frames,
         )
+        frames = resolved_frames.frames
         trigger_frame_ids = list(self._trigger_frame_ids(observation))
         frame_settings = (
             settings.frame_bundle
@@ -693,6 +706,7 @@ class ViewerRuntimeCoordinator:
             frames=frames,
             settings=frame_settings,
             now_ms=observation.created_at_ms,
+            visual_signatures=resolved_frames.visual_signatures,
         )
         selected_by_id = {item.frame_id: item for item in selected}
         trigger_frames = [
@@ -994,10 +1008,11 @@ class ViewerRuntimeCoordinator:
         *,
         session_id: str,
         frames: tuple[FrameRef, ...],
-    ) -> tuple[FrameBundleItem, ...]:
+    ) -> ResolvedFrameSelection:
         if self._frame_metadata is None:
-            return ()
+            return ResolvedFrameSelection(frames=(), visual_signatures={})
         resolved: list[FrameBundleItem] = []
+        visual_signatures: dict[str, bytes] = {}
         for frame in frames:
             try:
                 metadata = await self._frame_metadata.resolve(
@@ -1021,9 +1036,15 @@ class ViewerRuntimeCoordinator:
                     change_score=metadata.change_score,
                 )
             )
+            if metadata.visual_signature is not None:
+                visual_signatures[frame.frame_id] = metadata.visual_signature
         resolved.sort(key=lambda item: (item.captured_at_ms, item.frame_id))
-        return tuple(
-            item.model_copy(update={"frame_index": index}) for index, item in enumerate(resolved)
+        return ResolvedFrameSelection(
+            frames=tuple(
+                item.model_copy(update={"frame_index": index})
+                for index, item in enumerate(resolved)
+            ),
+            visual_signatures=visual_signatures,
         )
 
     async def _read_memory_slice(

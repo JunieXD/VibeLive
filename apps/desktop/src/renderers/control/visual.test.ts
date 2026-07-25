@@ -8,6 +8,7 @@ import {
   deliverAndReleaseVisualBatch,
   deliverVisualFrames,
   encodeJpegWithinTarget,
+  encodeVisualSignature,
   grayscaleMeanAbsoluteDifference,
   grayscaleSignature,
   getContainRectangle,
@@ -32,6 +33,7 @@ function createFrame(capturedAt: number): VisualFrame {
     bytes: blob.size,
     overTarget: false,
     changeScore: 0,
+    visualSignature: 'A'.repeat(192),
     blob
   }
 }
@@ -94,6 +96,12 @@ describe('visual compression', () => {
     )
 
     expect(grayscaleMeanAbsoluteDifference(black, white)).toBe(1)
+  })
+
+  it('packs a stable compact visual signature for group-anchor comparison', () => {
+    expect(encodeVisualSignature(new Uint8Array(16 * 18))).toBe('A'.repeat(192))
+    expect(encodeVisualSignature(new Uint8Array(16 * 18).fill(255))).toBe('_'.repeat(192))
+    expect(() => encodeVisualSignature(new Uint8Array(1))).toThrow('Visual signature')
   })
 
   it.each([

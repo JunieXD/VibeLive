@@ -108,6 +108,7 @@ class InMemoryFrameStore:
                         else _byte_change_score(self._last_ingested_body, frame.body)
                     )
                 ),
+                visual_signature=frame.visual_signature,
             )
             self._last_ingested_body = frame.body
             self._frames[data_ref] = _StoredFrame(data_ref=data_ref, resolved=resolved)

@@ -24,12 +24,17 @@ const MAGIC = Buffer.from("ADVX", "ascii");
 const VERSION = 2;
 const FIXED_HEADER_BYTES = 25;
 const MAX_TEXT_BYTES = 128;
+const MAX_FORMAT_BYTES = 256;
 const MAX_AUDIO_BYTES = 2_097_152;
 const MAX_IMAGE_BYTES = 4_194_304;
 const V3_FIXED_HEADER_BYTES = 9;
 const MAX_JSON_HEADER_BYTES = 4_096;
 
-export function formatImageMimeType(mimeType: string, changeScore: number): string {
+export function formatImageMimeType(
+  mimeType: string,
+  changeScore: number,
+  visualSignature: string
+): string {
   const normalized = mimeType.trim().toLowerCase();
   if (!["image/jpeg", "image/png", "image/webp"].includes(normalized)) {
     throw new Error("Image MIME type is not supported.");
@@ -37,13 +42,16 @@ export function formatImageMimeType(mimeType: string, changeScore: number): stri
   if (!Number.isFinite(changeScore) || changeScore < 0 || changeScore > 1) {
     throw new Error("changeScore must be a finite number between zero and one.");
   }
-  return `${normalized};advx-change-score=${changeScore.toFixed(6)}`;
+  if (!/^[A-Za-z0-9_-]{192}$/.test(visualSignature)) {
+    throw new Error("visualSignature must be a canonical compact visual signature.");
+  }
+  return `${normalized};advx-change-score=${changeScore.toFixed(6)};advx-visual-signature=${visualSignature}`;
 }
 
 export function encodeBinaryEnvelope(input: BinaryEnvelopeInput): Uint8Array {
   const sessionId = encodeText(input.sessionId, "sessionId");
   const inputId = encodeText(input.inputId, "inputId");
-  const format = encodeText(input.format, "format");
+  const format = encodeText(input.format, "format", MAX_FORMAT_BYTES);
   const body = Buffer.from(input.body.buffer, input.body.byteOffset, input.body.byteLength);
   const bodyLimit = input.mediaType === "audio" ? MAX_AUDIO_BYTES : MAX_IMAGE_BYTES;
   if (body.length === 0 || body.length > bodyLimit) {
@@ -88,7 +96,7 @@ export function encodeAtomicBinaryEnvelope(input: BinaryEnvelopeInput): Uint8Arr
     ["inputId", input.inputId],
     ["format", input.format]
   ] as const) {
-    encodeText(value, field);
+    encodeText(value, field, field === "format" ? MAX_FORMAT_BYTES : MAX_TEXT_BYTES);
   }
   if (input.mediaType === "audio") {
     if (input.turnId !== undefined) encodeText(input.turnId, "turnId");
@@ -136,11 +144,11 @@ function sourceByte(input: BinaryEnvelopeInput): number {
   throw new Error("Audio source is not supported.");
 }
 
-function encodeText(value: string, field: string): Buffer {
+function encodeText(value: string, field: string, maximumBytes = MAX_TEXT_BYTES): Buffer {
   if (!value || value.includes("\0")) throw new Error(`${field} must be non-empty text.`);
   const encoded = Buffer.from(value, "utf8");
-  if (encoded.length > MAX_TEXT_BYTES) {
-    throw new Error(`${field} exceeds ${MAX_TEXT_BYTES} UTF-8 bytes.`);
+  if (encoded.length > maximumBytes) {
+    throw new Error(`${field} exceeds ${maximumBytes} UTF-8 bytes.`);
   }
   return encoded;
 }

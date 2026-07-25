@@ -239,6 +239,7 @@ export type RealtimeAudioInput = RealtimeMediaInput & {
 export type RealtimeFrameInput = RealtimeMediaInput & {
   mimeType: string
   changeScore: number
+  visualSignature: string
 }
 
 export type SaveAudienceWorkspaceResult = {

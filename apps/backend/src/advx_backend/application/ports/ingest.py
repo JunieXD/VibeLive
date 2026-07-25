@@ -13,6 +13,10 @@ from enum import StrEnum
 from typing import Protocol
 
 from advx_backend.application.ports.asr import AudioSource
+from advx_backend.application.visual_signature import (
+    decode_visual_signature,
+    validate_visual_signature,
+)
 from advx_backend.domain.observation import FrameRef
 
 
@@ -130,6 +134,7 @@ class FrameInput:
     mime_type: str
     body: bytes = field(repr=False)
     change_score: float | None = None
+    visual_signature: bytes | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
@@ -137,11 +142,20 @@ class FrameInput:
         _require_timestamp(self.captured_at_ms, "captured_at_ms")
         _require_non_empty_string(self.mime_type, "mime_type")
         _require_media_body(self.body, "body")
-        mime_type, transported_score = _parse_frame_mime_type(self.mime_type)
+        mime_type, transported_score, transported_signature = _parse_frame_mime_type(
+            self.mime_type
+        )
         if transported_score is not None and self.change_score is not None:
             raise ValueError("change_score must use either metadata or the explicit field")
+        if transported_signature is not None and self.visual_signature is not None:
+            raise ValueError("visual_signature must use either metadata or the explicit field")
         change_score = (
             transported_score if transported_score is not None else self.change_score
+        )
+        visual_signature = (
+            transported_signature
+            if transported_signature is not None
+            else self.visual_signature
         )
         if change_score is not None and (
             isinstance(change_score, bool)
@@ -150,29 +164,47 @@ class FrameInput:
             or not 0 <= change_score <= 1
         ):
             raise ValueError("change_score must be a finite number between zero and one")
+        if visual_signature is not None:
+            validate_visual_signature(visual_signature)
         object.__setattr__(self, "mime_type", mime_type)
         object.__setattr__(
             self,
             "change_score",
             None if change_score is None else float(change_score),
         )
+        object.__setattr__(self, "visual_signature", visual_signature)
 
 
-def _parse_frame_mime_type(value: str) -> tuple[str, float | None]:
-    mime_type, separator, metadata = value.partition(";")
+def _parse_frame_mime_type(value: str) -> tuple[str, float | None, bytes | None]:
+    mime_type, *parameters = value.split(";")
     normalized = mime_type.strip().casefold()
-    if not separator:
-        return normalized, None
-    if not metadata.startswith("advx-change-score=") or ";" in metadata:
-        raise ValueError("frame MIME metadata is invalid")
-    raw_score = metadata.removeprefix("advx-change-score=")
-    if not raw_score or raw_score.strip() != raw_score:
-        raise ValueError("frame change score metadata is invalid")
-    try:
-        score = float(raw_score)
-    except ValueError as error:
-        raise ValueError("frame change score metadata is invalid") from error
-    return normalized, score
+    if not normalized:
+        raise ValueError("frame MIME type is invalid")
+    change_score: float | None = None
+    visual_signature: bytes | None = None
+    for parameter in parameters:
+        if parameter.strip() != parameter:
+            raise ValueError("frame MIME metadata is invalid")
+        key, separator, raw_value = parameter.partition("=")
+        if not separator or not key or not raw_value or raw_value.strip() != raw_value:
+            raise ValueError("frame MIME metadata is invalid")
+        if key == "advx-change-score":
+            if change_score is not None:
+                raise ValueError("frame change score metadata is duplicated")
+            try:
+                change_score = float(raw_value)
+            except ValueError as error:
+                raise ValueError("frame change score metadata is invalid") from error
+        elif key == "advx-visual-signature":
+            if visual_signature is not None:
+                raise ValueError("frame visual signature metadata is duplicated")
+            try:
+                visual_signature = decode_visual_signature(raw_value)
+            except ValueError as error:
+                raise ValueError("frame visual signature metadata is invalid") from error
+        else:
+            raise ValueError("frame MIME metadata is invalid")
+    return normalized, change_score, visual_signature
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +251,7 @@ class ResolvedFrame:
     mime_type: str
     body: bytes = field(repr=False)
     change_score: float = 0.0
+    visual_signature: bytes | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         _require_non_empty_string(self.session_id, "session_id")
@@ -229,6 +262,8 @@ class ResolvedFrame:
         _require_media_body(self.body, "body")
         if not 0 <= self.change_score <= 1:
             raise ValueError("change_score must be between zero and one")
+        if self.visual_signature is not None:
+            validate_visual_signature(self.visual_signature)
 
 
 class IngestPort(Protocol):

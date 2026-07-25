@@ -7,10 +7,12 @@ import {
   deliverAndReleaseVisualBatch,
   deliverVisualFrames,
   drawCompositeFrame,
+  encodeVisualSignature,
   grayscaleMeanAbsoluteDifference,
   releaseVisualFrames,
   requiredVisualSources,
   sampleCanvasChangeSignature,
+  sampleCanvasVisualSignature,
   type VisualBatchSink,
   type VisualFrame,
   type VisualPipelineStatus,
@@ -99,7 +101,8 @@ export function useVisualPipeline({
       ...presetProfile,
       maxLongEdge: Math.min(presetProfile.maxLongEdge, framePolicy.frameMaxDimension)
     }
-    const signatureCanvas = document.createElement('canvas')
+    const changeScoreCanvas = document.createElement('canvas')
+    const visualSignatureCanvas = document.createElement('canvas')
     let previousSignature: Uint8Array | null = null
     const batchAbortController = new AbortController()
 
@@ -138,8 +141,11 @@ export function useVisualPipeline({
         })
         if (!drawn) return
 
-        const signature = sampleCanvasChangeSignature(canvas, signatureCanvas)
+        const signature = sampleCanvasChangeSignature(canvas, changeScoreCanvas)
         const changeScore = grayscaleMeanAbsoluteDifference(previousSignature, signature)
+        const visualSignature = encodeVisualSignature(
+          sampleCanvasVisualSignature(canvas, visualSignatureCanvas)
+        )
         const encoded = await compressCompositeCanvas(
           canvas,
           profile,
@@ -158,6 +164,7 @@ export function useVisualPipeline({
           bytes: encoded.blob.size,
           overTarget: encoded.overTarget,
           changeScore,
+          visualSignature,
           blob: encoded.blob
         }
         pendingFramesRef.current.push(frame)

@@ -101,11 +101,15 @@ JSON header 必须包含：
 
 `format` 是实际 wire format 描述，不绑定 Provider。音频可使用
 `audio/pcm;rate=16000;channels=1;format=s16le`，图片可使用 `image/webp`、
-`image/jpeg` 等；具体 Adapter 支持集在接入时校验，不能把供应商字段写入本协议。
+`image/jpeg` 等；桌面端图片额外携带 `advx-change-score` 与
+`advx-visual-signature` 参数。后者是用于组首画面对比的紧凑灰度指纹，只在临时帧存储和
+本轮选择中使用，不进入模型请求、日志、Debug Trace 或持久化数据。具体 Adapter 支持集在
+接入时校验，不能把供应商字段写入本协议。
 
 | 限制 | 上限 |
 | --- | ---: |
-| `session_id` / `input_id` / `format` | 各 128 UTF-8 bytes |
+| `session_id` / `input_id` | 各 128 UTF-8 bytes |
+| `format` | 256 UTF-8 bytes |
 | audio body | 2,097,152 bytes |
 | image body | 4,194,304 bytes |
 | JSON header | 4,096 bytes |

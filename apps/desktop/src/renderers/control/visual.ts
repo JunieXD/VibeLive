@@ -48,6 +48,7 @@ export type VisualFrame = {
   bytes: number
   overTarget: boolean
   changeScore: number
+  visualSignature: string
   blob: Blob | null
 }
 
@@ -68,6 +69,7 @@ export type VisualFrameSubmitter = (input: {
   capturedAtMs: number
   mimeType: string
   changeScore: number
+  visualSignature: string
   body: Uint8Array
 }) => Promise<void>
 
@@ -82,6 +84,10 @@ const JPEG_MIN_QUALITY = 0.42
 const JPEG_QUALITY_SEARCH_STEPS = 2
 const CHANGE_SIGNATURE_WIDTH = 32
 const CHANGE_SIGNATURE_HEIGHT = 18
+const VISUAL_SIGNATURE_WIDTH = 16
+const VISUAL_SIGNATURE_HEIGHT = 18
+const VISUAL_SIGNATURE_QUANTIZATION = 15
+const BASE64_URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 const PIP_WIDTH_RATIOS: Record<PipSize, number> = {
   small: 0.2,
   medium: 0.28,
@@ -296,8 +302,54 @@ export function sampleCanvasChangeSignature(
   sourceCanvas: HTMLCanvasElement,
   sampleCanvas: HTMLCanvasElement
 ): Uint8Array {
-  sampleCanvas.width = CHANGE_SIGNATURE_WIDTH
-  sampleCanvas.height = CHANGE_SIGNATURE_HEIGHT
+  return sampleCanvasGrayscaleSignature(
+    sourceCanvas,
+    sampleCanvas,
+    CHANGE_SIGNATURE_WIDTH,
+    CHANGE_SIGNATURE_HEIGHT
+  )
+}
+
+export function sampleCanvasVisualSignature(
+  sourceCanvas: HTMLCanvasElement,
+  sampleCanvas: HTMLCanvasElement
+): Uint8Array {
+  return sampleCanvasGrayscaleSignature(
+    sourceCanvas,
+    sampleCanvas,
+    VISUAL_SIGNATURE_WIDTH,
+    VISUAL_SIGNATURE_HEIGHT
+  )
+}
+
+export function encodeVisualSignature(signature: Uint8Array): string {
+  const expectedLength = VISUAL_SIGNATURE_WIDTH * VISUAL_SIGNATURE_HEIGHT
+  if (signature.length !== expectedLength) {
+    throw new Error(`Visual signature must contain exactly ${expectedLength} grayscale samples.`)
+  }
+  const packed = new Uint8Array(expectedLength / 2)
+  for (let index = 0; index < signature.length; index += 2) {
+    const high = Math.min(
+      VISUAL_SIGNATURE_QUANTIZATION,
+      Math.round(signature[index] / 17)
+    )
+    const low = Math.min(
+      VISUAL_SIGNATURE_QUANTIZATION,
+      Math.round(signature[index + 1] / 17)
+    )
+    packed[index / 2] = (high << 4) | low
+  }
+  return encodeBase64Url(packed)
+}
+
+function sampleCanvasGrayscaleSignature(
+  sourceCanvas: HTMLCanvasElement,
+  sampleCanvas: HTMLCanvasElement,
+  width: number,
+  height: number
+): Uint8Array {
+  sampleCanvas.width = width
+  sampleCanvas.height = height
   const context = sampleCanvas.getContext('2d', {
     alpha: false,
     willReadFrequently: true
@@ -307,17 +359,29 @@ export function sampleCanvasChangeSignature(
     sourceCanvas,
     0,
     0,
-    CHANGE_SIGNATURE_WIDTH,
-    CHANGE_SIGNATURE_HEIGHT
+    width,
+    height
   )
   return grayscaleSignature(
     context.getImageData(
       0,
       0,
-      CHANGE_SIGNATURE_WIDTH,
-      CHANGE_SIGNATURE_HEIGHT
+      width,
+      height
     ).data
   )
+}
+
+function encodeBase64Url(bytes: Uint8Array): string {
+  let encoded = ''
+  for (let index = 0; index < bytes.length; index += 3) {
+    const value = (bytes[index] << 16) | (bytes[index + 1] << 8) | bytes[index + 2]
+    encoded += BASE64_URL_ALPHABET[(value >> 18) & 0x3f]
+    encoded += BASE64_URL_ALPHABET[(value >> 12) & 0x3f]
+    encoded += BASE64_URL_ALPHABET[(value >> 6) & 0x3f]
+    encoded += BASE64_URL_ALPHABET[value & 0x3f]
+  }
+  return encoded
 }
 
 function dimensionsForLongEdge(
@@ -585,6 +649,7 @@ export async function deliverVisualFrames(
         capturedAtMs: frame.capturedAt,
         mimeType: frame.blob.type || 'image/jpeg',
         changeScore: frame.changeScore,
+        visualSignature: frame.visualSignature,
         body
       })
       accepted = true

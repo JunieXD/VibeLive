@@ -24,6 +24,7 @@ from advx_backend.contracts.binary import (
 from advx_backend.main import create_app
 
 LOCAL_TOKEN = "test-local-token"
+VISUAL_SIGNATURE = "A" * 192
 
 
 def hello(protocol_version: int = 3) -> dict[str, object]:
@@ -167,7 +168,10 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
                 envelope(
                     media_type=BinaryMediaType.IMAGE,
                     input_id="frame-1",
-                    format_value="image/webp;advx-change-score=0.375",
+                    format_value=(
+                        "image/webp;advx-change-score=0.375;"
+                        f"advx-visual-signature={VISUAL_SIGNATURE}"
+                    ),
                     body=frame_body,
                 )
             )
@@ -182,6 +186,7 @@ def test_realtime_dispatches_binary_audio_frame_and_audio_commit(tmp_path: Path)
     assert ingest.inputs[2].body == frame_body
     assert ingest.inputs[2].mime_type == "image/webp"
     assert ingest.inputs[2].change_score == 0.375
+    assert ingest.inputs[2].visual_signature == bytes(144)
     assert len(ingest.cleared_connection_ids) == 1
 
 

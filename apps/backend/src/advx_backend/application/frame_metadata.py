@@ -35,6 +35,7 @@ class StoredFrameMetadataResolver:
             encoding=encoding,
             content_hash=hashlib.sha256(resolved.body).hexdigest(),
             change_score=resolved.change_score,
+            visual_signature=resolved.visual_signature,
         )
 
     async def retain(

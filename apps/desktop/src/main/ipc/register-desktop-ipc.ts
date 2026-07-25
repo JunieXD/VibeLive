@@ -1054,6 +1054,7 @@ export function registerDesktopIpc(
         capturedAtMs: number;
         mimeType: string;
         changeScore: number;
+        visualSignature: string;
         body: Uint8Array;
       }
     ) => {
@@ -1061,7 +1062,11 @@ export function registerDesktopIpc(
       return backendClient.submitFrame({
         inputId: input.inputId,
         capturedAtMs: input.capturedAtMs,
-        mimeType: formatImageMimeType(input.mimeType, input.changeScore),
+        mimeType: formatImageMimeType(
+          input.mimeType,
+          input.changeScore,
+          input.visualSignature
+        ),
         body: input.body
       });
     }
