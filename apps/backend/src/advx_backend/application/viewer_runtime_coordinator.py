@@ -1531,7 +1531,7 @@ class ViewerRuntimeCoordinator:
             for event in delta_events
         ):
             triggers.append(ObservationTrigger.SYSTEM_AUDIO)
-        if RoomEventSource.SCREEN_OBSERVATION in sources:
+        if observation.trigger_frame_ids or RoomEventSource.SCREEN_OBSERVATION in sources:
             triggers.append(ObservationTrigger.SCREEN_CHANGE)
         if observation.user_context.get("ambient") == "true":
             triggers.append(ObservationTrigger.AMBIENT_TICK)

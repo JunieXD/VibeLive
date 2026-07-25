@@ -86,14 +86,16 @@ def _observation(
         frames=(frame,),
         room_events=(() if event is None else (event,)),
         trigger_event_ids=(() if event is None else (event.event_id,)),
-        trigger_frame_ids=(frame.frame_id,),
+        trigger_frame_ids=(
+            (frame.frame_id,) if source is RoomEventSource.SCREEN_OBSERVATION else ()
+        ),
         user_context={"ambient": "true"} if ambient else {},
     )
 
 
-def test_system_audio_priority_is_between_user_and_ambient() -> None:
-    system_event = RoomEvent(
-        event_id="event-system",
+def _system_audio_observation(observation_id: str) -> Observation:
+    event = RoomEvent(
+        event_id=f"event-{observation_id}",
         session_id="session-1",
         sequence=1,
         source_type=RoomEventSource.SYSTEM_EVENT,
@@ -101,13 +103,17 @@ def test_system_audio_priority_is_between_user_and_ambient() -> None:
         text="video dialogue",
         payload={"event": "system_audio_transcript"},
     )
-    system_audio = Observation(
+    return Observation(
         session_id="session-1",
-        observation_id="system",
+        observation_id=observation_id,
         created_at_ms=100,
-        room_events=(system_event,),
-        trigger_event_ids=(system_event.event_id,),
+        room_events=(event,),
+        trigger_event_ids=(event.event_id,),
     )
+
+
+def test_system_audio_priority_is_between_user_and_ambient() -> None:
+    system_audio = _system_audio_observation("system")
     ambient = Observation(
         session_id="session-1",
         observation_id="ambient",
@@ -122,7 +128,7 @@ def test_system_audio_priority_is_between_user_and_ambient() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduler_honors_configured_one_second_merge(monkeypatch) -> None:
+async def test_user_input_replaces_a_pending_screen_trigger(monkeypatch) -> None:
     real_sleep = asyncio.sleep
 
     async def immediate_sleep(delay: float) -> None:
@@ -156,10 +162,10 @@ async def test_scheduler_honors_configured_one_second_merge(monkeypatch) -> None
         _observation("user", source=RoomEventSource.USER_TEXT)
     )
 
-    assert await first is not None
+    assert await first is None
     assert await latest is not None
     assert [item.observation_id for item in executor.observations] == ["user"]
-    assert len(executor.observations[0].frames) == 2
+    assert len(executor.observations[0].frames) == 1
 
 
 @pytest.mark.asyncio
@@ -192,6 +198,70 @@ async def test_scheduler_lower_priority_does_not_interrupt_user_work() -> None:
     release.set()
     assert await user is not None
     assert executor.observations == ["user"]
+
+
+@pytest.mark.asyncio
+async def test_screen_trigger_does_not_interrupt_ambient_work() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Executor:
+        observations: list[str] = []
+
+        async def react(self, observation: Observation) -> ReactionResult:
+            self.observations.append(observation.observation_id)
+            started.set()
+            await release.wait()
+            return ReactionResult(published_events=(), validations=())
+
+    executor = Executor()
+    scheduler = LatestWinsReactionScheduler(
+        executor=executor,
+        session_tasks=_SessionTasks(),
+        clock=_Clock(),
+    )
+    ambient = await scheduler.submit(_observation("ambient", ambient=True))
+    await started.wait()
+    screen = await scheduler.submit(
+        _observation("screen", source=RoomEventSource.SCREEN_OBSERVATION)
+    )
+
+    assert await screen is None
+    release.set()
+    assert await ambient is not None
+    assert executor.observations == ["ambient"]
+
+
+@pytest.mark.asyncio
+async def test_screen_trigger_does_not_interrupt_system_audio_work() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Executor:
+        observations: list[str] = []
+
+        async def react(self, observation: Observation) -> ReactionResult:
+            self.observations.append(observation.observation_id)
+            started.set()
+            await release.wait()
+            return ReactionResult(published_events=(), validations=())
+
+    executor = Executor()
+    scheduler = LatestWinsReactionScheduler(
+        executor=executor,
+        session_tasks=_SessionTasks(),
+        clock=_Clock(),
+    )
+    system_audio = await scheduler.submit(_system_audio_observation("system"))
+    await started.wait()
+    screen = await scheduler.submit(
+        _observation("screen", source=RoomEventSource.SCREEN_OBSERVATION)
+    )
+
+    assert await screen is None
+    release.set()
+    assert await system_audio is not None
+    assert executor.observations == ["system"]
 
 
 @pytest.mark.asyncio

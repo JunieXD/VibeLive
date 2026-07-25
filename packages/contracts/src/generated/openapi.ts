@@ -2131,7 +2131,7 @@ export interface components {
             screen_change_threshold: number;
             /**
              * Screen Change Cooldown Ms
-             * @default 2000
+             * @default 10000
              */
             screen_change_cooldown_ms: number;
             /**

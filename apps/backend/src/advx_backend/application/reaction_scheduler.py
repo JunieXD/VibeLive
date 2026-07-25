@@ -152,6 +152,19 @@ class LatestWinsReactionScheduler:
             priority = self._priority(observation)
             if (
                 schedule.running is not None
+                and self._screen_trigger_yields_to(
+                    observation,
+                    schedule.running.observation,
+                )
+            ):
+                completion.set_result(None)
+                return completion
+            if (
+                schedule.running is not None
+                and not self._screen_trigger_yields_to(
+                    schedule.running.observation,
+                    observation,
+                )
                 and priority < self._priority(schedule.running.observation)
             ):
                 completion.set_result(None)
@@ -162,7 +175,12 @@ class LatestWinsReactionScheduler:
                     schedule.running.execution_task.cancel()
             if schedule.pending is not None:
                 pending_priority = self._priority(schedule.pending.observation)
-                if schedule.pending.merge_window_ms:
+                if self._screen_trigger_yields_to(observation, schedule.pending.observation):
+                    completion.set_result(None)
+                    return completion
+                if self._screen_trigger_yields_to(schedule.pending.observation, observation):
+                    self._resolve_all(schedule.pending.completions, None)
+                elif schedule.pending.merge_window_ms:
                     if (
                         len(schedule.pending.completions)
                         >= self._config.max_pending_observations_per_session
@@ -174,10 +192,11 @@ class LatestWinsReactionScheduler:
                     )
                     schedule.pending.completions.append(completion)
                     return completion
-                if priority < pending_priority:
+                elif priority < pending_priority:
                     completion.set_result(None)
                     return completion
-                self._resolve_all(schedule.pending.completions, None)
+                else:
+                    self._resolve_all(schedule.pending.completions, None)
             scheduled = _ScheduledObservation(
                 observation=observation,
                 completions=[completion],
@@ -424,14 +443,10 @@ class LatestWinsReactionScheduler:
             raise ValueError("dynamic observation merge window must be non-negative")
         return value
 
-    @staticmethod
-    def _priority(observation: Observation) -> int:
+    @classmethod
+    def _priority(cls, observation: Observation) -> int:
         trigger_ids = set(observation.trigger_event_ids)
-        trigger_sources = {
-            event.source_type
-            for event in observation.room_events
-            if event.event_id in trigger_ids
-        }
+        trigger_sources = cls._trigger_sources(observation)
         if trigger_sources & {RoomEventSource.USER_TEXT, RoomEventSource.USER_VOICE}:
             return 3
         if (
@@ -446,6 +461,35 @@ class LatestWinsReactionScheduler:
         ):
             return 2
         return 1
+
+    @classmethod
+    def _screen_trigger_yields_to(
+        cls,
+        candidate: Observation,
+        existing: Observation,
+    ) -> bool:
+        return cls._is_screen_only_trigger(candidate) and not cls._is_screen_only_trigger(
+            existing
+        )
+
+    @staticmethod
+    def _trigger_sources(observation: Observation) -> set[RoomEventSource]:
+        trigger_ids = set(observation.trigger_event_ids)
+        return {
+            event.source_type
+            for event in observation.room_events
+            if event.event_id in trigger_ids
+        }
+
+    @classmethod
+    def _is_screen_only_trigger(cls, observation: Observation) -> bool:
+        trigger_sources = cls._trigger_sources(observation)
+        return (
+            bool(observation.trigger_frame_ids)
+            or RoomEventSource.SCREEN_OBSERVATION in trigger_sources
+        ) and not trigger_sources - {RoomEventSource.SCREEN_OBSERVATION} and (
+            observation.user_context.get("ambient") != "true"
+        )
 
     @staticmethod
     def _resolve(

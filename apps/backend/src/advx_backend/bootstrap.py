@@ -328,6 +328,14 @@ class BackendRuntime:
         )
         return mode is not None and mode.ambience.value == "continuous"
 
+    async def screen_trigger_settings(self, session_id: str) -> tuple[float, int]:
+        try:
+            committed = await self.runtime_state.snapshot(session_id)
+        except KeyError:
+            return 0.2, 10_000
+        settings = committed.spec.settings
+        return settings.screen_change_threshold, settings.screen_change_cooldown_ms
+
     def configure_ingest_pipeline(
         self,
         *,
@@ -358,6 +366,7 @@ class BackendRuntime:
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
             voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
             ambient_enabled=self.ambient_enabled,
+            screen_trigger_settings=self.screen_trigger_settings,
             transcript_publisher=self.realtime_broker,
         )
         self.session_resources.add_resource(ingest_service)
@@ -506,6 +515,7 @@ class BackendRuntime:
             max_tracked_input_ids=self.pipeline_config.ingest_max_tracked_input_ids,
             voice_target_resolver=RuntimeTranscriptTargetResolver(self.runtime_state),
             ambient_enabled=self.ambient_enabled,
+            screen_trigger_settings=self.screen_trigger_settings,
             transcript_publisher=self.realtime_broker,
         )
         self.session_resources.add_resource(viewer_runtime)

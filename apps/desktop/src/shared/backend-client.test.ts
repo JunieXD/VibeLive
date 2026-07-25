@@ -48,7 +48,7 @@ describe('canonical desktop runtime spec', () => {
         viewer_ambient_speaker_budget: 2,
         max_direct_frame_age_ms: 30_000,
         screen_change_threshold: 0.2,
-        screen_change_cooldown_ms: 2_000
+        screen_change_cooldown_ms: 10_000
       }
     })
     expect(compiled.spec.personas[0].content_hash).toMatch(/^[0-9a-f]{64}$/)

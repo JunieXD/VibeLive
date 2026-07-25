@@ -37,6 +37,8 @@ from advx_backend.domain.room import RoomEventSource
 logger = logging.getLogger(__name__)
 
 _COORDINATED_TURN_TIMEOUT_MS = 70_000
+_SCREEN_CHANGE_TRIGGER_THRESHOLD = 0.2
+_SCREEN_TRIGGER_COOLDOWN_MS = 10_000
 
 
 class ObservationScheduler(Protocol):
@@ -149,6 +151,7 @@ class IngestService:
         voice_turn_silence_ms: int = 1_500,
         coordinated_turn_timeout_ms: int = 3_000,
         ambient_enabled: Callable[[str], Awaitable[bool]] | None = None,
+        screen_trigger_settings: Callable[[str], Awaitable[tuple[float, int]]] | None = None,
         ambient_interval_ms: int = 30_000,
         transcript_publisher: TranscriptPublisher | None = None,
     ) -> None:
@@ -180,6 +183,7 @@ class IngestService:
         self._voice_turn_silence_ms = voice_turn_silence_ms
         self._coordinated_turn_timeout_ms = coordinated_turn_timeout_ms
         self._ambient_enabled = ambient_enabled
+        self._screen_trigger_settings = screen_trigger_settings
         self._ambient_interval_ms = ambient_interval_ms
         self._transcript_publisher = transcript_publisher
         self._active_session_id: str | None = None
@@ -194,6 +198,7 @@ class IngestService:
         self._coordinated_utterance_keys: OrderedDict[str, None] = OrderedDict()
         self._timestamp_floors: dict[tuple[IngestInputKind, AudioSource | None], int] = {}
         self._pending_audio_ids: dict[AudioSource, str] = {}
+        self._last_trigger_at_ms: int | None = None
         self._result_task: asyncio.Task[None] | None = None
         self._ambient_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
@@ -382,6 +387,11 @@ class IngestService:
             frame = await self._frame_store.store(input)
             stored = True
             await self._context_builder.append_frame_ref(input.session_id, frame)
+            await self._schedule_screen_change_if_cold(
+                input.session_id,
+                frame_id=frame.frame_id,
+                change_score=input.change_score,
+            )
         except BaseException:
             await self._settle(
                 input.input_id,
@@ -1247,6 +1257,7 @@ class IngestService:
     ) -> None:
         if not await self._session_tasks.accepts_results(session_id):
             return
+        await self._record_trigger(session_id)
         observation = await self._context_builder.build(
             session_id,
             user_context=user_context,
@@ -1256,6 +1267,61 @@ class IngestService:
             target_persona_id=target_persona_id,
         )
         await self._scheduler.submit(observation)
+
+    async def _schedule_screen_change_if_cold(
+        self,
+        session_id: str,
+        *,
+        frame_id: str,
+        change_score: float | None,
+    ) -> None:
+        change_threshold, cooldown_ms = await self._screen_trigger_policy(session_id)
+        if change_score is None or change_score < change_threshold:
+            return
+        if not await self._claim_screen_trigger(session_id, cooldown_ms=cooldown_ms):
+            return
+        observation = await self._context_builder.build(
+            session_id,
+            trigger_frame_ids=(frame_id,),
+        )
+        await self._scheduler.submit(observation)
+
+    async def _screen_trigger_policy(self, session_id: str) -> tuple[float, int]:
+        if self._screen_trigger_settings is None:
+            return _SCREEN_CHANGE_TRIGGER_THRESHOLD, _SCREEN_TRIGGER_COOLDOWN_MS
+        threshold, cooldown_ms = await self._screen_trigger_settings(session_id)
+        if (
+            isinstance(threshold, bool)
+            or not isinstance(threshold, (int, float))
+            or not 0 <= threshold <= 1
+        ):
+            raise ValueError("screen trigger threshold must be between zero and one")
+        if (
+            isinstance(cooldown_ms, bool)
+            or not isinstance(cooldown_ms, int)
+            or cooldown_ms < 0
+        ):
+            raise ValueError("screen trigger cooldown must be a non-negative integer")
+        return float(threshold), cooldown_ms
+
+    async def _claim_screen_trigger(self, session_id: str, *, cooldown_ms: int) -> bool:
+        now_ms = self._clock.now_ms()
+        async with self._lock:
+            self._require_active_locked(session_id)
+            last_trigger_at_ms = self._last_trigger_at_ms
+            if (
+                last_trigger_at_ms is not None
+                and now_ms < last_trigger_at_ms + cooldown_ms
+            ):
+                return False
+            self._last_trigger_at_ms = now_ms
+            return True
+
+    async def _record_trigger(self, session_id: str) -> None:
+        now_ms = self._clock.now_ms()
+        async with self._lock:
+            self._require_active_locked(session_id)
+            self._last_trigger_at_ms = now_ms
 
     async def _reserve(
         self,
@@ -1563,3 +1629,4 @@ class IngestService:
         self._coordinated_utterance_keys.clear()
         self._timestamp_floors.clear()
         self._pending_audio_ids.clear()
+        self._last_trigger_at_ms = None
