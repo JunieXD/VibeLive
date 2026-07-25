@@ -8,6 +8,7 @@ import {
   Sparkles
 } from 'lucide-react'
 import type {
+  AudienceMode,
   BarrageDisplayMode,
   BarrageMode,
   ModelConfigStatus,
@@ -35,6 +36,7 @@ export type SettingsViewProps = {
   overlaySettings: OverlaySettings | null
   overlayTargets: readonly OverlayTarget[]
   overlaySettingsNotice: string | null
+  activeAudienceMode: AudienceMode | undefined
   onModelBaseUrlChange: (value: string) => void
   onProviderProfileIdChange: (value: string) => void
   onModelNameChange: (value: string) => void
@@ -47,6 +49,7 @@ export type SettingsViewProps = {
   onAsrApiKeyChange: (value: string) => void
   onSaveModelConfig: () => void
   onOverlaySettingsChange: (settings: OverlaySettings) => void
+  onAllowViewerSilenceChange: (allowViewerSilence: boolean) => void
   onPreviewBarrage: (mode: BarrageMode) => void
 }
 
@@ -183,6 +186,7 @@ export function SettingsView({
   onAsrApiKeyChange,
   onSaveModelConfig,
   onOverlaySettingsChange,
+  onAllowViewerSilenceChange,
   onPreviewBarrage
 }: SettingsViewProps): React.JSX.Element {
   const credentialsStored =
@@ -580,6 +584,13 @@ export function SettingsView({
                 </button>
               </div>
             )}
+
+            <ToggleField
+              label="允许观众沉默"
+              checked={activeAudienceMode?.dispatchSettings.allowViewerSilence ?? false}
+              disabled={!activeAudienceMode}
+              onChange={onAllowViewerSilenceChange}
+            />
           </div>
         )}
       </section>

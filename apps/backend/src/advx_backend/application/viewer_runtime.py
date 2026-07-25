@@ -2510,6 +2510,7 @@ class ViewerRuntime:
             scene_assessment=assessment,
             active_viewer_ids=list(active_viewer_ids),
             instance_variant=viewer.variant,
+            allow_viewer_silence=runtime.settings.allow_viewer_silence,
             mode_context=mode_context,
             visual_input_mode=visual_mode,
             frame_bundle=(

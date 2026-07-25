@@ -495,6 +495,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             overlaySettings={overlay.settings}
             overlayTargets={overlay.targets}
             overlaySettingsNotice={overlay.notice}
+            activeAudienceMode={activeAudienceMode}
             onModelBaseUrlChange={modelConfig.setBaseUrl}
             onProviderProfileIdChange={modelConfig.setProviderProfileId}
             onModelNameChange={modelConfig.setModel}
@@ -507,6 +508,23 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
             onAsrApiKeyChange={modelConfig.setAsrApiKey}
             onSaveModelConfig={() => void modelConfig.save()}
             onOverlaySettingsChange={overlay.updateSettings}
+            onAllowViewerSilenceChange={(allowViewerSilence) => {
+              if (!activeAudienceMode) return
+              audience.setWorkspace((current) => ({
+                ...current,
+                modeState: {
+                  ...current.modeState,
+                  modes: current.modeState.modes.map((mode) =>
+                    mode.id === activeAudienceMode.id
+                      ? {
+                          ...mode,
+                          dispatchSettings: { ...mode.dispatchSettings, allowViewerSilence }
+                        }
+                      : mode
+                  )
+                }
+              }))
+            }}
             onPreviewBarrage={(mode) => void barrage.previewBarrage(mode)}
           />
         )}

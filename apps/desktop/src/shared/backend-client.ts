@@ -167,6 +167,7 @@ export function compileCanonicalRuntimeSpec(
       visual_summary_model: provider.visualSummaryModel
     },
     settings: {
+      allow_viewer_silence: dispatch.allowViewerSilence,
       frame_bundle: {
         frame_bundle_size: windowBatch ? 4 : visual.frameBundleSize,
         frame_window_ms: windowBatch ? 30_000 : visual.frameWindowMs,

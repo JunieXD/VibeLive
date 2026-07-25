@@ -271,6 +271,7 @@ export const DEFAULT_VISUAL_SETTINGS: AudienceVisualSettings = {
 }
 
 export const DEFAULT_DISPATCH_SETTINGS: AudienceDispatchSettings = {
+  allowViewerSilence: false,
   userSpeakerBudget: 6,
   screenSpeakerBudget: 4,
   ambientSpeakerBudget: 2,

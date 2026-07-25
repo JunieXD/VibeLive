@@ -2129,6 +2129,11 @@ export interface components {
         };
         /** RuntimeSettings */
         RuntimeSettings: {
+            /**
+             * Allow Viewer Silence
+             * @default false
+             */
+            allow_viewer_silence: boolean;
             /** @default per_viewer */
             barrage_generation_mode: components["schemas"]["BarrageGenerationMode"];
             frame_bundle?: components["schemas"]["FrameBundleSettings"];
@@ -3397,6 +3402,11 @@ export interface components {
             /** Active Viewer Ids */
             active_viewer_ids?: string[];
             instance_variant: components["schemas"]["ViewerInstanceVariant"];
+            /**
+             * Allow Viewer Silence
+             * @default false
+             */
+            allow_viewer_silence: boolean;
             /** Mode Context */
             mode_context: {
                 [key: string]: components["schemas"]["JsonValue"];

@@ -19,7 +19,7 @@ const STABLE_ID_PATTERN = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/
 const MODE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const MAX_FRAME_BUNDLE_SIZE = 5
 const MAX_FRAME_WINDOW_MS = 30_000
-type AudienceWorkspaceSourceVersion = 1 | 2 | 3 | 4 | 5 | 6
+type AudienceWorkspaceSourceVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7
 const BUILT_IN_MODE_MIGRATIONS = new Map<
   string,
   { readonly fromRevisions: readonly number[]; readonly toRevision: number }
@@ -45,7 +45,7 @@ export type AudienceWorkspaceParseResult =
   | {
       readonly ok: true
       readonly workspace: AudienceWorkspaceState
-      readonly migratedFromVersion?: 1 | 2 | 3 | 4 | 5
+      readonly migratedFromVersion?: 1 | 2 | 3 | 4 | 5 | 6
       readonly legacyMemes?: readonly LegacyLocalMeme[]
     }
   | { readonly ok: false; readonly issues: readonly string[] }
@@ -64,9 +64,10 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
     value.version !== 3 &&
     value.version !== 4 &&
     value.version !== 5 &&
-    value.version !== 6
+    value.version !== 6 &&
+    value.version !== 7
   ) {
-    return { ok: false, issues: ['version must be 1, 2, 3, 4, 5 or 6'] }
+    return { ok: false, issues: ['version must be 1, 2, 3, 4, 5, 6 or 7'] }
   }
   const sourceVersion = value.version
   const issues: string[] = []
@@ -100,12 +101,12 @@ export function parseAudienceWorkspaceState(value: unknown): AudienceWorkspacePa
 
   validateReferences(personas, modes, activeModeId, issues)
   if (issues.length > 0) return { ok: false, issues }
-  const migratedFromVersion: 1 | 2 | 3 | 4 | 5 | undefined = sourceVersion === 6
+  const migratedFromVersion: 1 | 2 | 3 | 4 | 5 | 6 | undefined = sourceVersion === 7
     ? undefined
     : sourceVersion
   return {
     ok: true,
-    workspace: { version: 6, personas, modeState: { modes, activeModeId } },
+    workspace: { version: 7, personas, modeState: { modes, activeModeId } },
     ...(migratedFromVersion === undefined ? {} : { migratedFromVersion }),
     ...(legacyMemes.length > 0 ? { legacyMemes } : {})
   }
@@ -275,7 +276,12 @@ function parseMode(
     : parsedVisualSettings
   const dispatchSettings = sourceVersion < 6
     ? { ...DEFAULT_DISPATCH_SETTINGS }
-    : parseDispatchSettings(value.dispatchSettings, `${path}.dispatchSettings`, issues)
+    : parseDispatchSettings(
+        value.dispatchSettings,
+        `${path}.dispatchSettings`,
+        sourceVersion,
+        issues
+      )
 
   if (issues.some((issue) => issue.startsWith(path))) return null
   return {
@@ -517,13 +523,21 @@ function parseVisualSettings(
 function parseDispatchSettings(
   value: unknown,
   path: string,
+  sourceVersion: AudienceWorkspaceSourceVersion,
   issues: string[]
 ): AudienceDispatchSettings {
   if (!isRecord(value)) {
     issues.push(`${path} must be an object`)
     return { ...DEFAULT_DISPATCH_SETTINGS }
   }
+  const allowViewerSilence = sourceVersion < 7
+    ? false
+    : value.allowViewerSilence
+  if (typeof allowViewerSilence !== 'boolean') {
+    issues.push(`${path}.allowViewerSilence must be boolean`)
+  }
   return {
+    allowViewerSilence: allowViewerSilence === true,
     userSpeakerBudget: boundedInteger(
       value.userSpeakerBudget,
       `${path}.userSpeakerBudget`,

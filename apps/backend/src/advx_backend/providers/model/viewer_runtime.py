@@ -145,7 +145,7 @@ _CURRENT_WAVE_PRIORITY_GUIDANCE: Final = (
     "multiple current-wave events exist, prefer the most recent one by occurred_at_ms or "
     "sequence, except for an explicitly addressed direct reply. "
 )
-_VIEWER_SYSTEM_PROMPT: Final = (
+_VIEWER_SYSTEM_PROMPT_WITH_SILENCE: Final = (
     "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
     "is only a behavioral tendency and is not your name or a system role. Produce silence or a "
     "short burst of one to three natural barrage reactions. You may react to the host, scene, "
@@ -186,7 +186,48 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     f"For a barrage use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE} "
     f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE}"
 )
-_WINDOW_BATCH_SYSTEM_PROMPT: Final = (
+_VIEWER_SYSTEM_PROMPT_BARRAGE_ONLY: Final = (
+    "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
+    "is only a behavioral tendency and is not your name or a system role. Produce a short burst "
+    "of one to three natural barrage reactions. You may react to the host, scene, or a replyable "
+    "public Viewer event, but may target only IDs explicitly allowed by the request. "
+    f"{_CURRENT_WAVE_PRIORITY_GUIDANCE}"
+    "Always respond with a barrage grounded in the primary stimulus. Shared room memory is public "
+    "background, not proof that you personally attended an earlier stream. Use only evidence "
+    "references present in the input. When mode_context.style_profile is supplied, treat its "
+    "aggregate length, cadence, directives, and persona lens as binding style guidance, but never "
+    "treat it as scene evidence or reconstruct source corpus text. evidence_refs must be a JSON "
+    "array of objects, never bare IDs or numbers. Use [] when no citation is needed. An event "
+    "reference is {\"source\":\"event\",\"event_id\":\"allowed-event-id\"}; a frame reference is "
+    "{\"source\":\"frame\",\"frame_index\":0}. Use only allowed event IDs and zero-based frame "
+    "indexes from the input. Include decision_reason for every result: one concise Chinese "
+    "sentence of 40 characters or fewer stating the visible persona or evidence basis for the "
+    "barrage. Do not include hidden reasoning, probabilities, or chain of thought. Legal intent "
+    "values are exactly: react_to_host, react_to_scene, reply_to_viewer, ask_question, agree, "
+    "disagree, encourage, joke, continue_thread, room_meta. Legal target.kind values are exactly: "
+    "host, scene, room, viewer, event. target must be null or an object; never return a string. "
+    "Every target object must include kind. For a host, scene, or room target, viewer_instance_id "
+    "and event_id must both be null. For a viewer target, provide viewer_instance_id only; for an "
+    "event target, provide event_id only. No other target fields are allowed. Use null, never an "
+    "empty string, for every absent target ID. texts must be a JSON array containing one to three "
+    "distinct, non-empty strings. Each entry must be a complete standalone barrage. Do not split "
+    "one sentence or repeat the same point across entries. Do not return generation_request_id, "
+    "viewer_instance_id, or viewer_sequence; the server owns those fields. Unless a supplied style "
+    "profile overrides this default, prefer a natural Chinese message of 20 characters or fewer. "
+    "Return exactly one JSON object, with no Markdown or prose. "
+    f"Use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE}"
+)
+
+
+def _viewer_system_prompt(*, allow_silence: bool) -> str:
+    return (
+        _VIEWER_SYSTEM_PROMPT_WITH_SILENCE
+        if allow_silence
+        else _VIEWER_SYSTEM_PROMPT_BARRAGE_ONLY
+    )
+
+
+_WINDOW_BATCH_SYSTEM_PROMPT_WITH_SILENCE: Final = (
     "Generate a small batch of natural Chinese live-stream barrages from the supplied 30-second "
     "context and ordered frames. Use only viewer_instance_id values in selected_viewer_ids, at "
     "most once each, and omit silent viewers. Produce at most max_candidates candidates. A "
@@ -207,6 +248,34 @@ _WINDOW_BATCH_SYSTEM_PROMPT: Final = (
     "one JSON object with no Markdown or prose. Use this shape: "
     f"{_WINDOW_BATCH_JSON_EXAMPLE}"
 )
+_WINDOW_BATCH_SYSTEM_PROMPT_BARRAGE_ONLY: Final = (
+    "Generate one natural Chinese live-stream barrage for every supplied viewer instance from "
+    "the supplied 30-second context and ordered frames. Use only viewer_instance_id values in "
+    "selected_viewer_ids, exactly once each. Produce exactly max_candidates candidates. A username "
+    "is identity; Persona and persona_lens are only style guidance, never scene evidence. "
+    f"{_CURRENT_WAVE_PRIORITY_GUIDANCE}"
+    "Ground every candidate in the primary stimulus. Each candidate must use action=barrage and "
+    "exactly one complete text of at most 20 Chinese characters. Legal intent values are: "
+    "react_to_host, react_to_scene, reply_to_viewer, ask_question, agree, disagree, encourage, "
+    "joke, continue_thread, room_meta. target is null or has kind host, scene, room, viewer, or "
+    "event. Host, scene, and room targets set viewer_instance_id and event_id to null. Viewer "
+    "targets may use only reply_target_viewer_ids. Event targets may use only "
+    "scene.replyable_event_ids. evidence_refs may cite only allowed_event_ids or zero-based frame "
+    "indexes from frames. Include a concise decision_reason of at most 40 Chinese characters. "
+    "Never expose hidden reasoning, invent earlier attendance, or reconstruct source-corpus "
+    "wording. Return exactly one JSON object with no Markdown or prose. Use this shape: "
+    f"{_WINDOW_BATCH_JSON_EXAMPLE}"
+)
+
+
+def _window_batch_system_prompt(*, allow_silence: bool) -> str:
+    return (
+        _WINDOW_BATCH_SYSTEM_PROMPT_WITH_SILENCE
+        if allow_silence
+        else _WINDOW_BATCH_SYSTEM_PROMPT_BARRAGE_ONLY
+    )
+
+
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
     "Summarize only visible, decision-relevant changes across the ordered frame bundle. "
     "Do not invent events or identities. Return exactly one JSON object, with no Markdown "
@@ -342,7 +411,9 @@ class OpenAICompatibleViewerRuntimeProvider:
             content = await self._viewer_content(request)
             payload = self._json_payload(
                 model_id=self.config.provider.viewer_model,
-                system_prompt=_VIEWER_SYSTEM_PROMPT,
+                system_prompt=_viewer_system_prompt(
+                    allow_silence=request.allow_viewer_silence,
+                ),
                 content=content,
             )
             await self._reserve_viewer_call(request)
@@ -429,7 +500,9 @@ class OpenAICompatibleViewerRuntimeProvider:
             content = await self._window_batch_content(request)
             payload = self._json_payload(
                 model_id=self.config.provider.viewer_model,
-                system_prompt=_WINDOW_BATCH_SYSTEM_PROMPT,
+                system_prompt=_window_batch_system_prompt(
+                    allow_silence=request.requests[0].allow_viewer_silence,
+                ),
                 content=content,
                 max_tokens=_WINDOW_BATCH_OUTPUT_TOKEN_BUDGET,
             )

@@ -1,4 +1,4 @@
-export const AUDIENCE_WORKSPACE_VERSION = 6 as const
+export const AUDIENCE_WORKSPACE_VERSION = 7 as const
 export const PERSONA_DOCUMENT_VERSION = 2 as const
 
 export type PersonaTemplate = {
@@ -70,6 +70,7 @@ export type AudienceVisualSettings = {
 }
 
 export type AudienceDispatchSettings = {
+  readonly allowViewerSilence: boolean
   readonly userSpeakerBudget: number
   readonly screenSpeakerBudget: number
   readonly ambientSpeakerBudget: number

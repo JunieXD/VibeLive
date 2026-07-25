@@ -58,6 +58,7 @@ class BarrageGenerationMode(StrEnum):
 
 
 class RuntimeSettings(RuntimeContractModel):
+    allow_viewer_silence: bool = False
     barrage_generation_mode: BarrageGenerationMode = BarrageGenerationMode.PER_VIEWER
     frame_bundle: FrameBundleSettings = Field(default_factory=FrameBundleSettings)
     viewer_visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES
@@ -376,6 +377,7 @@ class ViewerGenerationRequest(RuntimeContractModel):
     scene_assessment: SceneAssessment
     active_viewer_ids: list[str] = Field(default_factory=list, max_length=128)
     instance_variant: ViewerInstanceVariant
+    allow_viewer_silence: bool = False
     mode_context: dict[str, JsonValue]
     visual_input_mode: ViewerVisualInputMode
     frame_bundle: FrameBundle | None = None
