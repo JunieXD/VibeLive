@@ -1181,6 +1181,13 @@ export function registerDesktopIpc(
     assertControlSender(event);
     return backendClient.queryAiCalls(query);
   });
+  ipcMain.handle("backend:ai-call-image", (event, previewId: string) => {
+    assertControlSender(event);
+    if (typeof previewId !== "string" || !previewId.trim() || previewId.length > 128) {
+      throw new Error("AI 调用图片预览 ID 无效。");
+    }
+    return backendClient.queryAiCallImage(previewId);
+  });
   ipcMain.handle("shared-brain:memory-list", (event, roomId: string) => {
     assertControlSender(event);
     return backendClient.listRoomMemories(roomId);

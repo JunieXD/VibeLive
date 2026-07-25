@@ -73,6 +73,31 @@ describe("BackendClient runtime v2", () => {
     fetchMock.mockRestore();
   });
 
+  it("loads an AI call image through the token-protected debug endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        mime_type: "image/png",
+        data_url: "data:image/png;base64,cGl4ZWw="
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    );
+    const client = new BackendClient({
+      baseUrl: "http://127.0.0.1:9999",
+      localToken: "token"
+    });
+
+    await expect(client.queryAiCallImage("image/a")).resolves.toMatchObject({
+      mime_type: "image/png"
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://127.0.0.1:9999/debug/ai-calls/images/image%2Fa"
+    );
+    fetchMock.mockRestore();
+  });
+
   it("treats an already-gone backend session as an idempotent stop", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

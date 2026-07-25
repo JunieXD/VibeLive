@@ -1,9 +1,11 @@
+import base64
 import inspect
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Protocol
 
 from advx_backend.contracts.debug import (
+    AiCallImagePreview,
     AiCallQuery,
     AiCallQueryResponse,
     AiCallTrace,
@@ -19,6 +21,7 @@ from advx_backend.contracts.debug import (
 )
 from advx_backend.contracts.protocol import TRACE_SCHEMA_VERSION
 from advx_backend.contracts.viewer_runtime import ViewerRuntimeTelemetry
+from advx_backend.infrastructure.logging.ai_call_image_store import AiCallImageStore
 from advx_backend.infrastructure.logging.ai_call_store import AiCallStore
 from advx_backend.infrastructure.logging.trace_store import (
     TraceStore,
@@ -46,11 +49,13 @@ class DebugService:
         runtime_state: RuntimeDebugState | None = None,
         runtime_agent: RuntimeAgentDebugProvider | object | None = None,
         ai_call_store: AiCallStore | None = None,
+        ai_call_image_store: AiCallImageStore | None = None,
     ) -> None:
         self._trace_store = trace_store
         self._runtime_state = runtime_state
         self._runtime_agent = runtime_agent
         self._ai_call_store = ai_call_store or AiCallStore()
+        self._ai_call_image_store = ai_call_image_store or AiCallImageStore()
 
     def bind_runtime_state(self, runtime_state: RuntimeDebugState) -> None:
         self._runtime_state = runtime_state
@@ -72,6 +77,21 @@ class DebugService:
         query: AiCallQuery | None = None,
     ) -> AiCallQueryResponse:
         return self._ai_call_store.query(query)
+
+    def capture_ai_call_image(self, data_url: str) -> str | None:
+        return self._ai_call_image_store.capture(data_url)
+
+    def query_ai_call_image(self, preview_id: str) -> AiCallImagePreview | None:
+        image = self._ai_call_image_store.get(preview_id)
+        if image is None:
+            return None
+        return AiCallImagePreview(
+            mime_type=image.mime_type,
+            data_url=(
+                f"data:{image.mime_type};base64,"
+                f"{base64.b64encode(image.body).decode('ascii')}"
+            ),
+        )
 
     def observation_wave(
         self,

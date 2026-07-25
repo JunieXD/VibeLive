@@ -352,3 +352,28 @@ def test_debug_ai_calls_endpoint_exposes_filtered_traces() -> None:
 
     assert response.status_code == 200
     assert response.json()["items"][0]["call_id"] == "call-1"
+
+
+def test_debug_ai_call_image_endpoint_exposes_only_ephemeral_previews() -> None:
+    service = DebugService(TraceStore())
+    preview_id = service.capture_ai_call_image("data:image/png;base64,cGl4ZWw=")
+    assert preview_id is not None
+    app = FastAPI()
+    app.state.debug_service = service
+    app.include_router(create_debug_router(local_token=LOCAL_TOKEN))
+    client = TestClient(app)
+
+    response = client.get(
+        f"/debug/ai-calls/images/{preview_id}",
+        headers={
+            "Authorization": f"Bearer {LOCAL_TOKEN}",
+            PROTOCOL_VERSION_HEADER: "3",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "mime_type": "image/png",
+        "data_url": "data:image/png;base64,cGl4ZWw=",
+    }
+    assert service.query_ai_calls().items == []

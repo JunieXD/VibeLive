@@ -55,6 +55,15 @@ class RecordingSink:
         self.traces.append(trace)
 
 
+class RecordingImageCapture:
+    def __init__(self) -> None:
+        self.data_urls: list[str] = []
+
+    def capture_ai_call_image(self, data_url: str) -> str:
+        self.data_urls.append(data_url)
+        return f"preview-{len(self.data_urls)}"
+
+
 def test_openai_summary_keeps_public_context_and_redacts_unsafe_fields() -> None:
     payload = {
         "model": "viewer-model",
@@ -127,7 +136,8 @@ def test_openai_summary_keeps_public_context_and_redacts_unsafe_fields() -> None
         },
     }
 
-    summary = build_openai_request_summary(payload)
+    image_capture = RecordingImageCapture()
+    summary = build_openai_request_summary(payload, image_capture=image_capture)
     serialized = json.dumps(summary.model_dump(mode="json"), ensure_ascii=False)
 
     assert summary.schema_name == "viewer_response"
@@ -143,6 +153,8 @@ def test_openai_summary_keeps_public_context_and_redacts_unsafe_fields() -> None
     assert "namespaced-inline" not in serialized
     assert "camel-inline" not in serialized
     assert "private-attention-body" not in serialized
+    assert '"preview_id": "preview-1"' in serialized
+    assert image_capture.data_urls == ["data:image/jpeg;base64,ABCDEF"]
     assert "Return the required JSON" not in serialized
     assert summary.input_preview["instruction"]["kind"] == "instruction_ref"
     assert summary.redacted_fields

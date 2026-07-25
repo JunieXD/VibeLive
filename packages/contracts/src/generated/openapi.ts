@@ -209,6 +209,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/debug/ai-calls/images/{preview_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Query Ai Call Image */
+        get: operations["query_ai_call_image_debug_ai_calls_images__preview_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/debug/runtime/{session_id}": {
         parameters: {
             query?: never;
@@ -858,6 +875,16 @@ export interface components {
              * @default false
              */
             retryable: boolean;
+        };
+        /** AiCallImagePreview */
+        AiCallImagePreview: {
+            /**
+             * Mime Type
+             * @enum {string}
+             */
+            mime_type: "image/jpeg" | "image/png" | "image/webp";
+            /** Data Url */
+            data_url: string;
         };
         /** AiCallQueryResponse */
         AiCallQueryResponse: {
@@ -3796,6 +3823,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiCallQueryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    query_ai_call_image_debug_ai_calls_images__preview_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-ADVX-Protocol-Version": "3";
+            };
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiCallImagePreview"];
                 };
             };
             /** @description Validation Error */

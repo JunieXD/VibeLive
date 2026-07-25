@@ -619,7 +619,7 @@ class OpenAICompatibleViewerRuntimeProvider:
                     viewer_request,
                     maximum_seconds=maximum_timeout_seconds,
                 )
-            lifecycle.sent(build_openai_request_summary(payload))
+            lifecycle.sent(build_openai_request_summary(payload, image_capture=lifecycle))
             try:
                 response = await self._send(
                     provider,

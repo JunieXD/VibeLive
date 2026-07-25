@@ -2,6 +2,7 @@ import type { components } from "@advx/contracts";
 import type { AudienceWorkspaceState } from "./audience";
 import type {
   AiCallQuery,
+  AiCallImagePreview,
   AiCallQueryResponse,
   DebugTraceQueryResult,
   AutoIngestResponse,
@@ -357,6 +358,7 @@ export type ControlApi = {
     cursor?: string
   ) => Promise<DebugTraceQueryResult>
   queryAiCalls: (query: AiCallQuery) => Promise<AiCallQueryResponse>
+  queryAiCallImage: (previewId: string) => Promise<AiCallImagePreview>
   submitUserText: (text: string, target?: TextSubmitTarget) => Promise<void>
   submitAudioSegment: (input: RealtimeAudioInput) => Promise<void>
   notifyVoiceActivity: (source: AudioSource, occurredAtMs: number) => void

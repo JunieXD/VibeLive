@@ -87,6 +87,10 @@ class AiCallSink(Protocol):
     def record_ai_call(self, trace: AiCallTrace) -> None: ...
 
 
+class AiCallImageCapture(Protocol):
+    def capture_ai_call_image(self, data_url: str) -> str | None: ...
+
+
 @dataclass(frozen=True, slots=True)
 class AiCallScope:
     room_id: str | None = None
@@ -149,6 +153,18 @@ class AiCallLifecycle:
                 "wire_sha256": request.wire_sha256,
             },
         )
+
+    def capture_ai_call_image(self, data_url: str) -> str | None:
+        sink = self._sink
+        capture = getattr(sink, "capture_ai_call_image", None)
+        if not callable(capture):
+            return None
+        try:
+            preview_id = capture(data_url)
+        except Exception:
+            logger.exception("ai_call.image_capture_failed", extra={"call_id": self.call_id})
+            return None
+        return preview_id if isinstance(preview_id, str) and preview_id else None
 
     def received(self, response: AiCallResponseSummary) -> None:
         self._transition(
@@ -305,7 +321,11 @@ class AiCallLifecycle:
             )
 
 
-def build_openai_request_summary(payload: dict[str, object]) -> AiCallRequestSummary:
+def build_openai_request_summary(
+    payload: dict[str, object],
+    *,
+    image_capture: AiCallImageCapture | None = None,
+) -> AiCallRequestSummary:
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -330,6 +350,7 @@ def build_openai_request_summary(payload: dict[str, object]) -> AiCallRequestSum
         user_content,
         path="input",
         redacted_fields=redacted_fields,
+        image_capture=image_capture,
     )
     schema_name = None
     response_format = payload.get("response_format")
@@ -459,6 +480,7 @@ def _content_preview(
     *,
     path: str,
     redacted_fields: set[str],
+    image_capture: AiCallImageCapture | None,
 ) -> object:
     if isinstance(content, str):
         try:
@@ -501,6 +523,7 @@ def _content_preview(
                             item.get("text"),
                             path=f"{item_path}.text",
                             redacted_fields=redacted_fields,
+                            image_capture=image_capture,
                         ),
                     }
                 )
@@ -508,7 +531,7 @@ def _content_preview(
             if item.get("type") == "image_url":
                 media = item.get("image_url")
                 url = media.get("url") if isinstance(media, dict) else None
-                parts.append(_media_reference(url))
+                parts.append(_media_reference(url, image_capture=image_capture))
                 redacted_fields.add(f"{item_path}.image_url")
                 continue
             parts.append(
@@ -681,19 +704,28 @@ def _is_sensitive_key(key: str) -> bool:
     return any(marker in compact for marker in _SENSITIVE_KEY_MARKERS)
 
 
-def _media_reference(value: object) -> dict[str, object]:
+def _media_reference(
+    value: object,
+    *,
+    image_capture: AiCallImageCapture | None,
+) -> dict[str, object]:
     if not isinstance(value, str):
         return {"type": "media_ref", "available": False}
     header, separator, encoded = value.partition(",")
     mime_type = None
     if header.startswith("data:"):
         mime_type = header.removeprefix("data:").split(";", 1)[0]
-    return {
+    reference: dict[str, object] = {
         "type": "media_ref",
         "mime_type": mime_type,
         "encoded_chars": len(encoded) if separator else len(value),
         "sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
     }
+    if image_capture is not None:
+        preview_id = image_capture.capture_ai_call_image(value)
+        if preview_id is not None:
+            reference["preview_id"] = preview_id
+    return reference
 
 
 def _provider_request_id(response: httpx.Response, payload: object) -> str | None:

@@ -1,6 +1,6 @@
 from typing import Annotated, Protocol, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi import status as http_status
 
 from advx_backend.api.dependencies import (
@@ -8,6 +8,7 @@ from advx_backend.api.dependencies import (
     RuntimeProtocolVersionGuard,
 )
 from advx_backend.contracts.debug import (
+    AiCallImagePreview,
     AiCallQuery,
     AiCallQueryResponse,
     AiCallRole,
@@ -29,6 +30,8 @@ class DebugServiceApi(Protocol):
     def query(self, query: TraceQuery) -> TraceQueryResponse: ...
 
     def query_ai_calls(self, query: AiCallQuery) -> AiCallQueryResponse: ...
+
+    def query_ai_call_image(self, preview_id: str) -> AiCallImagePreview | None: ...
 
     def export_artifact(self, query: TraceQuery) -> dict[str, object]: ...
 
@@ -129,6 +132,22 @@ def create_debug_router(*, local_token: str) -> APIRouter:
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={"code": "invalid_ai_call_query", "message": str(error)},
             ) from error
+
+    @router.get("/ai-calls/images/{preview_id}", response_model=AiCallImagePreview)
+    async def query_ai_call_image(
+        request: Request,
+        preview_id: Annotated[str, Path(min_length=1, max_length=128)],
+    ) -> AiCallImagePreview:
+        preview = _debug_service(request).query_ai_call_image(preview_id)
+        if preview is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "ai_call_image_not_found",
+                    "message": "The AI call image preview is unavailable.",
+                },
+            )
+        return preview
 
     @router.get("/runtime/{session_id}", response_model=DebugRuntimeSnapshot)
     async def runtime_snapshot(

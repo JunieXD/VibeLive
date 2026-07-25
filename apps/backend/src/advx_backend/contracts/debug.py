@@ -258,6 +258,11 @@ class AiCallQueryResponse(DebugContractModel):
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class AiCallImagePreview(DebugContractModel):
+    mime_type: Literal["image/jpeg", "image/png", "image/webp"]
+    data_url: str = Field(min_length=1)
+
+
 class DebugQueueSnapshot(DebugContractModel):
     depth: int | None = Field(default=None, ge=0)
     capacity: int | None = Field(default=None, ge=1)

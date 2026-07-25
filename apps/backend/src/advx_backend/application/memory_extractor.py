@@ -218,7 +218,7 @@ class OpenAICompatibleMemoryExtractor:
                 )
             async with self._slots:
                 async with self._rate_gate.lease() as rate_limit_generation:
-                    lifecycle.sent(build_openai_request_summary(payload))
+                    lifecycle.sent(build_openai_request_summary(payload, image_capture=lifecycle))
                     try:
                         response = await self._provider._send(
                             "POST",

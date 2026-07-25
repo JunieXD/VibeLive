@@ -150,6 +150,7 @@ const api: ControlApi = {
   queryDebugTraces: (sessionId, cursor) =>
     ipcRenderer.invoke("backend:debug-traces", sessionId, cursor),
   queryAiCalls: (query) => ipcRenderer.invoke("backend:ai-calls", query),
+  queryAiCallImage: (previewId) => ipcRenderer.invoke("backend:ai-call-image", previewId),
   submitUserText: (text, target) => ipcRenderer.invoke("backend:submit-text", text, target),
   submitAudioSegment: (input) => ipcRenderer.invoke("backend:submit-audio", input),
   notifyVoiceActivity: (source, occurredAtMs) =>

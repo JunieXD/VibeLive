@@ -6,6 +6,7 @@ import {
   Check,
   Clock3,
   Copy,
+  Image as ImageIcon,
   RefreshCw,
   Search,
   Unplug
@@ -27,6 +28,7 @@ import {
   formatJson,
   formatTimestamp
 } from './aiCallFormatters'
+import { collectAiCallImageReferences } from './aiCallImages'
 
 export type AiCallLogProps = {
   active: boolean
@@ -77,6 +79,57 @@ function JsonBlock({ value }: { value: unknown }): React.JSX.Element {
   )
 }
 
+function ImagePreview({
+  previewId,
+  label
+}: {
+  previewId: string | null
+  label: string
+}): React.JSX.Element {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+
+  useEffect(() => {
+    let disposed = false
+    setDataUrl(null)
+    setUnavailable(false)
+    if (!previewId) {
+      setUnavailable(true)
+      return () => {
+        disposed = true
+      }
+    }
+    void window.advx.queryAiCallImage(previewId).then(
+      (preview) => {
+        if (!disposed) setDataUrl(preview.data_url)
+      },
+      () => {
+        if (!disposed) setUnavailable(true)
+      }
+    )
+    return () => {
+      disposed = true
+    }
+  }, [previewId])
+
+  if (dataUrl) {
+    return (
+      <img
+        className="size-full object-contain"
+        src={dataUrl}
+        alt={label}
+        referrerPolicy="no-referrer"
+      />
+    )
+  }
+
+  return (
+    <div className="grid size-full place-items-center px-2 text-center text-[10px] text-[var(--text-faint)]">
+      {unavailable ? (previewId ? '预览已过期' : '旧记录未保留图片') : '加载图片'}
+    </div>
+  )
+}
+
 function viewerDecisionReason(value: unknown): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const response = value as Record<string, unknown>
@@ -99,6 +152,8 @@ function EmptyDetail(): React.JSX.Element {
 function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
   const correlations = collectCorrelationIds(trace)
   const timeline = trace.timeline ?? []
+  const imageReferences = collectAiCallImageReferences(trace.request?.input_preview)
+  const hasAvailableImagePreview = imageReferences.some((image) => image.previewId !== null)
   const decisionReason = viewerDecisionReason(trace.response?.parsed_output)
   const [copied, setCopied] = useState(false)
 
@@ -183,10 +238,38 @@ function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
           <Metric label="请求字节" value={trace.request?.wire_bytes ?? '—'} />
           <Metric label="最大输出 Token" value={trace.request?.max_output_tokens ?? '—'} />
         </div>
+        {imageReferences.length > 0 && (
+          <div className="border-b border-[var(--border)]">
+            <h3 className="m-0 flex items-center gap-2 px-4 py-2 text-[11px] font-bold text-[var(--text-dim)]">
+              <ImageIcon size={14} className="text-[var(--accent)]" aria-hidden="true" />
+              发送图片
+            </h3>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(144px,1fr))] gap-px border-t border-[var(--border)] bg-[var(--border)]">
+              {imageReferences.map((image, index) => {
+                const label = `发送给模型的图片 ${index + 1}`
+                return (
+                  <figure
+                    className="m-0 min-w-0 bg-[var(--panel)] p-2"
+                    key={`${image.previewId ?? image.sha256 ?? 'image'}-${index}`}
+                  >
+                    <div className="grid aspect-video overflow-hidden rounded-md bg-[var(--bg-deep)]">
+                      <ImagePreview previewId={image.previewId} label={label} />
+                    </div>
+                    <figcaption className="mt-1.5 truncate text-[10px] text-[var(--text-faint)]" title={image.sha256 ?? undefined}>
+                      {label}{image.mimeType ? ` · ${image.mimeType}` : ''}
+                    </figcaption>
+                  </figure>
+                )
+              })}
+            </div>
+          </div>
+        )}
         <JsonBlock value={trace.request?.input_preview} />
         {trace.request?.redacted_fields && trace.request.redacted_fields.length > 0 && (
           <p className="m-0 border-t border-[var(--border)] px-4 py-2 text-[10px] text-[var(--text-faint)]">
-            已脱敏字段：{trace.request.redacted_fields.join('、')}
+            已保护字段：{trace.request.redacted_fields.join('、')}。{hasAvailableImagePreview
+              ? '图片内容已在上方显示，原始地址不会写入调用记录。'
+              : '旧记录未保留图片内容；新调用会在上方显示图片预览。'}
           </p>
         )}
       </section>
