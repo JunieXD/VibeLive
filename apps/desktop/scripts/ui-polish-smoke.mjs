@@ -73,6 +73,8 @@ try {
     return {
       viewport: { width: window.innerWidth, height: window.innerHeight },
       documentOverflow: document.documentElement.scrollWidth > window.innerWidth,
+      stagePanel: bounds('.stage-panel'),
+      commandMeter: bounds('.command-meter'),
       rightRail: bounds('.right-rail'),
       viewerPanel: bounds('.viewer-panel'),
       viewerList: bounds('.viewer-list'),
@@ -99,8 +101,13 @@ try {
 
   assert.ok(layout, 'Live dashboard layout was not available.')
   assert.equal(layout.documentOverflow, false, 'Live dashboard overflowed horizontally.')
-  assert.ok(layout.rightRail && layout.viewerPanel && layout.viewerList)
+  assert.ok(layout.stagePanel && layout.commandMeter && layout.rightRail && layout.viewerPanel && layout.viewerList)
   assert.ok(layout.mixerPanel && layout.mixerScroll)
+  assert.ok(
+    layout.commandMeter.left >= layout.stagePanel.left &&
+      layout.commandMeter.right <= layout.stagePanel.right,
+    'The microphone status is clipped outside the live stage at 1120x720.'
+  )
   assert.ok(
     layout.rightRail.scrollHeight <= layout.rightRail.clientHeight + 1,
     'The live right rail requires a second outer scrollbar at 1120x720.'

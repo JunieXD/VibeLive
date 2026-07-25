@@ -46,6 +46,7 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
     audienceSessionActive,
     overlayVisible,
     barrageTotal,
+    microphoneEnabled,
     microphoneLevel,
     message,
     messageSending,
@@ -413,9 +414,20 @@ export function LiveStage(props: LiveStageProps): React.JSX.Element {
           </span>
         </span>
         <span className="command-spacer" />
-        <div className="command-meter" aria-label={`麦克风音量 ${microphoneLevel}%`}>
-          <Mic size={14} />
-          <div className="mini-meter">
+        <div
+          className={`command-meter ${microphoneEnabled ? 'is-enabled' : ''}`}
+          aria-label={`${microphoneEnabled ? '麦克风已开启' : '麦克风已关闭'}，音量 ${microphoneLevel}%`}
+          title={
+            microphoneEnabled
+              ? '麦克风已开启。未开播时可进行本地音量检测，不会上传声音。'
+              : '麦克风已关闭。'
+          }
+        >
+          <Mic size={14} aria-hidden="true" />
+          <span className="command-meter-label">
+            {microphoneEnabled ? '麦克风已开启' : '麦克风已关闭'}
+          </span>
+          <div className="mini-meter" aria-hidden="true">
             <span style={{ width: `${microphoneLevel}%` }} />
           </div>
         </div>

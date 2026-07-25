@@ -49,6 +49,7 @@ export type LiveStageProps = {
   audienceSessionActive: boolean
   overlayVisible: boolean
   barrageTotal: number
+  microphoneEnabled: boolean
   microphoneLevel: number
   message: string
   messageSending: boolean

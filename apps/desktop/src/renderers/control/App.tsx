@@ -297,6 +297,7 @@ export function App({ initialColorTheme }: AppProps): React.JSX.Element {
               audienceSessionActive: media.audienceSessionActive,
               overlayVisible: media.overlayVisible,
               barrageTotal: barrage.barrageTotal,
+              microphoneEnabled: media.microphoneEnabled,
               microphoneLevel: media.microphoneLevel,
               message: activityFeed.message,
               messageSending: barrage.messageSending,

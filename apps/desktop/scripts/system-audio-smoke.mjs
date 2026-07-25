@@ -70,6 +70,7 @@ try {
   })
   await microphoneToggle.click()
   assert.equal(await microphoneToggle.getAttribute('aria-checked'), 'true')
+  await page.locator('.command-meter.is-enabled').getByText('麦克风已开启', { exact: true }).waitFor()
   await page.waitForFunction(() => {
     const raw = localStorage.getItem('advx.audio-settings')
     if (!raw) return false
