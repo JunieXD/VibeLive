@@ -54,6 +54,7 @@ const INGEST_ACK_TIMEOUT_MS = 10_000;
 const CONNECT_TIMEOUT_MS = 8_000;
 // The probe has four sequential upstream phases, each bounded at 30 seconds.
 const PROVIDER_PROBE_TIMEOUT_MS = 130_000;
+const PROVIDER_CONFIGURATION_TIMEOUT_MS = 30_000;
 // Starting a runtime repeats the model probe and adds a final-ASR check (35 seconds).
 const RUNTIME_SESSION_START_TIMEOUT_MS = 180_000;
 const PROVIDER_OPERATION_TIMEOUT_MS = 180_000;
@@ -200,18 +201,27 @@ export class BackendClient {
   }
 
   async configureProviders(config: ModelConfig): Promise<void> {
-    await this.request("/configuration/providers", "PUT", {
-      model_base_url: config.baseUrl,
-      provider_profile_id: config.providerProfileId,
-      model_name: config.model,
-      viewer_model: config.viewerModel || undefined,
-      memory_model: config.memoryModel || undefined,
-      visual_summary_model: config.visualSummaryModel || undefined,
-      model_api_key: config.apiKey,
-      asr_base_url: config.asrBaseUrl,
-      asr_model: config.asrModel,
-      asr_api_key: config.asrApiKey
-    });
+    await this.request(
+      "/configuration/providers",
+      "PUT",
+      {
+        model_base_url: config.baseUrl,
+        provider_profile_id: config.providerProfileId,
+        model_name: config.model,
+        viewer_model: config.viewerModel || undefined,
+        memory_model: config.memoryModel || undefined,
+        visual_summary_model: config.visualSummaryModel || undefined,
+        model_api_key: config.apiKey,
+        asr_base_url: config.asrBaseUrl,
+        asr_model: config.asrModel,
+        asr_api_key: config.asrApiKey
+      },
+      {
+        timeoutMs: PROVIDER_CONFIGURATION_TIMEOUT_MS,
+        timeoutCode: "provider_configuration_timeout",
+        timeoutMessage: "配置模型和语音识别服务超时。"
+      }
+    );
     this.providersConfigured = true;
     this.emitStatus();
   }
