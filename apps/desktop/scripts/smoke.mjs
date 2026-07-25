@@ -1552,12 +1552,14 @@ try {
   await restartedOverlayPage.locator('.overlay-barrage').first().waitFor({ state: 'detached' })
   await restartedPage.evaluate(async () => {
     const settings = await window.advx.getOverlaySettings()
-    await window.advx.setOverlaySettings({ ...settings, density: 7 })
+    await window.advx.setOverlaySettings({ ...settings, density: 24 })
   })
   const mockBarrageEvents = [
-    ['mock-scroll-1', '这波操作有点东西', 'scroll'],
-    ['mock-scroll-2', '前方高能，请注意', 'scroll'],
-    ['mock-scroll-3', '画面很清楚，继续冲', 'scroll'],
+    ...Array.from({ length: 20 }, (_, index) => [
+      `mock-scroll-${index + 1}`,
+      `高密度滚动弹幕 ${index + 1}`,
+      'scroll'
+    ]),
     ['mock-top-1', '顶端固定：本场最佳', 'top'],
     ['mock-top-2', '顶端固定：名场面预定', 'top'],
     ['mock-bottom-1', '底端固定：感谢观看', 'bottom'],
@@ -1578,7 +1580,7 @@ try {
     }
   }, mockBarrageEvents)
   await restartedOverlayPage.waitForFunction(
-    () => document.querySelectorAll('.overlay-barrage').length === 7
+    () => document.querySelectorAll('.overlay-barrage').length === 24
   )
   await restartedOverlayPage.waitForTimeout(1_200)
   const modeMock = await restartedOverlayPage.evaluate(() => {
@@ -1631,8 +1633,8 @@ try {
     }
   })
   assert.ok(modeMock, 'Three-mode mock styles were not readable.')
-  assert.equal(modeMock.count, 7)
-  assert.deepEqual(modeMock.modes, { scroll: 3, top: 2, bottom: 2 })
+  assert.equal(modeMock.count, 24)
+  assert.deepEqual(modeMock.modes, { scroll: 20, top: 2, bottom: 2 })
   assert.equal(modeMock.fontSize, '25px')
   assert.match(modeMock.fontFamily, /SimHei/)
   assert.ok(['700', 'bold'].includes(modeMock.fontWeight))

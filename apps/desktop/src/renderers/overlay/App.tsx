@@ -7,7 +7,6 @@ import {
   enqueueBarrage,
   fixedBarrageLaneOffsetPx,
   FIXED_BARRAGE_DURATION_MS,
-  fitSettingsToViewport,
   normalizeOverlaySettings,
   remainingDisplayMs,
   travelDurationMs,
@@ -37,9 +36,9 @@ function outlineTextShadow(widthPx: number): string {
 export function App(): React.JSX.Element {
   const [items, setItems] = useState<VisibleBarrage[]>([])
   const [settings, setSettings] = useState(DEFAULT_OVERLAY_SETTINGS)
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight)
   const itemsRef = useRef<VisibleBarrage[]>([])
   const settingsRef = useRef(settings)
-  const requestedSettingsRef = useRef(DEFAULT_OVERLAY_SETTINGS)
   const timersRef = useRef(new Map<number, number>())
   const nextInstanceIdRef = useRef(1)
 
@@ -106,41 +105,26 @@ export function App(): React.JSX.Element {
     const clear = window.advxOverlay.onClear(clearItems)
     const removeSettings = window.advxOverlay.onSettingsChanged((snapshot: OverlaySettings) => {
       const normalized = normalizeOverlaySettings(snapshot)
-      const fitted = fitSettingsToViewport(normalized, window.innerHeight)
-      const result = applySettingsToQueue(itemsRef.current, fitted)
+      const result = applySettingsToQueue(itemsRef.current, normalized)
       for (const removed of result.removed) {
         clearTimer(removed.instanceId)
       }
       itemsRef.current = result.items
-      requestedSettingsRef.current = normalized
-      settingsRef.current = fitted
+      settingsRef.current = normalized
       setItems(result.items)
-      setSettings(fitted)
+      setSettings(normalized)
       for (const item of result.items) {
         scheduleRemoval(item)
       }
     })
-    const reflowForViewport = (): void => {
-      const fitted = fitSettingsToViewport(
-        requestedSettingsRef.current,
-        window.innerHeight
-      )
-      const result = applySettingsToQueue(itemsRef.current, fitted)
-      for (const removed of result.removed) {
-        clearTimer(removed.instanceId)
-      }
-      itemsRef.current = result.items
-      settingsRef.current = fitted
-      setItems(result.items)
-      setSettings(fitted)
-    }
-    window.addEventListener('resize', reflowForViewport)
+    const updateViewportHeight = (): void => setViewportHeight(window.innerHeight)
+    window.addEventListener('resize', updateViewportHeight)
 
     return () => {
       removeBarrage()
       clear()
       removeSettings()
-      window.removeEventListener('resize', reflowForViewport)
+      window.removeEventListener('resize', updateViewportHeight)
       clearItems()
     }
   }, [])
@@ -174,7 +158,10 @@ export function App(): React.JSX.Element {
             '--lane-bottom': `${item.laneBottomPercent}%`,
             '--fixed-lane-offset': `${fixedBarrageLaneOffsetPx(
               item.lane,
-              settings.fontSizePx
+              settings.fontSizePx,
+              settings.density,
+              settings.region,
+              viewportHeight
             )}px`
           } as React.CSSProperties}
         >

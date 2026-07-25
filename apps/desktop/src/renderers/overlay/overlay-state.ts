@@ -95,23 +95,6 @@ export function remainingDisplayMs(
   return Math.max(0, displayDurationMs(mode, speed) - (now - shownAt))
 }
 
-export function fitSettingsToViewport(
-  settings: OverlaySettings,
-  viewportHeight: number
-): OverlaySettings {
-  const normalized = normalizeOverlaySettings(settings)
-  const regionHeight =
-    Math.max(1, viewportHeight) *
-    ((normalized.region.bottomPercent - normalized.region.topPercent) / 100)
-  const rowPitch = normalized.fontSizePx * 1.35 + 20
-  const availableLanes = Math.max(1, Math.floor(regionHeight / rowPitch))
-
-  return {
-    ...normalized,
-    density: Math.min(normalized.density, availableLanes)
-  }
-}
-
 export function laneFor(id: string, laneCount: number): number {
   const normalizedLaneCount = Math.max(1, Math.round(laneCount))
   return (
@@ -153,14 +136,30 @@ export function laneBottomPercent(
 
 export function fixedBarrageLaneOffsetPx(
   lane: number,
-  fontSizePx: number
+  fontSizePx: number,
+  laneCount: number,
+  region: OverlaySettings['region'],
+  viewportHeight: number
 ): number {
-  const normalizedLane = Math.max(0, Math.round(lane))
+  const normalizedLaneCount = Math.max(1, Math.round(laneCount))
+  const normalizedLane = clamp(Math.round(lane), 0, normalizedLaneCount - 1)
   const normalizedFontSize = clamp(fontSizePx, 14, 36)
   const lanePitch = normalizedFontSize * BARRAGE_LINE_HEIGHT +
     FIXED_BARRAGE_LANE_GAP_PX
+  const topPercent = clamp(region.topPercent, 0, 100)
+  const bottomPercent = clamp(region.bottomPercent, topPercent, 100)
+  const regionHeightPx =
+    Math.max(1, viewportHeight) * ((bottomPercent - topPercent) / 100)
+  const maximumOffsetPx = Math.max(
+    0,
+    regionHeightPx - normalizedFontSize * BARRAGE_LINE_HEIGHT - 8
+  )
+  const fittedOffsetPx =
+    normalizedLaneCount === 1
+      ? 0
+      : (normalizedLane / (normalizedLaneCount - 1)) * maximumOffsetPx
 
-  return normalizedLane * lanePitch
+  return Math.min(normalizedLane * lanePitch, fittedOffsetPx)
 }
 
 function barrageMode(mode: BarrageEvent['mode'] | undefined): BarrageMode {
