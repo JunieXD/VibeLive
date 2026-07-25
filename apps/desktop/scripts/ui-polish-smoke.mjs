@@ -250,6 +250,42 @@ try {
   })
   await sampleDropdown.press('Escape')
 
+  await page.getByRole('button', { name: '观众配置', exact: true }).click()
+  await page.getByRole('button', { name: '模式参数', exact: true }).click()
+  const modeParameters = page.getByRole('dialog', { name: '模式参数', exact: true })
+  await modeParameters.waitFor()
+  const algorithmMode = modeParameters.getByRole('combobox', {
+    name: '算法模式',
+    exact: true
+  })
+  assert.equal(await algorithmMode.getAttribute('data-value'), 'per_viewer')
+  await algorithmMode.click()
+  await page
+    .getByRole('listbox', { name: '算法模式', exact: true })
+    .getByRole('option', { name: '30 秒窗口聚合', exact: true })
+    .click()
+  assert.equal(await algorithmMode.getAttribute('data-value'), 'window_batch')
+  assert.equal(
+    await modeParameters.getByRole('combobox', { name: '视觉输入', exact: true }).isDisabled(),
+    true
+  )
+  assert.equal(
+    await modeParameters.getByRole('combobox', { name: '帧选择策略', exact: true }).isDisabled(),
+    true
+  )
+  const frameCount = modeParameters.locator('label').filter({ hasText: '帧数' }).locator('input')
+  const frameWindow = modeParameters
+    .locator('label')
+    .filter({ hasText: '窗口 ms' })
+    .locator('input')
+  assert.equal(await frameCount.inputValue(), '5')
+  assert.equal(await frameWindow.inputValue(), '30000')
+  assert.equal(await frameCount.isDisabled(), true)
+  assert.equal(await frameWindow.isDisabled(), true)
+  await page.screenshot({
+    path: resolve(artifactDirectory, 'audience-window-batch-settings-light.png')
+  })
+
   console.log(
     JSON.stringify({
       layout,
@@ -258,7 +294,8 @@ try {
       resolve(artifactDirectory, 'live-ui-polish-1120-dark.png'),
       resolve(artifactDirectory, 'live-ui-polish-command-tooltip-dark.png'),
       resolve(artifactDirectory, 'live-ui-polish-dropdown-dark.png'),
-      resolve(artifactDirectory, 'live-ui-polish-dropdown-light.png')
+      resolve(artifactDirectory, 'live-ui-polish-dropdown-light.png'),
+      resolve(artifactDirectory, 'audience-window-batch-settings-light.png')
       ]
     })
   )

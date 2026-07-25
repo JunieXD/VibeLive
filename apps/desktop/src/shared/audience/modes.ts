@@ -91,6 +91,7 @@ export function canonicalModeContent(mode: AudienceMode): string {
     highlight_response_range: [...mode.highlightResponseRange],
     ambience: mode.ambience,
     visual_settings: {
+      barrage_generation_mode: mode.visualSettings.barrageGenerationMode,
       viewer_visual_input_mode: mode.visualSettings.viewerVisualInputMode,
       frame_bundle_size: mode.visualSettings.frameBundleSize,
       frame_window_ms: mode.visualSettings.frameWindowMs,

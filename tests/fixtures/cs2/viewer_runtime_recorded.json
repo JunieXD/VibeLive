@@ -1687,6 +1687,10 @@
           "frame_similarity_threshold": 0.9,
           "frame_anchor_interval_ms": 5000
         },
+        "barrage_generation_mode": "per_viewer",
+        "window_batch_interval_ms": 5000,
+        "window_batch_context_window_ms": 30000,
+        "window_batch_max_frames": 5,
         "viewer_visual_input_mode": "direct_frames",
         "max_in_flight_viewer_requests": 6,
         "viewer_request_ttl_ms": 30000,
@@ -1706,7 +1710,7 @@
         "max_consecutive_ambient_waves": 1
       }
     },
-    "config_hash": "c96630ebdeae36831cc9cd5b645355c879ff367bffffd7062c05cb02b9295ed1",
+    "config_hash": "a8ec97ab5138624b49975764771b03310fb009236172041ca436a6c70147d66f",
     "created_at_ms": 2000,
     "events": [
       {
@@ -3559,6 +3563,10 @@
         "frame_similarity_threshold": 0.9,
         "frame_anchor_interval_ms": 5000
       },
+      "barrage_generation_mode": "per_viewer",
+      "window_batch_interval_ms": 5000,
+      "window_batch_context_window_ms": 30000,
+      "window_batch_max_frames": 5,
       "viewer_visual_input_mode": "direct_frames",
       "max_in_flight_viewer_requests": 6,
       "viewer_request_ttl_ms": 30000,

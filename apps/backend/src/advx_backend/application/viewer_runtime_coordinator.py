@@ -19,6 +19,7 @@ from advx_backend.application.viewer_runtime import (
 )
 from advx_backend.contracts.debug import ObservationWaveStatus
 from advx_backend.contracts.viewer_runtime import (
+    BarrageGenerationMode,
     CanonicalRuntimeSpec,
     RuntimeSettings,
     ViewerRuntimeTelemetry,
@@ -263,10 +264,19 @@ class ViewerRuntimeCoordinator:
                 )
                 return ViewerCoordinatorResult(wave=core_wave)
 
-            public_context, reply_context = self._select_contexts(
-                observation,
-                committed.spec.settings,
-            )
+            if (
+                committed.spec.settings.barrage_generation_mode
+                is BarrageGenerationMode.WINDOW_BATCH
+            ):
+                public_context, reply_context = self._select_window_batch_contexts(
+                    observation,
+                    committed.spec.settings,
+                )
+            else:
+                public_context, reply_context = self._select_contexts(
+                    observation,
+                    committed.spec.settings,
+                )
             context_event_ids = list(
                 dict.fromkeys(event.event_id for event in public_context)
             )
@@ -399,12 +409,23 @@ class ViewerRuntimeCoordinator:
             ),
             decision=decision,
         )
-        dispatch = await self._viewer_runtime.dispatch(
-            wave=wave,
-            decision=decision,
-            pool=committed.pool,
-            runtime=runtime,
-        )
+        if (
+            committed.spec.settings.barrage_generation_mode
+            is BarrageGenerationMode.WINDOW_BATCH
+        ):
+            dispatch = await self._viewer_runtime.dispatch_window_batch(
+                wave=wave,
+                decision=decision,
+                pool=committed.pool,
+                runtime=runtime,
+            )
+        else:
+            dispatch = await self._viewer_runtime.dispatch(
+                wave=wave,
+                decision=decision,
+                pool=committed.pool,
+                runtime=runtime,
+            )
         if proposed_policy is not None and self._dispatch_commits_admission(
             decision,
             dispatch,
@@ -654,9 +675,19 @@ class ViewerRuntimeCoordinator:
             frames=observation.frames,
         )
         trigger_frame_ids = list(self._trigger_frame_ids(observation))
+        frame_settings = (
+            settings.frame_bundle
+            if settings.barrage_generation_mode is BarrageGenerationMode.PER_VIEWER
+            else settings.frame_bundle.model_copy(
+                update={
+                    "frame_bundle_size": settings.window_batch_max_frames,
+                    "frame_window_ms": settings.window_batch_context_window_ms,
+                }
+            )
+        )
         selected = select_frame_bundle(
             frames=frames,
-            settings=settings.frame_bundle,
+            settings=frame_settings,
             now_ms=observation.created_at_ms,
         )
         selected_by_id = {item.frame_id: item for item in selected}
@@ -664,6 +695,11 @@ class ViewerRuntimeCoordinator:
             item
             for item in frames
             if item.frame_id in trigger_frame_ids and item.frame_id not in selected_by_id
+            and (
+                settings.barrage_generation_mode is BarrageGenerationMode.PER_VIEWER
+                or item.captured_at_ms
+                >= observation.created_at_ms - frame_settings.frame_window_ms
+            )
         ]
         if trigger_frames:
             combined = sorted(
@@ -672,13 +708,13 @@ class ViewerRuntimeCoordinator:
             )
             trigger_ids = set(trigger_frame_ids)
             forced = [item for item in combined if item.frame_id in trigger_ids]
-            remaining = settings.frame_bundle.frame_bundle_size - len(forced)
+            remaining = frame_settings.frame_bundle_size - len(forced)
             ordinary = [
                 item for item in combined if item.frame_id not in trigger_ids
             ][-max(0, remaining) :]
             selected = tuple(
                 sorted(
-                    [*forced[: settings.frame_bundle.frame_bundle_size], *ordinary],
+                    [*forced[: frame_settings.frame_bundle_size], *ordinary],
                     key=lambda item: (item.captured_at_ms, item.frame_id),
                 )
             )
@@ -688,7 +724,7 @@ class ViewerRuntimeCoordinator:
         frame_bundle = (
             FrameBundle(
                 bundle_id=self._bundle_id(observation.observation_id),
-                settings=settings.frame_bundle,
+                settings=frame_settings,
                 frames=list(selected),
             )
             if selected
@@ -790,9 +826,15 @@ class ViewerRuntimeCoordinator:
     ) -> bool:
         spec = committed.spec
         mode = next(mode for mode in spec.modes if mode.mode_id == spec.active_mode_id)
+        settings = spec.settings
+        if settings.barrage_generation_mode is BarrageGenerationMode.WINDOW_BATCH:
+            return (
+                state.last_ambient_at_ms is None
+                or wave.created_at_ms
+                >= state.last_ambient_at_ms + settings.window_batch_interval_ms
+            )
         if mode.ambience.value != "continuous":
             return False
-        settings = spec.settings
         if state.consecutive_ambient_waves >= settings.max_consecutive_ambient_waves:
             return False
         return (
@@ -1220,6 +1262,27 @@ class ViewerRuntimeCoordinator:
                 reply_context = [parent, *reply_context[-(reply_limit - 1) :]]
         reply_context.sort(key=lambda event: (event.sequence, event.event_id))
         return tuple(ordinary), tuple(reply_context)
+
+    @staticmethod
+    def _select_window_batch_contexts(
+        observation: Observation,
+        settings: RuntimeSettings,
+    ) -> tuple[tuple[RoomEvent, ...], tuple[RoomEvent, ...]]:
+        cutoff = observation.created_at_ms - settings.window_batch_context_window_ms
+        public_context = tuple(
+            event
+            for event in observation.room_events
+            if event.created_at_ms >= cutoff
+            and (
+                event.source_type
+                in {RoomEventSource.USER_TEXT, RoomEventSource.USER_VOICE}
+                or (
+                    event.source_type is RoomEventSource.SYSTEM_EVENT
+                    and event.payload.get("event") == "system_audio_transcript"
+                )
+            )
+        )[-settings.public_context_max_events :]
+        return public_context, ()
 
     async def _compact_history(
         self,

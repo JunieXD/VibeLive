@@ -29,6 +29,10 @@ describe('canonical desktop runtime spec', () => {
         visual_summary_model: 'summary-model'
       },
       settings: {
+        barrage_generation_mode: 'per_viewer',
+        window_batch_interval_ms: 5_000,
+        window_batch_context_window_ms: 30_000,
+        window_batch_max_frames: 5,
         frame_bundle: {
           frame_bundle_size: 15,
           frame_selection_strategy: 'change_peaks',
@@ -60,6 +64,56 @@ describe('canonical desktop runtime spec', () => {
     )
     const generatedContract: ContractCanonicalRuntimeSpec = compiled.spec
     expect(generatedContract.settings?.frame_bundle?.frame_quality).toBe(82)
+  })
+
+  it('compiles window generation with a five-frame thirty-second ceiling', () => {
+    const workspace = createInitialAudienceWorkspace()
+    const activeMode = workspace.modeState.modes[0]
+    const windowWorkspace = {
+      ...workspace,
+      modeState: {
+        ...workspace.modeState,
+        modes: workspace.modeState.modes.map((mode) =>
+          mode.id === activeMode.id
+            ? {
+                ...mode,
+                visualSettings: {
+                  ...mode.visualSettings,
+                  barrageGenerationMode: 'window_batch' as const,
+                  viewerVisualInputMode: 'shared_summary' as const,
+                  frameBundleSize: 2,
+                  frameWindowMs: 10_000,
+                  frameSelectionStrategy: 'latest_n' as const
+                }
+              }
+            : mode
+        )
+      }
+    }
+
+    const compiled = compileCanonicalRuntimeSpec(windowWorkspace, {
+      configRevision: 4,
+      provider: {
+        providerProfileId: 'profile-a',
+        viewerModel: 'viewer-model',
+        memoryModel: 'memory-model',
+        visualSummaryModel: 'summary-model'
+      }
+    })
+
+    expect(compiled.spec.settings).toMatchObject({
+      barrage_generation_mode: 'window_batch',
+      window_batch_interval_ms: 5_000,
+      window_batch_context_window_ms: 30_000,
+      window_batch_max_frames: 5,
+      viewer_visual_input_mode: 'direct_frames',
+      public_context_window_ms: 30_000,
+      frame_bundle: {
+        frame_bundle_size: 5,
+        frame_window_ms: 30_000,
+        frame_selection_strategy: 'change_peaks'
+      }
+    })
   })
 
   it('sorts object keys recursively without reordering arrays', () => {

@@ -4,11 +4,18 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerBarrageEvent,
     ViewerGenerationRequest,
     ViewerGenerationResponse,
+    WindowBatchGenerationRequest,
+    WindowBatchGenerationResponse,
 )
 
 
 class ViewerProvider(Protocol):
     async def generate(self, request: ViewerGenerationRequest) -> ViewerGenerationResponse: ...
+
+    async def generate_window_batch(
+        self,
+        request: WindowBatchGenerationRequest,
+    ) -> WindowBatchGenerationResponse: ...
 
 
 class ViewerSessionFence(Protocol):

@@ -30,6 +30,8 @@ from advx_backend.contracts.viewer_runtime import (
     ViewerGenerationResponse,
     ViewerReactionIntent,
     ViewerReactionTarget,
+    WindowBatchGenerationRequest,
+    WindowBatchGenerationResponse,
 )
 from advx_backend.domain.observation import FrameRef
 from advx_backend.domain.observation_wave import (
@@ -116,6 +118,13 @@ _VIEWER_SILENCE_JSON_EXAMPLE: Final = (
     '"decision_reason":"普通问候未触发当前人设","evidence_refs":[]}'
 )
 _SUMMARY_JSON_EXAMPLE: Final = '{"summary":"画面中的关键变化"}'
+_WINDOW_BATCH_JSON_EXAMPLE: Final = (
+    '{"candidates":[{"viewer_instance_id":"allowed-viewer-id",'
+    '"action":"barrage","intent":"react_to_scene","target":null,'
+    '"text":"这波看懂了","reaction_type":"comment",'
+    '"decision_reason":"画面出现关键变化",'
+    '"evidence_refs":[{"source":"frame","frame_index":0}]}]}'
+)
 _VIEWER_SYSTEM_PROMPT: Final = (
     "Act as exactly the supplied viewer instance. The username is your identity; the Persona "
     "is only a behavioral tendency and is not your name or a system role. Produce zero or one "
@@ -148,6 +157,30 @@ _VIEWER_SYSTEM_PROMPT: Final = (
     "exactly one JSON object, with no Markdown or prose. "
     f"For a barrage use this shape: {_VIEWER_BARRAGE_JSON_EXAMPLE} "
     f"For no response use this shape: {_VIEWER_SILENCE_JSON_EXAMPLE}"
+)
+_WINDOW_BATCH_SYSTEM_PROMPT: Final = (
+    "Act as the locally selected viewer instances supplied in the request. Produce zero or "
+    "more natural barrage candidates in one response. Each candidate must use exactly one "
+    "viewer_instance_id from viewers and no viewer may appear twice. Omit viewers who should "
+    "stay silent. A viewer username is its identity; Persona is only a behavioral tendency. "
+    "Shared room memory is public background, not proof that a viewer attended an earlier "
+    "stream. Treat each style_profile as binding style guidance, but never as scene evidence "
+    "and never reconstruct its source corpus text. Candidate action must be barrage and text "
+    "must be a natural Chinese message of 20 characters or fewer unless its style_profile "
+    "requires otherwise. Legal intent values "
+    "are exactly: react_to_host, react_to_scene, reply_to_viewer, ask_question, agree, disagree, "
+    "encourage, joke, continue_thread, room_meta. target must be null or an object with kind "
+    "host, scene, room, viewer, or event. Host, scene, and room targets must set both "
+    "viewer_instance_id and event_id to null. A viewer target must set viewer_instance_id to "
+    "an active_viewer_ids value and event_id to null. An event target must set event_id to a "
+    "scene_assessment.replyable_event_ids value and viewer_instance_id to null. No other target "
+    "fields are allowed. evidence_refs must be an array "
+    'of {"source":"event","event_id":"allowed-event-id"} or '
+    '{"source":"frame","frame_index":0} objects using only IDs and zero-based frame indexes in '
+    "the request. Include one concise Chinese decision_reason of 40 characters or fewer. Do not "
+    "return generation_request_id or viewer_sequence; the server owns them. Do not expose hidden "
+    "reasoning. Return exactly one JSON object with no Markdown or prose. Use this shape: "
+    f"{_WINDOW_BATCH_JSON_EXAMPLE}"
 )
 _VISUAL_SUMMARY_SYSTEM_PROMPT: Final = (
     "Summarize only visible, decision-relevant changes across the ordered frame bundle. "
@@ -189,6 +222,29 @@ class _ViewerModelOutput(BaseModel):
                 raise ValueError("silence cannot include target or text")
             if self.reaction_type != "silence":
                 raise ValueError("silence action requires silence reaction_type")
+        return self
+
+
+class _WindowBatchCandidate(_ViewerModelOutput):
+    viewer_instance_id: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_barrage_only(self) -> "_WindowBatchCandidate":
+        if self.action is not ViewerAction.BARRAGE:
+            raise ValueError("window batch candidates must be barrages")
+        return self
+
+
+class _WindowBatchModelOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: list[_WindowBatchCandidate] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_unique_viewers(self) -> "_WindowBatchModelOutput":
+        viewer_ids = [candidate.viewer_instance_id for candidate in self.candidates]
+        if len(viewer_ids) != len(set(viewer_ids)):
+            raise ValueError("window batch candidate viewer IDs must be unique")
         return self
 
 
@@ -292,6 +348,83 @@ class OpenAICompatibleViewerRuntimeProvider:
                     "viewer_instance_id": request.viewer_instance_id,
                     "viewer_sequence": request.viewer_sequence,
                 }
+            )
+            lifecycle.succeeded(result.model_dump(mode="json"))
+            return result
+        except asyncio.CancelledError:
+            lifecycle.cancelled()
+            raise
+        except Exception as error:
+            lifecycle.failed(error)
+            raise
+
+    async def generate_window_batch(
+        self,
+        request: WindowBatchGenerationRequest,
+    ) -> WindowBatchGenerationResponse:
+        lifecycle = self._call_lifecycle(
+            role=AiCallRole.VIEWER,
+            correlation_id=request.batch_generation_request_id,
+            model_id=self.config.provider.viewer_model,
+            scope=AiCallScope(
+                room_id=request.room_id,
+                session_id=request.session_id,
+                audience_epoch=request.audience_epoch,
+                observation_id=request.observation_id,
+                generation_request_id=request.batch_generation_request_id,
+            ),
+        )
+        try:
+            self._ensure_available(self._viewer)
+            content = await self._window_batch_content(request)
+            payload = self._json_payload(
+                model_id=self.config.provider.viewer_model,
+                system_prompt=_WINDOW_BATCH_SYSTEM_PROMPT,
+                content=content,
+            )
+            response = await self._send_rate_limited(
+                self._viewer,
+                payload,
+                lifecycle=lifecycle,
+                viewer_request=request.requests[0],
+                maximum_timeout_seconds=_PRIMARY_TIMEOUT_SECONDS,
+                allow_json_mode_fallback=False,
+            )
+            lifecycle.received(build_http_response_summary(response))
+            output = self._structured_output(response)
+            try:
+                model_output = _WindowBatchModelOutput.model_validate(output)
+            except ValidationError as error:
+                raise ViewerRuntimeProtocolError(
+                    "Window batch response violated the model output contract: "
+                    f"{self._validation_codes(error)}"
+                ) from None
+            request_by_viewer = {
+                item.viewer_instance_id: item for item in request.requests
+            }
+            candidates: list[ViewerGenerationResponse] = []
+            for candidate in model_output.candidates:
+                viewer_request = request_by_viewer.get(candidate.viewer_instance_id)
+                if viewer_request is None:
+                    raise ViewerRuntimeProtocolError(
+                        "Window batch response used an unselected viewer ID"
+                    )
+                candidates.append(
+                    ViewerGenerationResponse.model_validate(
+                        {
+                            **candidate.model_dump(
+                                mode="json",
+                                exclude={"viewer_instance_id"},
+                            ),
+                            "generation_request_id": viewer_request.generation_request_id,
+                            "viewer_instance_id": viewer_request.viewer_instance_id,
+                            "viewer_sequence": viewer_request.viewer_sequence,
+                        }
+                    )
+                )
+            result = WindowBatchGenerationResponse(
+                batch_generation_request_id=request.batch_generation_request_id,
+                candidates=candidates,
             )
             lifecycle.succeeded(result.model_dump(mode="json"))
             return result
@@ -598,6 +731,73 @@ class OpenAICompatibleViewerRuntimeProvider:
         content = await self._content(context, request.session_id, bundle)
         if (
             request.visual_input_mode is ViewerVisualInputMode.DIRECT_FRAMES
+            and not isinstance(content, list)
+        ):
+            raise ViewerRuntimeProviderBlockedError(
+                "direct_frames requires resolvable frames"
+            )
+        return content
+
+    async def _window_batch_content(
+        self,
+        request: WindowBatchGenerationRequest,
+    ) -> str | list[dict[str, object]]:
+        first = request.requests[0]
+        mode_context = dict(first.mode_context)
+        mode_context.pop("style_profile", None)
+        mode_context.pop("_viewer_persona_id", None)
+        mode_context.pop("_viewer_display_name", None)
+        viewers: list[dict[str, object]] = []
+        for viewer_request in request.requests:
+            style_guidance = style_guidance_for(
+                viewer_request.mode_context,
+                persona_id=viewer_request.persona.persona_id,
+            )
+            viewer_context: dict[str, object] = {
+                "viewer_instance_id": viewer_request.viewer_instance_id,
+                "username": viewer_request.username,
+                "display_name": viewer_request.display_name,
+                "persona": viewer_request.persona.model_dump(mode="json"),
+                "instance_variant": viewer_request.instance_variant.model_dump(mode="json"),
+                "viewer_private_state": viewer_request.viewer_private_state.model_dump(mode="json"),
+            }
+            if style_guidance is not None:
+                viewer_context["style_profile"] = style_guidance
+            viewers.append(viewer_context)
+        context: dict[str, object] = {
+            "batch_generation_request_id": request.batch_generation_request_id,
+            "room_id": request.room_id,
+            "session_id": request.session_id,
+            "audience_epoch": request.audience_epoch,
+            "observation_id": request.observation_id,
+            "deadline_at_ms": request.deadline_at_ms,
+            "scene_assessment": first.scene_assessment.model_dump(mode="json"),
+            "active_viewer_ids": first.active_viewer_ids,
+            "mode_context": mode_context,
+            "visual_input_mode": first.visual_input_mode.value,
+            "frame_bundle": (
+                None
+                if first.frame_bundle is None
+                else first.frame_bundle.model_dump(mode="json")
+            ),
+            "shared_visual_summary": first.shared_visual_summary,
+            "input_event_ids": first.input_event_ids,
+            "public_context_event_ids": first.public_context_event_ids,
+            "public_context": [
+                event.model_dump(mode="json") for event in first.public_context
+            ],
+            "reply_context_event_ids": first.reply_context_event_ids,
+            "reply_context": [
+                event.model_dump(mode="json") for event in first.reply_context
+            ],
+            "conversation_history_summary": first.conversation_history_summary,
+            "room_memory_slice": first.room_memory_slice.model_dump(mode="json"),
+            "viewers": viewers,
+        }
+        self._remove_data_refs(context)
+        content = await self._content(context, request.session_id, first.frame_bundle)
+        if (
+            first.visual_input_mode is ViewerVisualInputMode.DIRECT_FRAMES
             and not isinstance(content, list)
         ):
             raise ViewerRuntimeProviderBlockedError(

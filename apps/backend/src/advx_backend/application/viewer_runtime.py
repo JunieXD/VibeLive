@@ -22,7 +22,10 @@ from advx_backend.contracts.debug import ObservationWaveStatus, TraceResponseSta
 from advx_backend.contracts.viewer_runtime import (
     ViewerAction,
     ViewerGenerationRequest,
+    ViewerGenerationResponse,
     ViewerPublicEvent,
+    WindowBatchGenerationRequest,
+    WindowBatchGenerationResponse,
 )
 from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.memory import RoomMemorySlice
@@ -124,6 +127,27 @@ class _WorkItem:
 
 
 @dataclass(slots=True)
+class _WindowBatchWork:
+    session_id: str
+    audience_epoch: int
+    observation_id: str
+    priority: int
+    wave_generation: int
+    generation: int = 0
+    items: list[_WorkItem] = field(default_factory=list)
+    unmatched_stale: int = 0
+    lane: "_RuntimeLane | None" = None
+    slot_reserved: bool = False
+    queued: bool = False
+    was_queued: bool = False
+    superseded_reason: str | None = None
+    provider_task: asyncio.Task[object] | None = None
+    ready: asyncio.Event = field(default_factory=asyncio.Event)
+    cancelled: asyncio.Event = field(default_factory=asyncio.Event)
+    finished: bool = False
+
+
+@dataclass(slots=True)
 class _ViewerMailbox:
     task: asyncio.Task[None] | None = None
     current: _WorkItem | None = None
@@ -136,7 +160,7 @@ class _RuntimeLane:
     queue_capacity: int
     active: int = 0
     queued: int = 0
-    eligible: deque[_WorkItem] = field(default_factory=deque)
+    eligible: deque[_WorkItem | _WindowBatchWork] = field(default_factory=deque)
 
 
 @dataclass(slots=True)
@@ -151,6 +175,10 @@ class _RequestContext:
 
 
 class _ViewerRequestExpired(TimeoutError):
+    pass
+
+
+class _WindowBatchSuperseded(RuntimeError):
     pass
 
 
@@ -202,6 +230,7 @@ class ViewerRuntime:
         self._behavior_state_sink = behavior_state_sink
         self._lanes: dict[tuple[object, ...], _RuntimeLane] = {}
         self._mailboxes: dict[str, _ViewerMailbox] = {}
+        self._window_batches: dict[int, _WindowBatchWork] = {}
         self._sequences: dict[str, int] = {}
         self._sequence_epochs: dict[str, int] = {}
         self._lock = asyncio.Lock()
@@ -229,6 +258,15 @@ class ViewerRuntime:
                 for mailbox in self._mailboxes.values()
                 if mailbox.task is not None
             ]
+            for work in self._window_batches.values():
+                work.superseded_reason = "session_stopped"
+                work.cancelled.set()
+                if work.queued:
+                    self._discard_item_locked(work)
+                    work.ready.set()
+                if work.provider_task is not None:
+                    work.provider_task.cancel()
+                    work.provider_task.add_done_callback(self._consume_task_result)
             pending = list(
                 {
                     id(item): item
@@ -254,6 +292,7 @@ class ViewerRuntime:
                 )
                 self._resolve(item, "cancelled")
             self._mailboxes.clear()
+            self._window_batches.clear()
             self._lanes.clear()
             self._sequences.clear()
             self._sequence_epochs.clear()
@@ -347,6 +386,617 @@ class ViewerRuntime:
             selected=selected,
             unmatched_stale=unmatched_stale,
         )
+
+    async def dispatch_window_batch(
+        self,
+        *,
+        wave: ObservationWave,
+        decision: CrowdDecision,
+        pool: object,
+        runtime: object,
+    ) -> ViewerDispatchSummary:
+        selected = len(decision.selected_viewer_ids)
+        if not self._valid_dispatch(wave, decision):
+            return ViewerDispatchSummary(selected=selected, stale=selected)
+        if (
+            wave.visual_input_mode is ViewerVisualInputMode.DIRECT_FRAMES
+            and wave.frame_bundle is None
+        ):
+            return ViewerDispatchSummary(selected=selected, rejected=selected)
+        wave_generation = await self._advance_wave_fence(wave)
+        if wave_generation is None:
+            return ViewerDispatchSummary(selected=selected, superseded=selected)
+
+        work = _WindowBatchWork(
+            session_id=wave.session_id,
+            audience_epoch=wave.audience_epoch,
+            observation_id=wave.observation_id,
+            priority=self._wave_priority(wave),
+            wave_generation=wave_generation,
+        )
+        try:
+            if not await self._admit_window_batch(work, runtime):
+                unmatched_stale = await self._ensure_window_batch_trace_items(
+                    work=work,
+                    wave=wave,
+                    decision=decision,
+                    pool=pool,
+                    runtime=runtime,
+                )
+                return self._window_batch_interrupted_summary(
+                    work,
+                    selected=selected,
+                    unmatched_stale=unmatched_stale,
+                )
+            return await self._execute_window_batch(
+                work=work,
+                wave=wave,
+                decision=decision,
+                pool=pool,
+                runtime=runtime,
+            )
+        except asyncio.CancelledError:
+            async with self._lock:
+                work.superseded_reason = (
+                    work.superseded_reason or "superseded_by_scheduler"
+                )
+                work.cancelled.set()
+                if work.provider_task is not None and not work.provider_task.done():
+                    work.provider_task.cancel()
+                    work.provider_task.add_done_callback(self._consume_task_result)
+            unmatched_stale = await self._ensure_window_batch_trace_items(
+                work=work,
+                wave=wave,
+                decision=decision,
+                pool=pool,
+                runtime=runtime,
+            )
+            return self._window_batch_interrupted_summary(
+                work,
+                selected=selected,
+                unmatched_stale=unmatched_stale,
+            )
+        finally:
+            await self._finish_window_batch(work)
+
+    async def _execute_window_batch(
+        self,
+        *,
+        work: _WindowBatchWork,
+        wave: ObservationWave,
+        decision: CrowdDecision,
+        pool: object,
+        runtime: object,
+    ) -> ViewerDispatchSummary:
+        selected = len(decision.selected_viewer_ids)
+        if work.superseded_reason is not None:
+            return self._window_batch_interrupted_summary(
+                work,
+                selected=selected,
+            )
+        viewers = {
+            item.viewer_instance_id: item
+            for item in getattr(pool, "viewers", ())
+            if isinstance(item, ViewerInstance)
+        }
+        available_viewer_ids = tuple(viewers)
+        items: list[_WorkItem] = []
+        unmatched_stale = 0
+        loop = asyncio.get_running_loop()
+        async with self._lock:
+            if not self._window_batch_is_current_locked(work):
+                work.superseded_reason = (
+                    work.superseded_reason or "window_batch_wave_superseded"
+                )
+                return self._window_batch_interrupted_summary(
+                    work,
+                    selected=selected,
+                )
+            for viewer_id in decision.selected_viewer_ids:
+                viewer = viewers.get(viewer_id)
+                if viewer is None or not self._viewer_matches(viewer, wave):
+                    unmatched_stale += 1
+                    continue
+                previous_epoch = self._sequence_epochs.get(viewer.viewer_instance_id)
+                previous_sequence = (
+                    self._sequences.get(viewer.viewer_instance_id, viewer.viewer_sequence)
+                    if previous_epoch == viewer.audience_epoch
+                    else viewer.viewer_sequence
+                )
+                sequence = previous_sequence + 1
+                items.append(
+                    _WorkItem(
+                        request=self._build_request(
+                            viewer=viewer,
+                            wave=wave,
+                            runtime=runtime,
+                            sequence=sequence,
+                            active_viewer_ids=available_viewer_ids,
+                        ),
+                        viewer=viewer,
+                        wave=wave,
+                        decision=decision,
+                        available_viewer_ids=available_viewer_ids,
+                        runtime=runtime,
+                        generation=self._generation,
+                        wave_generation=work.wave_generation,
+                        priority=self._wave_priority(wave),
+                        future=loop.create_future(),
+                        queued_at_ms=self._clock.now_ms(),
+                    )
+                )
+            work.items.extend(items)
+            work.unmatched_stale = unmatched_stale
+        if not items:
+            return ViewerDispatchSummary(selected=selected, stale=unmatched_stale)
+
+        claimed: list[_WorkItem] = []
+        for item in items:
+            if work.cancelled.is_set():
+                return self._window_batch_interrupted_summary(
+                    work,
+                    selected=selected,
+                    unmatched_stale=unmatched_stale,
+                )
+            if await self._claim_sequence(item.request):
+                async with self._lock:
+                    viewer_id = item.request.viewer_instance_id
+                    current_epoch = self._sequence_epochs.get(viewer_id)
+                    current_sequence = self._sequences.get(viewer_id, 0)
+                    if (
+                        current_epoch != item.request.audience_epoch
+                        or item.request.viewer_sequence > current_sequence
+                    ):
+                        self._sequences[viewer_id] = item.request.viewer_sequence
+                        self._sequence_epochs[viewer_id] = item.request.audience_epoch
+                item.dispatched_at_ms = self._clock.now_ms()
+                claimed.append(item)
+            else:
+                self._record_trace(
+                    item,
+                    status=TraceResponseStatus.STALE,
+                    accepted=False,
+                    reason="viewer_sequence_claim_rejected",
+                    validation_codes=("viewer_sequence_claim_rejected",),
+                )
+                unmatched_stale += 1
+                work.unmatched_stale = unmatched_stale
+        if not claimed:
+            return ViewerDispatchSummary(selected=selected, stale=unmatched_stale)
+
+        batch_id = self._id_generator.new_id()
+        batch_request = WindowBatchGenerationRequest(
+            batch_generation_request_id=batch_id,
+            room_id=wave.room_id,
+            session_id=wave.session_id,
+            audience_epoch=wave.audience_epoch,
+            observation_id=wave.observation_id,
+            requests=[item.request for item in claimed],
+            deadline_at_ms=min(item.request.deadline_at_ms for item in claimed),
+        )
+        try:
+            timeout_seconds = max(
+                0.0,
+                (batch_request.deadline_at_ms - self._clock.now_ms()) / 1_000,
+            )
+            if timeout_seconds <= 0:
+                raise _ViewerRequestExpired("Window batch request TTL expired")
+            response = await self._generate_window_batch_with_retry(
+                work,
+                batch_request,
+                timeout_seconds=timeout_seconds,
+            )
+            if (
+                response.batch_generation_request_id
+                != batch_request.batch_generation_request_id
+            ):
+                raise ViewerRuntimeProviderError(
+                    "Window batch response request ID mismatch"
+                )
+        except _WindowBatchSuperseded:
+            return self._window_batch_interrupted_summary(
+                work,
+                selected=selected,
+                unmatched_stale=unmatched_stale,
+            )
+        except asyncio.CancelledError:
+            if work.cancelled.is_set():
+                return self._window_batch_interrupted_summary(
+                    work,
+                    selected=selected,
+                    unmatched_stale=unmatched_stale,
+                )
+            raise
+        except (TimeoutError, _ViewerRequestExpired):
+            for item in claimed:
+                item.completed_at_ms = self._clock.now_ms()
+                self._record_trace(
+                    item,
+                    status=TraceResponseStatus.EXPIRED,
+                    accepted=False,
+                    reason="window_batch_provider_expired",
+                    validation_codes=("expired",),
+                )
+            return ViewerDispatchSummary(
+                selected=selected,
+                queued=(len(claimed) if work.was_queued else 0),
+                dispatched=len(claimed),
+                completed=len(claimed),
+                retry=sum(item.retry_count for item in claimed),
+                expired=len(claimed),
+                stale=unmatched_stale,
+            )
+        except Exception:
+            logger.exception("Window batch Viewer provider failed")
+            for item in claimed:
+                item.completed_at_ms = self._clock.now_ms()
+                self._record_trace(
+                    item,
+                    status=TraceResponseStatus.FAILED,
+                    accepted=False,
+                    reason="window_batch_provider_failed",
+                    validation_codes=("provider_failed",),
+                )
+            return ViewerDispatchSummary(
+                selected=selected,
+                queued=(len(claimed) if work.was_queued else 0),
+                dispatched=len(claimed),
+                completed=len(claimed),
+                retry=sum(item.retry_count for item in claimed),
+                failed=len(claimed),
+                stale=unmatched_stale,
+            )
+
+        by_viewer = {item.request.viewer_instance_id: item for item in claimed}
+        candidates: dict[str, tuple[_WorkItem, ViewerGenerationResponse]] = {}
+        seen_text: set[str] = set()
+        for candidate in response.candidates:
+            item = by_viewer.get(candidate.viewer_instance_id)
+            normalized_text = (candidate.text or "").strip().casefold()
+            if (
+                item is None
+                or candidate.viewer_instance_id in candidates
+                or candidate.generation_request_id != item.request.generation_request_id
+                or candidate.viewer_sequence != item.request.viewer_sequence
+                or not normalized_text
+                or normalized_text in seen_text
+            ):
+                continue
+            seen_text.add(normalized_text)
+            candidates[candidate.viewer_instance_id] = (item, candidate)
+
+        outcomes: list[_DispatchResult] = []
+        for item in claimed:
+            item.completed_at_ms = self._clock.now_ms()
+            candidate_entry = candidates.get(item.request.viewer_instance_id)
+            if candidate_entry is None:
+                if await self._final_fence_outcome(item) is not None:
+                    outcome = "stale"
+                elif await self._commit_silence(item):
+                    self._record_trace(
+                        item,
+                        status=TraceResponseStatus.SILENCE,
+                        accepted=True,
+                    )
+                    outcome = "silenced"
+                else:
+                    outcome = self._finalize_after_provider(item, phase="silence_commit")
+            else:
+                _, candidate = candidate_entry
+                outcome = await self._accept_window_batch_candidate(item, candidate)
+            outcomes.append(
+                _DispatchResult(
+                    outcome=outcome,
+                    queued=int(work.was_queued),
+                    dispatched=1,
+                    completed=1,
+                    retry=item.retry_count,
+                )
+            )
+        return ViewerDispatchSummary.combine(
+            outcomes,
+            selected=selected,
+            unmatched_stale=unmatched_stale,
+        )
+
+    async def _admit_window_batch(
+        self,
+        work: _WindowBatchWork,
+        runtime: object,
+    ) -> bool:
+        lane_key, max_in_flight, queue_capacity = self._runtime_limits(
+            runtime=runtime,
+            session_id=work.session_id,
+            audience_epoch=work.audience_epoch,
+        )
+        async with self._lock:
+            if not self._window_batch_is_current_locked(work):
+                work.superseded_reason = "window_batch_wave_superseded"
+                return False
+            work.generation = self._generation
+            lane = self._lanes.setdefault(
+                lane_key,
+                _RuntimeLane(
+                    max_in_flight=max_in_flight,
+                    queue_capacity=queue_capacity,
+                ),
+            )
+            work.lane = lane
+            if lane.active < lane.max_in_flight:
+                lane.active += 1
+                work.slot_reserved = True
+                work.ready.set()
+            elif lane.queued >= lane.queue_capacity:
+                work.superseded_reason = "window_batch_queue_capacity_exceeded"
+                return False
+            else:
+                lane.queued += 1
+                work.queued = True
+                work.was_queued = True
+                lane.eligible.append(work)
+            self._window_batches[id(work)] = work
+        try:
+            await work.ready.wait()
+        except BaseException:
+            await self._finish_window_batch(work)
+            raise
+        async with self._lock:
+            if not self._window_batch_is_current_locked(work):
+                work.superseded_reason = (
+                    work.superseded_reason or "window_batch_wave_superseded"
+                )
+                return False
+            return True
+
+    async def _finish_window_batch(self, work: _WindowBatchWork) -> None:
+        async with self._lock:
+            if work.finished:
+                return
+            work.finished = True
+            self._window_batches.pop(id(work), None)
+            if work.queued:
+                self._discard_item_locked(work)
+            self._release_slot_locked(work)
+
+    async def _ensure_window_batch_trace_items(
+        self,
+        *,
+        work: _WindowBatchWork,
+        wave: ObservationWave,
+        decision: CrowdDecision,
+        pool: object,
+        runtime: object,
+    ) -> int:
+        if work.items:
+            return work.unmatched_stale
+        viewers = {
+            item.viewer_instance_id: item
+            for item in getattr(pool, "viewers", ())
+            if isinstance(item, ViewerInstance)
+        }
+        available_viewer_ids = tuple(viewers)
+        loop = asyncio.get_running_loop()
+        async with self._lock:
+            if work.items:
+                return work.unmatched_stale
+            unmatched_stale = 0
+            for viewer_id in decision.selected_viewer_ids:
+                viewer = viewers.get(viewer_id)
+                if viewer is None or not self._viewer_matches(viewer, wave):
+                    unmatched_stale += 1
+                    continue
+                previous_epoch = self._sequence_epochs.get(viewer.viewer_instance_id)
+                previous_sequence = (
+                    self._sequences.get(viewer.viewer_instance_id, viewer.viewer_sequence)
+                    if previous_epoch == viewer.audience_epoch
+                    else viewer.viewer_sequence
+                )
+                work.items.append(
+                    _WorkItem(
+                        request=self._build_request(
+                            viewer=viewer,
+                            wave=wave,
+                            runtime=runtime,
+                            sequence=previous_sequence + 1,
+                            active_viewer_ids=available_viewer_ids,
+                        ),
+                        viewer=viewer,
+                        wave=wave,
+                        decision=decision,
+                        available_viewer_ids=available_viewer_ids,
+                        runtime=runtime,
+                        generation=self._generation,
+                        wave_generation=work.wave_generation,
+                        priority=work.priority,
+                        future=loop.create_future(),
+                        queued_at_ms=self._clock.now_ms(),
+                    )
+                )
+            work.unmatched_stale = unmatched_stale
+            return unmatched_stale
+
+    def _window_batch_interrupted_summary(
+        self,
+        work: _WindowBatchWork,
+        *,
+        selected: int,
+        unmatched_stale: int = 0,
+    ) -> ViewerDispatchSummary:
+        claimed_items = work.items
+        interrupted_items = [item for item in claimed_items if not item.traced]
+        reason = work.superseded_reason or "window_batch_superseded"
+        cancelled = reason in {
+            "session_stopped",
+            "window_batch_queue_capacity_exceeded",
+        }
+        validation_codes = (
+            ("queue_capacity_exceeded",)
+            if reason == "window_batch_queue_capacity_exceeded"
+            else (("cancelled",) if cancelled else ("superseded",))
+        )
+        now_ms = self._clock.now_ms()
+        for item in interrupted_items:
+            item.completed_at_ms = now_ms if item.dispatched_at_ms is not None else None
+            self._record_trace(
+                item,
+                status=TraceResponseStatus.CANCELLED,
+                accepted=False,
+                reason=reason,
+                validation_codes=validation_codes,
+            )
+        terminal = len(interrupted_items)
+        return ViewerDispatchSummary(
+            selected=selected,
+            queued=(terminal if work.was_queued else 0),
+            dispatched=sum(item.dispatched_at_ms is not None for item in claimed_items),
+            completed=sum(item.completed_at_ms is not None for item in claimed_items),
+            retry=sum(item.retry_count for item in claimed_items),
+            stale=unmatched_stale,
+            cancelled=(terminal if cancelled else 0),
+            superseded=(0 if cancelled else terminal),
+        )
+
+    async def _generate_window_batch_with_retry(
+        self,
+        work: _WindowBatchWork,
+        request: WindowBatchGenerationRequest,
+        *,
+        timeout_seconds: float,
+    ) -> WindowBatchGenerationResponse:
+        loop = asyncio.get_running_loop()
+        monotonic_deadline = loop.time() + timeout_seconds
+        try:
+            return await self._window_batch_provider_attempt(
+                work,
+                request,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception as error:
+            if isinstance(error, (_ViewerRequestExpired, _WindowBatchSuperseded)):
+                raise
+            first_request = request.requests[0]
+            if not self._is_transient(error) or self._expired(first_request):
+                raise
+            backoff_seconds = self._retry_delay_seconds(error)
+            remaining_seconds = min(
+                self._remaining_ttl_seconds(first_request),
+                monotonic_deadline - loop.time(),
+            )
+            if remaining_seconds < backoff_seconds + 0.05:
+                raise _ViewerRequestExpired("insufficient TTL for window batch retry")
+            await asyncio.sleep(backoff_seconds)
+            async with self._lock:
+                if not self._window_batch_is_current_locked(work):
+                    raise _WindowBatchSuperseded
+            retry_budget = min(
+                self._remaining_ttl_seconds(first_request),
+                monotonic_deadline - loop.time(),
+            )
+            if retry_budget < 0.05:
+                raise _ViewerRequestExpired("insufficient TTL for window batch retry")
+            for item in work.items:
+                item.retry_count = 1
+            return await self._window_batch_provider_attempt(
+                work,
+                request,
+                timeout_seconds=retry_budget,
+            )
+
+    async def _window_batch_provider_attempt(
+        self,
+        work: _WindowBatchWork,
+        request: WindowBatchGenerationRequest,
+        *,
+        timeout_seconds: float,
+    ) -> WindowBatchGenerationResponse:
+        if timeout_seconds <= 0:
+            raise _ViewerRequestExpired("Window batch request TTL expired")
+        attempt = asyncio.create_task(
+            self._provider.generate_window_batch(request),
+            name=f"viewer-window-batch:{request.batch_generation_request_id}",
+        )
+        cancelled = asyncio.create_task(work.cancelled.wait())
+        work.provider_task = attempt
+        try:
+            done, _ = await asyncio.wait(
+                {attempt, cancelled},
+                timeout=timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except BaseException:
+            attempt.cancel()
+            attempt.add_done_callback(self._consume_task_result)
+            cancelled.cancel()
+            cancelled.add_done_callback(self._consume_task_result)
+            raise
+        finally:
+            if work.provider_task is attempt:
+                work.provider_task = None
+        if cancelled in done or work.cancelled.is_set():
+            attempt.cancel()
+            attempt.add_done_callback(self._consume_task_result)
+            if cancelled not in done:
+                cancelled.cancel()
+                cancelled.add_done_callback(self._consume_task_result)
+            raise _WindowBatchSuperseded
+        cancelled.cancel()
+        cancelled.add_done_callback(self._consume_task_result)
+        if attempt in done:
+            return attempt.result()
+        attempt.cancel()
+        attempt.add_done_callback(self._consume_task_result)
+        raise _ViewerRequestExpired("Window batch provider attempt exceeded remaining TTL")
+
+    def _window_batch_is_current_locked(self, work: _WindowBatchWork) -> bool:
+        wave_fence = self._wave_fences.get((work.session_id, work.audience_epoch))
+        return (
+            not work.finished
+            and work.superseded_reason is None
+            and work.generation in (0, self._generation)
+            and self._active_session_id == work.session_id
+            and wave_fence is not None
+            and wave_fence[0] == work.wave_generation
+            and wave_fence[2] == work.observation_id
+        )
+
+    async def _accept_window_batch_candidate(
+        self,
+        item: _WorkItem,
+        response: ViewerGenerationResponse,
+    ) -> str:
+        validation = self._barrage_pipeline.validate(
+            request=item.request,
+            response=response,
+        )
+        if not validation.accepted:
+            reason = str(validation.rejection_reason or "validation_rejected")
+            self._record_trace(
+                item,
+                status=TraceResponseStatus.REJECTED,
+                accepted=False,
+                reason=reason,
+                validation_codes=(reason,),
+            )
+            return "rejected"
+        if validation.event is None:
+            return "silenced"
+        fenced = await self._final_fence_outcome(item)
+        if fenced is not None:
+            return fenced
+        outcome, delivery_failed = await self._commit_published_event(
+            item,
+            validation.event,
+        )
+        if outcome != "published":
+            return outcome
+        self._record_trace(
+            item,
+            status=TraceResponseStatus.PUBLISHED,
+            accepted=True,
+            validation_codes=(("realtime_delivery_failed",) if delivery_failed else ()),
+            published_barrage_id=getattr(validation.event, "barrage_id", None),
+        )
+        return "published"
 
     def record_observation_trace(
         self,
@@ -539,15 +1189,36 @@ class ViewerRuntime:
                         active.ready.set()
                     if active.provider_task is not None and not active.provider_task.done():
                         active.provider_task.cancel()
+            for work in self._window_batches.values():
+                if (
+                    work.session_id == wave.session_id
+                    and work.audience_epoch == wave.audience_epoch
+                    and work.priority <= priority
+                    and work.wave_generation != generation
+                ):
+                    work.superseded_reason = self._supersede_reason(
+                        priority,
+                        work.priority,
+                    )
+                    work.cancelled.set()
+                    if work.queued:
+                        self._discard_item_locked(work)
+                        work.ready.set()
+                    if work.provider_task is not None and not work.provider_task.done():
+                        work.provider_task.cancel()
             return generation
 
     def _wave_has_live_work_locked(self, generation: int) -> bool:
-        return any(
+        viewer_work = any(
             item is not None
             and item.wave_generation == generation
             and not item.future.done()
             for mailbox in self._mailboxes.values()
             for item in (mailbox.current, mailbox.pending)
+        )
+        return viewer_work or any(
+            work.wave_generation == generation and not work.finished
+            for work in self._window_batches.values()
         )
 
     async def _run_mailbox(self, viewer_id: str, item: _WorkItem) -> None:
@@ -1072,9 +1743,11 @@ class ViewerRuntime:
         validation_codes: tuple[str, ...] = (),
         published_barrage_id: str | None = None,
     ) -> None:
-        if self._trace_recorder is None or item.traced:
+        if item.traced:
             return
         item.traced = True
+        if self._trace_recorder is None:
+            return
         try:
             self._trace_recorder.record(
                 build_viewer_request_trace(
@@ -1296,7 +1969,10 @@ class ViewerRuntime:
             queue_capacity,
         )
 
-    def _release_slot_locked(self, item: _WorkItem) -> None:
+    def _release_slot_locked(
+        self,
+        item: _WorkItem | _WindowBatchWork,
+    ) -> None:
         lane = item.lane
         if lane is None or not item.slot_reserved:
             return
@@ -1305,7 +1981,10 @@ class ViewerRuntime:
         self._promote_locked(lane)
         self._prune_lane_locked(lane)
 
-    def _discard_item_locked(self, item: _WorkItem) -> None:
+    def _discard_item_locked(
+        self,
+        item: _WorkItem | _WindowBatchWork,
+    ) -> None:
         lane = item.lane
         if lane is None:
             return

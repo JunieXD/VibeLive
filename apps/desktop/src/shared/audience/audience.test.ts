@@ -28,6 +28,9 @@ describe('audience presets and modes', () => {
     expect(BUILT_IN_MODES).toHaveLength(6)
     expect(BUILT_IN_MODES.map((mode) => mode.targetConcurrentViewers))
       .toEqual([24, 28, 16, 14, 24, 14])
+    expect(BUILT_IN_MODES.every(
+      (mode) => mode.visualSettings.barrageGenerationMode === 'per_viewer'
+    )).toBe(true)
     expect(BASE_PERSONAS.flatMap((persona) => validatePersona(persona))).toEqual([])
 
     const mode6657 = BUILT_IN_MODES.find((mode) => mode.id === 'room-6657')
@@ -213,6 +216,7 @@ describe('workspace persistence', () => {
     expect(parsed.workspace.modeState.modes.map((mode) => mode.targetConcurrentViewers))
       .toEqual([24, 28, 16, 14, 24, 14])
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
+      barrageGenerationMode: 'per_viewer',
       viewerVisualInputMode: 'direct_frames',
       frameBundleSize: 15,
       frameSelectionStrategy: 'change_peaks'
@@ -267,6 +271,42 @@ describe('workspace persistence', () => {
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
       frameBundleSize: 15,
       frameWindowMs: 120_000
+    })
+  })
+
+  it('defaults old visual settings to per-viewer generation without rejecting them', () => {
+    const workspace = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    delete workspace.modeState.modes[0].visualSettings.barrageGenerationMode
+
+    const parsed = parseAudienceWorkspaceState(workspace)
+
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.workspace.modeState.modes[0].visualSettings.barrageGenerationMode)
+      .toBe('per_viewer')
+  })
+
+  it('normalizes persisted window generation settings to backend-compatible limits', () => {
+    const workspace = JSON.parse(JSON.stringify(createInitialAudienceWorkspace()))
+    workspace.modeState.modes[0].visualSettings = {
+      ...workspace.modeState.modes[0].visualSettings,
+      barrageGenerationMode: 'window_batch',
+      viewerVisualInputMode: 'shared_summary',
+      frameBundleSize: 2,
+      frameWindowMs: 10_000,
+      frameSelectionStrategy: 'latest_n'
+    }
+
+    const parsed = parseAudienceWorkspaceState(workspace)
+
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
+      barrageGenerationMode: 'window_batch',
+      viewerVisualInputMode: 'direct_frames',
+      frameBundleSize: 5,
+      frameWindowMs: 30_000,
+      frameSelectionStrategy: 'change_peaks'
     })
   })
 

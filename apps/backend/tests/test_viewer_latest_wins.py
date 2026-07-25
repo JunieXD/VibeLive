@@ -8,12 +8,15 @@ from advx_backend.application.reaction_scheduler import (
     ReactionSchedulerConfig,
 )
 from advx_backend.application.reaction_service import ReactionResult
+from advx_backend.application.viewer_barrage_pipeline import ViewerBarragePipeline
 from advx_backend.application.viewer_runtime import ViewerRuntime
+from advx_backend.contracts.debug import TraceResponseStatus
 from advx_backend.contracts.viewer_runtime import (
     EvidenceRef,
     EvidenceSource,
     ViewerAction,
     ViewerGenerationResponse,
+    WindowBatchGenerationResponse,
 )
 from advx_backend.domain.crowd_decision import CrowdDecision
 from advx_backend.domain.observation import FrameRef, Observation
@@ -511,6 +514,14 @@ class _Sink:
         self.events.append(event)
 
 
+class _TraceSink:
+    def __init__(self) -> None:
+        self.traces: list[object] = []
+
+    def record(self, trace: object) -> None:
+        self.traces.append(trace)
+
+
 class _FenceBehaviorSink:
     def __init__(self, fence: _TaskOwnedFence) -> None:
         self._fence = fence
@@ -555,11 +566,152 @@ class _GatedProvider:
         )
 
 
+class _BatchProvider:
+    def __init__(
+        self,
+        *,
+        response_batch_id: str | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.requests: list[object] = []
+        self.response_batch_id = response_batch_id
+        self.error = error
+
+    async def generate_window_batch(self, request: object) -> WindowBatchGenerationResponse:
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        candidates = [
+            ViewerGenerationResponse(
+                generation_request_id=item.generation_request_id,
+                viewer_instance_id=item.viewer_instance_id,
+                viewer_sequence=item.viewer_sequence,
+                action=ViewerAction.BARRAGE,
+                text=("same text" if index < 2 else f"text-{index}"),
+                reaction_type="reply",
+                evidence_refs=[
+                    EvidenceRef(
+                        source=EvidenceSource.EVENT,
+                        event_id="event-window",
+                    )
+                ],
+            )
+            for index, item in enumerate(request.requests)
+        ]
+        return WindowBatchGenerationResponse(
+            batch_generation_request_id=(
+                self.response_batch_id or request.batch_generation_request_id
+            ),
+            candidates=candidates,
+        )
+
+
+class _LaneBatchProvider(_BatchProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = [asyncio.Event(), asyncio.Event()]
+        self.release = [asyncio.Event(), asyncio.Event()]
+
+    async def generate_window_batch(self, request: object) -> WindowBatchGenerationResponse:
+        index = len(self.requests)
+        self.requests.append(request)
+        if index < len(self.started):
+            self.started[index].set()
+            await self.release[index].wait()
+        return WindowBatchGenerationResponse(
+            batch_generation_request_id=request.batch_generation_request_id,
+            candidates=[
+                ViewerGenerationResponse(
+                    generation_request_id=item.generation_request_id,
+                    viewer_instance_id=item.viewer_instance_id,
+                    viewer_sequence=item.viewer_sequence,
+                    action=ViewerAction.BARRAGE,
+                    text=f"batch-{index}-{item.viewer_instance_id}",
+                    reaction_type="reply",
+                    evidence_refs=[
+                        EvidenceRef(
+                            source=EvidenceSource.EVENT,
+                            event_id="event-window",
+                        )
+                    ],
+                )
+                for item in request.requests
+            ],
+        )
+
+
+class _CancellationResistantBatchProvider(_BatchProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_started = asyncio.Event()
+        self.first_cancelled = asyncio.Event()
+        self.release_first = asyncio.Event()
+
+    async def generate_window_batch(self, request: object) -> WindowBatchGenerationResponse:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            self.first_started.set()
+            try:
+                await self.release_first.wait()
+            except asyncio.CancelledError:
+                self.first_cancelled.set()
+                await self.release_first.wait()
+        return WindowBatchGenerationResponse(
+            batch_generation_request_id=request.batch_generation_request_id,
+            candidates=[
+                ViewerGenerationResponse(
+                    generation_request_id=item.generation_request_id,
+                    viewer_instance_id=item.viewer_instance_id,
+                    viewer_sequence=item.viewer_sequence,
+                    action=ViewerAction.BARRAGE,
+                    text=request.observation_id,
+                    reaction_type="reply",
+                    evidence_refs=[
+                        EvidenceRef(
+                            source=EvidenceSource.EVENT,
+                            event_id=f"event-{request.observation_id}",
+                        )
+                    ],
+                )
+                for item in request.requests
+            ],
+        )
+
+
+class _GatedSequenceClaimer:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.second_started = asyncio.Event()
+
+    async def claim_viewer_sequence(self, **scope: object) -> bool:
+        self.calls.append(str(scope["viewer_instance_id"]))
+        if len(self.calls) == 2:
+            self.second_started.set()
+            await asyncio.Event().wait()
+        return True
+
+
+class _RejectThenGateSequenceClaimer:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.second_started = asyncio.Event()
+
+    async def claim_viewer_sequence(self, **scope: object) -> bool:
+        self.calls.append(str(scope["viewer_instance_id"]))
+        if len(self.calls) == 1:
+            return False
+        self.second_started.set()
+        await asyncio.Event().wait()
+        return True
+
+
 def _runtime(
     provider: object,
     *,
     fence: object | None = None,
     behavior_state_sink: object | None = None,
+    trace_recorder: object | None = None,
+    sequence_claimer: object | None = None,
 ) -> tuple[ViewerRuntime, _Sink, _Sink]:
     publisher = _Sink()
     room = _Sink()
@@ -573,6 +725,8 @@ def _runtime(
         id_generator=_Ids(),
         max_in_flight=1,
         behavior_state_sink=behavior_state_sink,
+        trace_recorder=trace_recorder,
+        sequence_claimer=sequence_claimer,
     )
     return runtime, publisher, room
 
@@ -638,6 +792,405 @@ async def test_published_screen_waves_keep_behavior_update_in_fence_task() -> No
     assert behavior.published_observation_ids == ["screen-1", "screen-2"]
     assert len(publisher.events) == 2
     assert len(room.events) == 2
+
+
+@pytest.mark.asyncio
+async def test_window_batch_calls_provider_once_and_reuses_trusted_publish_pipeline() -> None:
+    provider = _BatchProvider()
+    publisher = _Sink()
+    room = _Sink()
+    runtime = ViewerRuntime(
+        provider=provider,
+        barrage_pipeline=ViewerBarragePipeline(clock=_Clock(), id_generator=_Ids()),
+        session_fence=_Fence(),
+        publisher=publisher,
+        room_service=room,
+        clock=_Clock(),
+        id_generator=_Ids(),
+        max_in_flight=1,
+    )
+    await runtime.start_session("session-1")
+
+    summary = await runtime.dispatch_window_batch(
+        wave=_wave("window"),
+        decision=_decision("window", "viewer-1", "viewer-2"),
+        pool=SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2"))),
+        runtime=_runtime_context(),
+    )
+
+    assert len(provider.requests) == 1
+    assert [item.viewer_instance_id for item in provider.requests[0].requests] == [
+        "viewer-1",
+        "viewer-2",
+    ]
+    assert summary.published == 1
+    assert summary.silenced == 1
+    assert len(publisher.events) == 1
+    assert len(room.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_window_batch_rejects_mismatched_batch_response_id() -> None:
+    provider = _BatchProvider(response_batch_id="wrong-batch")
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+
+    summary = await runtime.dispatch_window_batch(
+        wave=_wave("window"),
+        decision=_decision("window", "viewer-1", "viewer-2"),
+        pool=SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2"))),
+        runtime=_runtime_context(),
+    )
+
+    assert summary.failed == 2
+    assert summary.completed == 2
+    assert not publisher.events
+    assert not room.events
+
+
+@pytest.mark.asyncio
+async def test_window_batch_timeout_is_a_completed_terminal_outcome() -> None:
+    provider = _BatchProvider(error=TimeoutError())
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+
+    summary = await runtime.dispatch_window_batch(
+        wave=_wave("window"),
+        decision=_decision("window", "viewer-1", "viewer-2"),
+        pool=SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2"))),
+        runtime=_runtime_context(),
+    )
+
+    assert summary.dispatched == 2
+    assert summary.completed == 2
+    assert summary.expired == 2
+    assert not publisher.events
+    assert not room.events
+
+
+@pytest.mark.asyncio
+async def test_window_batch_reuses_runtime_lane_and_enforces_queue_capacity() -> None:
+    provider = _LaneBatchProvider()
+    traces = _TraceSink()
+    runtime, _, _ = _runtime(provider, trace_recorder=traces)
+    await runtime.start_session("session-1")
+    wave = _wave("window")
+    decision = _decision("window", "viewer-1", "viewer-2")
+    pool = SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2")))
+
+    first = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=wave,
+            decision=decision,
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await provider.started[0].wait()
+    second = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=wave,
+            decision=decision,
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await asyncio.sleep(0)
+
+    third = await runtime.dispatch_window_batch(
+        wave=wave,
+        decision=decision,
+        pool=pool,
+        runtime=_runtime_context(),
+    )
+
+    assert len(provider.requests) == 1
+    assert third.cancelled == 2
+    rejected = [
+        trace
+        for trace in traces.traces
+        if getattr(trace, "observation_id", None) == "window"
+        and getattr(trace, "stale_or_cancel_reason", None)
+        == "window_batch_queue_capacity_exceeded"
+    ]
+    assert len(rejected) == 2
+    assert all(trace.response_status is TraceResponseStatus.CANCELLED for trace in rejected)
+    assert all(trace.validation.codes == ["queue_capacity_exceeded"] for trace in rejected)
+    provider.release[0].set()
+    await provider.started[1].wait()
+    provider.release[1].set()
+    first_summary, second_summary = await asyncio.gather(first, second)
+
+    assert first_summary.published == 2
+    assert second_summary.published == 2
+    assert second_summary.queued == 2
+    assert runtime._window_batches == {}
+    assert runtime._lanes == {}
+
+
+@pytest.mark.asyncio
+async def test_scheduler_supersession_records_window_batch_terminal_traces() -> None:
+    provider = _CancellationResistantBatchProvider()
+    traces = _TraceSink()
+    runtime, publisher, room = _runtime(provider, trace_recorder=traces)
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2")))
+    summaries = []
+
+    class Executor:
+        async def react(self, observation: Observation) -> ReactionResult:
+            summary = await runtime.dispatch_window_batch(
+                wave=_wave(observation.observation_id),
+                decision=_decision(
+                    observation.observation_id,
+                    "viewer-1",
+                    "viewer-2",
+                ),
+                pool=pool,
+                runtime=_runtime_context(),
+            )
+            summaries.append(summary)
+            return ReactionResult(published_events=(), validations=())
+
+    scheduler = LatestWinsReactionScheduler(
+        executor=Executor(),
+        session_tasks=_SessionTasks(),
+        clock=_Clock(),
+    )
+    old = await scheduler.submit(
+        _observation("old", source=RoomEventSource.USER_TEXT)
+    )
+    await provider.first_started.wait()
+    new = await scheduler.submit(
+        _observation("new", source=RoomEventSource.USER_TEXT)
+    )
+
+    assert await asyncio.wait_for(old, timeout=0.2) is None
+    assert await asyncio.wait_for(new, timeout=0.2) is not None
+    await asyncio.wait_for(provider.first_cancelled.wait(), timeout=0.2)
+    provider.release_first.set()
+    await asyncio.sleep(0)
+
+    assert summaries[0].superseded == 2
+    assert summaries[0].completed == 2
+    assert summaries[1].published == 1
+    assert summaries[1].silenced == 1
+    old_traces = [
+        trace
+        for trace in traces.traces
+        if getattr(trace, "observation_id", None) == "old"
+    ]
+    assert len(old_traces) == 2
+    assert all(trace.response_status is TraceResponseStatus.CANCELLED for trace in old_traces)
+    assert all(
+        trace.stale_or_cancel_reason == "superseded_by_scheduler"
+        for trace in old_traces
+    )
+    assert [event.text for event in publisher.events] == ["new"]
+    assert [event.text for event in room.events] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_window_batch_cancellation_traces_viewers_not_yet_sequence_claimed() -> None:
+    provider = _BatchProvider()
+    traces = _TraceSink()
+    claimer = _GatedSequenceClaimer()
+    runtime, publisher, room = _runtime(
+        provider,
+        trace_recorder=traces,
+        sequence_claimer=claimer,
+    )
+    await runtime.start_session("session-1")
+    dispatch = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("claiming"),
+            decision=_decision("claiming", "viewer-1", "viewer-2"),
+            pool=SimpleNamespace(
+                viewers=(_viewer("viewer-1"), _viewer("viewer-2"))
+            ),
+            runtime=_runtime_context(),
+        )
+    )
+    await claimer.second_started.wait()
+
+    dispatch.cancel()
+    summary = await asyncio.wait_for(dispatch, timeout=0.2)
+
+    assert summary.selected == 2
+    assert summary.superseded == 2
+    assert summary.dispatched == 1
+    assert summary.completed == 1
+    assert provider.requests == []
+    assert publisher.events == []
+    assert room.events == []
+    request_traces = [
+        trace
+        for trace in traces.traces
+        if getattr(trace, "observation_id", None) == "claiming"
+    ]
+    assert {trace.viewer_instance_id for trace in request_traces} == {
+        "viewer-1",
+        "viewer-2",
+    }
+    assert all(
+        trace.response_status is TraceResponseStatus.CANCELLED
+        for trace in request_traces
+    )
+    by_viewer = {trace.viewer_instance_id: trace for trace in request_traces}
+    assert by_viewer["viewer-1"].provider.dispatched_at_ms == 100
+    assert by_viewer["viewer-1"].provider.completed_at_ms == 100
+    assert by_viewer["viewer-2"].provider.dispatched_at_ms is None
+    assert by_viewer["viewer-2"].provider.completed_at_ms is None
+
+
+@pytest.mark.asyncio
+async def test_window_batch_cancel_after_claim_rejection_keeps_stale_count() -> None:
+    provider = _BatchProvider()
+    traces = _TraceSink()
+    claimer = _RejectThenGateSequenceClaimer()
+    runtime, publisher, room = _runtime(
+        provider,
+        trace_recorder=traces,
+        sequence_claimer=claimer,
+    )
+    await runtime.start_session("session-1")
+    dispatch = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("reject-then-cancel"),
+            decision=_decision(
+                "reject-then-cancel",
+                "viewer-1",
+                "viewer-2",
+            ),
+            pool=SimpleNamespace(
+                viewers=(_viewer("viewer-1"), _viewer("viewer-2"))
+            ),
+            runtime=_runtime_context(),
+        )
+    )
+    await claimer.second_started.wait()
+
+    dispatch.cancel()
+    summary = await asyncio.wait_for(dispatch, timeout=0.2)
+
+    assert summary.selected == 2
+    assert summary.stale == 1
+    assert summary.superseded == 1
+    assert summary.dispatched == 0
+    assert summary.completed == 0
+    assert provider.requests == []
+    assert publisher.events == []
+    assert room.events == []
+    by_viewer = {
+        trace.viewer_instance_id: trace
+        for trace in traces.traces
+        if getattr(trace, "observation_id", None) == "reject-then-cancel"
+    }
+    assert by_viewer["viewer-1"].response_status is TraceResponseStatus.STALE
+    assert by_viewer["viewer-1"].stale_or_cancel_reason == (
+        "viewer_sequence_claim_rejected"
+    )
+    assert by_viewer["viewer-2"].response_status is TraceResponseStatus.CANCELLED
+    assert by_viewer["viewer-2"].stale_or_cancel_reason == "superseded_by_scheduler"
+
+
+@pytest.mark.asyncio
+async def test_window_batch_terminal_counts_do_not_require_trace_recorder() -> None:
+    provider = _BatchProvider()
+    claimer = _RejectThenGateSequenceClaimer()
+    runtime, _, _ = _runtime(provider, sequence_claimer=claimer)
+    await runtime.start_session("session-1")
+    dispatch = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("no-trace-recorder"),
+            decision=_decision(
+                "no-trace-recorder",
+                "viewer-1",
+                "viewer-2",
+            ),
+            pool=SimpleNamespace(
+                viewers=(_viewer("viewer-1"), _viewer("viewer-2"))
+            ),
+            runtime=_runtime_context(),
+        )
+    )
+    await claimer.second_started.wait()
+
+    dispatch.cancel()
+    summary = await asyncio.wait_for(dispatch, timeout=0.2)
+
+    assert summary.selected == 2
+    assert summary.stale == 1
+    assert summary.superseded == 1
+    assert summary.dispatched == 0
+    assert summary.completed == 0
+
+
+@pytest.mark.asyncio
+async def test_newer_window_batch_cancels_old_provider_with_zero_side_effects() -> None:
+    provider = _CancellationResistantBatchProvider()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+    pool = SimpleNamespace(viewers=(_viewer("viewer-1"), _viewer("viewer-2")))
+
+    first = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("old"),
+            decision=_decision("old", "viewer-1", "viewer-2"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+    await provider.first_started.wait()
+    second = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("new"),
+            decision=_decision("new", "viewer-1", "viewer-2"),
+            pool=pool,
+            runtime=_runtime_context(),
+        )
+    )
+
+    await asyncio.wait_for(provider.first_cancelled.wait(), timeout=0.2)
+    first_summary = await asyncio.wait_for(first, timeout=0.2)
+    second_summary = await asyncio.wait_for(second, timeout=0.2)
+    provider.release_first.set()
+    await asyncio.sleep(0)
+
+    assert first_summary.superseded == 2
+    assert second_summary.published == 1
+    assert second_summary.silenced == 1
+    assert [event.text for event in publisher.events] == ["new"]
+    assert [event.text for event in room.events] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_stop_session_cancels_window_batch_without_waiting_for_provider() -> None:
+    provider = _CancellationResistantBatchProvider()
+    runtime, publisher, room = _runtime(provider)
+    await runtime.start_session("session-1")
+    dispatch = asyncio.create_task(
+        runtime.dispatch_window_batch(
+            wave=_wave("old"),
+            decision=_decision("old", "viewer-1", "viewer-2"),
+            pool=SimpleNamespace(
+                viewers=(_viewer("viewer-1"), _viewer("viewer-2"))
+            ),
+            runtime=_runtime_context(),
+        )
+    )
+    await provider.first_started.wait()
+
+    await asyncio.wait_for(runtime.stop_session("session-1"), timeout=0.2)
+    summary = await asyncio.wait_for(dispatch, timeout=0.2)
+    provider.release_first.set()
+    await asyncio.sleep(0)
+
+    assert summary.cancelled == 2
+    assert not publisher.events
+    assert not room.events
+    assert runtime._window_batches == {}
+    assert runtime._lanes == {}
 
 
 @pytest.mark.asyncio

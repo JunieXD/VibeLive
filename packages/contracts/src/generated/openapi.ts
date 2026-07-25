@@ -993,6 +993,11 @@ export interface components {
             /** Revision */
             revision: number;
         };
+        /**
+         * BarrageGenerationMode
+         * @enum {string}
+         */
+        BarrageGenerationMode: "per_viewer" | "window_batch";
         /** CandidateCommitResponse */
         CandidateCommitResponse: {
             /** Accepted */
@@ -2061,6 +2066,8 @@ export interface components {
         };
         /** RuntimeSettings */
         RuntimeSettings: {
+            /** @default per_viewer */
+            barrage_generation_mode: components["schemas"]["BarrageGenerationMode"];
             frame_bundle?: components["schemas"]["FrameBundleSettings"];
             /** @default direct_frames */
             viewer_visual_input_mode: components["schemas"]["ViewerVisualInputMode"];
@@ -2144,6 +2151,21 @@ export interface components {
              * @default 1
              */
             max_consecutive_ambient_waves: number;
+            /**
+             * Window Batch Interval Ms
+             * @default 5000
+             */
+            window_batch_interval_ms: number;
+            /**
+             * Window Batch Context Window Ms
+             * @default 30000
+             */
+            window_batch_context_window_ms: number;
+            /**
+             * Window Batch Max Frames
+             * @default 5
+             */
+            window_batch_max_frames: number;
         };
         /** SessionAudienceSnapshot */
         SessionAudienceSnapshot: {

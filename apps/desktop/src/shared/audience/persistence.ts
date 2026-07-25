@@ -265,7 +265,8 @@ function upgradeBuiltInModes(modes: readonly AudienceMode[]): AudienceMode[] {
 }
 
 function isLegacyVisualDefault(settings: AudienceVisualSettings): boolean {
-  return settings.viewerVisualInputMode === 'direct_frames' &&
+  return settings.barrageGenerationMode === 'per_viewer' &&
+    settings.viewerVisualInputMode === 'direct_frames' &&
     settings.frameBundleSize === 3 &&
     settings.frameWindowMs === 10_000 &&
     settings.frameSelectionStrategy === 'change_peaks'
@@ -329,6 +330,15 @@ function parseVisualSettings(
     issues.push(`${path} must be an object`)
     return { ...DEFAULT_VISUAL_SETTINGS }
   }
+  let barrageGenerationMode: AudienceVisualSettings['barrageGenerationMode'] = 'per_viewer'
+  if (value.barrageGenerationMode === 'window_batch') {
+    barrageGenerationMode = 'window_batch'
+  } else if (
+    value.barrageGenerationMode !== undefined &&
+    value.barrageGenerationMode !== 'per_viewer'
+  ) {
+    issues.push(`${path}.barrageGenerationMode is invalid`)
+  }
   if (value.viewerVisualInputMode !== 'direct_frames' &&
     value.viewerVisualInputMode !== 'shared_summary' &&
     value.viewerVisualInputMode !== 'text_only') {
@@ -359,10 +369,15 @@ function parseVisualSettings(
     issues.push(`${path}.frameQuality must be greater than 0 and at most 1`)
   }
   return {
-    viewerVisualInputMode: value.viewerVisualInputMode as AudienceVisualSettings['viewerVisualInputMode'],
-    frameBundleSize,
-    frameWindowMs,
-    frameSelectionStrategy: value.frameSelectionStrategy as AudienceVisualSettings['frameSelectionStrategy'],
+    barrageGenerationMode,
+    viewerVisualInputMode: barrageGenerationMode === 'window_batch'
+      ? 'direct_frames'
+      : value.viewerVisualInputMode as AudienceVisualSettings['viewerVisualInputMode'],
+    frameBundleSize: barrageGenerationMode === 'window_batch' ? 5 : frameBundleSize,
+    frameWindowMs: barrageGenerationMode === 'window_batch' ? 30_000 : frameWindowMs,
+    frameSelectionStrategy: barrageGenerationMode === 'window_batch'
+      ? 'change_peaks'
+      : value.frameSelectionStrategy as AudienceVisualSettings['frameSelectionStrategy'],
     frameMaxDimension,
     frameQuality: value.frameQuality as number
   }

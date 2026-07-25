@@ -2,10 +2,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from advx_backend.application.viewer_runtime_coordinator import ViewerRuntimeCoordinator
-from advx_backend.contracts.viewer_runtime import RuntimeSettings
+from advx_backend.application.viewer_runtime_coordinator import (
+    FrameMetadata,
+    ViewerRuntimeCoordinator,
+)
+from advx_backend.bootstrap import BackendRuntime
+from advx_backend.contracts.viewer_runtime import BarrageGenerationMode, RuntimeSettings
 from advx_backend.domain.memory import RoomMemorySlice
-from advx_backend.domain.observation import Observation
+from advx_backend.domain.observation import FrameRef, Observation
 from advx_backend.domain.observation_wave import (
     FrameBundle,
     FrameBundleItem,
@@ -108,6 +112,195 @@ def test_public_context_is_fresh_bounded_and_keeps_forced_triggers() -> None:
     assert all(
         event.source_type is RoomEventSource.AUDIENCE_BARRAGE
         for event in reply_context
+    )
+
+
+def test_window_batch_context_uses_recent_text_and_both_final_asr_sources() -> None:
+    events = (
+        _event(1, RoomEventSource.USER_TEXT, created_at_ms=69_999),
+        _event(2, RoomEventSource.SCREEN_OBSERVATION, created_at_ms=90_000),
+        _event(3, RoomEventSource.AUDIENCE_BARRAGE, created_at_ms=91_000),
+        _event(4, RoomEventSource.USER_VOICE, created_at_ms=92_000),
+        _event(
+            5,
+            RoomEventSource.SYSTEM_EVENT,
+            created_at_ms=93_000,
+            payload={"event": "system_audio_transcript"},
+        ),
+        _event(6, RoomEventSource.USER_TEXT, created_at_ms=99_000),
+    )
+    observation = Observation(
+        session_id="session",
+        observation_id="window",
+        created_at_ms=100_000,
+        room_events=events,
+    )
+
+    public_context, reply_context = (
+        ViewerRuntimeCoordinator._select_window_batch_contexts(
+            observation,
+            RuntimeSettings(
+                barrage_generation_mode=BarrageGenerationMode.WINDOW_BATCH
+            ),
+        )
+    )
+
+    assert [event.event_id for event in public_context] == [
+        "event-4",
+        "event-5",
+        "event-6",
+    ]
+    assert reply_context == ()
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"window_batch_interval_ms": 4_000},
+        {"window_batch_context_window_ms": 20_000},
+        {"window_batch_max_frames": 4},
+    ],
+)
+def test_window_batch_runtime_settings_enforce_the_fixed_preset(
+    override: dict[str, int],
+) -> None:
+    with pytest.raises(ValueError, match="window_batch requires"):
+        RuntimeSettings(
+            barrage_generation_mode=BarrageGenerationMode.WINDOW_BATCH,
+            **override,
+        )
+
+
+@pytest.mark.asyncio
+async def test_window_batch_frame_bundle_is_30_seconds_max_five_and_keeps_trigger() -> None:
+    class Metadata:
+        async def resolve(self, *, session_id: str, frame: FrameRef) -> FrameMetadata:
+            del session_id
+            return FrameMetadata(
+                width=1280,
+                height=720,
+                encoding="jpeg",
+                content_hash=f"{int(frame.frame_id):064x}",
+                change_score=int(frame.frame_id) / 10,
+            )
+
+    frames = tuple(
+        FrameRef(
+            frame_id=str(index),
+            created_at_ms=50_000 + index * 7_000,
+            mime_type="image/jpeg",
+            data_ref=f"frame:{index}",
+        )
+        for index in range(1, 8)
+    )
+    observation = Observation(
+        session_id="session",
+        observation_id="window",
+        created_at_ms=100_000,
+        frames=frames,
+        trigger_frame_ids=("3",),
+        user_context={"ambient": "true"},
+    )
+    committed = SimpleNamespace(
+        audience_epoch=1,
+        spec=SimpleNamespace(
+            room=SimpleNamespace(room_id="room"),
+            settings=RuntimeSettings(
+                barrage_generation_mode=BarrageGenerationMode.WINDOW_BATCH
+            ),
+        ),
+    )
+    coordinator = ViewerRuntimeCoordinator(
+        runtime_state=object(),
+        viewer_runtime=object(),
+        frame_metadata=Metadata(),
+    )
+
+    wave = await coordinator._build_wave(observation, committed)
+
+    assert wave.frame_bundle is not None
+    assert len(wave.frame_bundle.frames) == 5
+    assert wave.frame_bundle.settings.frame_window_ms == 30_000
+    assert all(frame.captured_at_ms >= 70_000 for frame in wave.frame_bundle.frames)
+    assert "3" in [frame.frame_id for frame in wave.frame_bundle.frames]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "generation_mode",
+        "ambience",
+        "ambient_enabled",
+        "ambient_interval_ms",
+        "window_enabled",
+        "window_interval_ms",
+    ),
+    [
+        (
+            BarrageGenerationMode.WINDOW_BATCH,
+            "natural",
+            False,
+            30_000,
+            True,
+            5_000,
+        ),
+        (
+            BarrageGenerationMode.PER_VIEWER,
+            "continuous",
+            True,
+            30_000,
+            False,
+            5_000,
+        ),
+        (
+            BarrageGenerationMode.PER_VIEWER,
+            "natural",
+            False,
+            30_000,
+            False,
+            5_000,
+        ),
+    ],
+)
+async def test_ambient_schedule_depends_on_generation_mode(
+    generation_mode: BarrageGenerationMode,
+    ambience: str,
+    ambient_enabled: bool,
+    ambient_interval_ms: int,
+    window_enabled: bool,
+    window_interval_ms: int,
+) -> None:
+    class State:
+        async def snapshot(self, session_id: str) -> object:
+            del session_id
+            return SimpleNamespace(
+                spec=SimpleNamespace(
+                    active_mode_id="mode",
+                    modes=(
+                        SimpleNamespace(
+                            mode_id="mode",
+                            ambience=SimpleNamespace(value=ambience),
+                        ),
+                    ),
+                    settings=RuntimeSettings(
+                        barrage_generation_mode=generation_mode
+                    ),
+                )
+            )
+
+    container = SimpleNamespace(runtime_state=State())
+
+    assert (
+        await BackendRuntime.ambient_enabled(container, "session")
+        is ambient_enabled
+    )
+    assert (
+        await BackendRuntime.ambient_interval_ms(container, "session")
+        == ambient_interval_ms
+    )
+    assert await BackendRuntime.window_batch_schedule(container, "session") == (
+        window_enabled,
+        window_interval_ms,
     )
 
 
@@ -235,6 +428,28 @@ def test_screen_waves_select_all_eligible_viewers_and_keep_other_budgets() -> No
         wave=_wave(ObservationTrigger.AMBIENT_TICK),
         committed=committed,
     )
+    mixed_window = coordinator._decide_speakers(
+        wave=_wave(ObservationTrigger.USER_TEXT).model_copy(
+            update={
+                "triggers": [
+                    ObservationTrigger.USER_TEXT,
+                    ObservationTrigger.SCREEN_CHANGE,
+                ]
+            }
+        ),
+        committed=committed,
+    )
+    dual_asr_window = coordinator._decide_speakers(
+        wave=_wave(ObservationTrigger.FINAL_VOICE).model_copy(
+            update={
+                "triggers": [
+                    ObservationTrigger.FINAL_VOICE,
+                    ObservationTrigger.SYSTEM_AUDIO,
+                ]
+            }
+        ),
+        committed=committed,
+    )
     direct = coordinator._decide_speakers(
         wave=_wave(ObservationTrigger.USER_TEXT, target_viewer_id="viewer-09"),
         committed=committed,
@@ -261,6 +476,8 @@ def test_screen_waves_select_all_eligible_viewers_and_keep_other_budgets() -> No
     ]
     assert system_audio.selected_viewer_ids == ["persona-fresh", "viewer-00"]
     assert ambient.selected_viewer_ids == ["persona-fresh", "viewer-00"]
+    assert len(mixed_window.selected_viewer_ids) == 6
+    assert len(dual_asr_window.selected_viewer_ids) == 6
     assert direct.selected_viewer_ids == ["viewer-09"]
     assert persona.selected_viewer_ids == ["persona-fresh"]
 

@@ -14,7 +14,11 @@ from advx_backend.application.ai_call_logging import (
 from advx_backend.application.memory_extractor import OpenAICompatibleMemoryExtractor
 from advx_backend.application.ports.memory import MemoryEvidence
 from advx_backend.contracts.debug import AiCallRole, AiCallStatus, AiCallTrace
-from advx_backend.contracts.viewer_runtime import ProviderRuntimeSpec, ViewerGenerationRequest
+from advx_backend.contracts.viewer_runtime import (
+    ProviderRuntimeSpec,
+    ViewerGenerationRequest,
+    WindowBatchGenerationRequest,
+)
 from advx_backend.domain.memory import RoomMemorySlice
 from advx_backend.domain.observation_wave import (
     FrameBundle,
@@ -262,6 +266,109 @@ def _viewer_request() -> ViewerGenerationRequest:
         room_memory_slice=RoomMemorySlice(room_id="room-1", memory_revision=0),
         deadline_at_ms=time.time_ns() // 1_000_000 + 60_000,
     )
+
+
+@pytest.mark.asyncio
+async def test_window_batch_provider_uses_one_logged_strict_json_call() -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        payload = json.loads(request.content)
+        assert payload["response_format"] == {"type": "json_object"}
+        assert '"candidates"' in payload["messages"][0]["content"]
+        context = json.loads(payload["messages"][1]["content"])
+        assert "requests" not in context
+        assert [viewer["viewer_instance_id"] for viewer in context["viewers"]] == [
+            "viewer-1",
+            "viewer-2",
+        ]
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "candidates": [
+                                        {
+                                            "viewer_instance_id": "viewer-2",
+                                            "action": "barrage",
+                                            "intent": "react_to_host",
+                                            "target": None,
+                                            "text": "窗口命中",
+                                            "reaction_type": "comment",
+                                            "decision_reason": "回应最近用户文字",
+                                            "evidence_refs": [
+                                                {
+                                                    "source": "event",
+                                                    "event_id": "event-1",
+                                                }
+                                            ],
+                                        }
+                                    ]
+                                },
+                                ensure_ascii=False,
+                            )
+                        },
+                    }
+                ]
+            },
+        )
+
+    first = _viewer_request()
+    second = first.model_copy(
+        update={
+            "generation_request_id": "generation-2",
+            "viewer_instance_id": "viewer-2",
+            "viewer_sequence": 2,
+            "username": "viewer-2",
+        }
+    )
+    batch = WindowBatchGenerationRequest(
+        batch_generation_request_id="batch-1",
+        room_id=first.room_id,
+        session_id=first.session_id,
+        audience_epoch=first.audience_epoch,
+        observation_id=first.observation_id,
+        requests=[first, second],
+        deadline_at_ms=first.deadline_at_ms,
+    )
+    sink = RecordingSink()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleViewerRuntimeProvider(
+            OpenAICompatibleViewerRuntimeConfig(
+                base_url="https://example.com/v1",
+                provider=ProviderRuntimeSpec(
+                    provider_profile_id="profile-1",
+                    viewer_model="viewer",
+                    memory_model="memory",
+                    visual_summary_model="visual",
+                ),
+                api_key="test-key",
+            ),
+            client=client,
+            ai_call_sink=sink,
+        )
+        result = await provider.generate_window_batch(batch)
+        await provider.aclose()
+
+    assert calls == 1
+    assert [candidate.viewer_instance_id for candidate in result.candidates] == [
+        "viewer-2"
+    ]
+    assert result.candidates[0].generation_request_id == "generation-2"
+    assert [trace.status for trace in sink.traces] == [
+        AiCallStatus.PREPARING,
+        AiCallStatus.SENT,
+        AiCallStatus.RECEIVED,
+        AiCallStatus.SUCCEEDED,
+    ]
+    assert sink.traces[-1].generation_request_id == "batch-1"
 
 
 @pytest.mark.asyncio

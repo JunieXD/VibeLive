@@ -55,10 +55,12 @@ export type PersonaOverride = Partial<
 >
 
 export type AudienceAmbience = 'natural' | 'continuous'
+export type BarrageGenerationMode = 'per_viewer' | 'window_batch'
 export type ViewerVisualInputMode = 'direct_frames' | 'shared_summary' | 'text_only'
 export type FrameSelectionStrategy = 'latest_n' | 'evenly_spaced' | 'change_peaks'
 
 export type AudienceVisualSettings = {
+  readonly barrageGenerationMode: BarrageGenerationMode
   readonly viewerVisualInputMode: ViewerVisualInputMode
   readonly frameBundleSize: number
   readonly frameWindowMs: number

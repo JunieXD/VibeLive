@@ -44,7 +44,13 @@ class ProviderRuntimeSpec(RuntimeContractModel):
     visual_summary_model: str = Field(min_length=1, max_length=256)
 
 
+class BarrageGenerationMode(StrEnum):
+    PER_VIEWER = "per_viewer"
+    WINDOW_BATCH = "window_batch"
+
+
 class RuntimeSettings(RuntimeContractModel):
+    barrage_generation_mode: BarrageGenerationMode = BarrageGenerationMode.PER_VIEWER
     frame_bundle: FrameBundleSettings = Field(default_factory=FrameBundleSettings)
     viewer_visual_input_mode: ViewerVisualInputMode = ViewerVisualInputMode.DIRECT_FRAMES
     max_in_flight_viewer_requests: int = Field(default=6, ge=1, le=32)
@@ -63,6 +69,23 @@ class RuntimeSettings(RuntimeContractModel):
     screen_change_cooldown_ms: int = Field(default=10_000, ge=0)
     ambient_tick_cooldown_ms: int = Field(default=30_000, ge=1)
     max_consecutive_ambient_waves: int = Field(default=1, ge=0, le=32)
+    window_batch_interval_ms: int = Field(default=5_000, ge=1)
+    window_batch_context_window_ms: int = Field(default=30_000, ge=1)
+    window_batch_max_frames: int = Field(default=5, ge=1, le=5)
+
+    @model_validator(mode="after")
+    def validate_window_batch_preset(self) -> "RuntimeSettings":
+        if self.barrage_generation_mode is not BarrageGenerationMode.WINDOW_BATCH:
+            return self
+        if (
+            self.window_batch_interval_ms != 5_000
+            or self.window_batch_context_window_ms != 30_000
+            or self.window_batch_max_frames != 5
+        ):
+            raise ValueError(
+                "window_batch requires a 5000 ms interval, 30000 ms context, and 5 frames"
+            )
+        return self
 
 
 class ViewerRuntimeTelemetry(RuntimeContractModel):
@@ -406,6 +429,49 @@ class ViewerGenerationResponse(RuntimeContractModel):
             raise ValueError("silence cannot include text")
         if self.action is ViewerAction.SILENCE and self.target is not None:
             raise ValueError("silence cannot include target")
+        return self
+
+
+class WindowBatchGenerationRequest(RuntimeContractModel):
+    batch_generation_request_id: str = Field(min_length=1, max_length=128)
+    room_id: str = Field(min_length=1, max_length=128)
+    session_id: str = Field(min_length=1, max_length=128)
+    audience_epoch: int = Field(ge=1)
+    observation_id: str = Field(min_length=1, max_length=128)
+    requests: list[ViewerGenerationRequest] = Field(min_length=1, max_length=32)
+    deadline_at_ms: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_requests(self) -> "WindowBatchGenerationRequest":
+        viewer_ids: set[str] = set()
+        generation_ids: set[str] = set()
+        for request in self.requests:
+            if (
+                request.room_id != self.room_id
+                or request.session_id != self.session_id
+                or request.audience_epoch != self.audience_epoch
+                or request.observation_id != self.observation_id
+                or request.deadline_at_ms != self.deadline_at_ms
+            ):
+                raise ValueError("batch requests must share one frozen observation scope")
+            if request.viewer_instance_id in viewer_ids:
+                raise ValueError("batch viewer IDs must be unique")
+            if request.generation_request_id in generation_ids:
+                raise ValueError("batch generation request IDs must be unique")
+            viewer_ids.add(request.viewer_instance_id)
+            generation_ids.add(request.generation_request_id)
+        return self
+
+
+class WindowBatchGenerationResponse(RuntimeContractModel):
+    batch_generation_request_id: str = Field(min_length=1, max_length=128)
+    candidates: list[ViewerGenerationResponse] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_candidates(self) -> "WindowBatchGenerationResponse":
+        viewer_ids = [candidate.viewer_instance_id for candidate in self.candidates]
+        if len(viewer_ids) != len(set(viewer_ids)):
+            raise ValueError("batch candidate viewer IDs must be unique")
         return self
 
 

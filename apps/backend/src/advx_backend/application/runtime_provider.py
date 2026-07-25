@@ -20,6 +20,8 @@ from advx_backend.contracts.viewer_runtime import (
     ProviderRuntimeSpec,
     ViewerGenerationRequest,
     ViewerGenerationResponse,
+    WindowBatchGenerationRequest,
+    WindowBatchGenerationResponse,
 )
 from advx_backend.domain.observation_wave import FrameBundle, ObservationWave
 from advx_backend.providers.model.provider_rate_gate import ProviderRateGate
@@ -51,6 +53,11 @@ class ViewerRuntimeProvider(Protocol):
         self,
         request: ViewerGenerationRequest,
     ) -> ViewerGenerationResponse: ...
+
+    async def generate_window_batch(
+        self,
+        request: WindowBatchGenerationRequest,
+    ) -> WindowBatchGenerationResponse: ...
 
     async def summarize(
         self,
@@ -273,6 +280,16 @@ class RuntimeProviderRouter:
             audience_epoch=request.audience_epoch,
         ) as generation:
             return await generation.viewer_provider.generate(request)
+
+    async def generate_window_batch(
+        self,
+        request: WindowBatchGenerationRequest,
+    ) -> WindowBatchGenerationResponse:
+        async with self._runtime_state.provider_lease(
+            session_id=request.session_id,
+            audience_epoch=request.audience_epoch,
+        ) as generation:
+            return await generation.viewer_provider.generate_window_batch(request)
 
     async def summarize(
         self,

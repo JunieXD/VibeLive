@@ -22,6 +22,7 @@ type Defaulted<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>
 export type CanonicalPersonaTemplate = ContractPersonaTemplate
 export type CanonicalModeDefinition = ModeDefinition
 type CompiledRuntimeSettings = Defaulted<RuntimeSettings, 'frame_bundle'> & {
+  barrage_generation_mode: AudienceMode['visualSettings']['barrageGenerationMode']
   screen_change_threshold: number
   screen_change_cooldown_ms: number
   public_context_window_ms: number
@@ -137,6 +138,7 @@ export function compileCanonicalRuntimeSpec(
     'documentVersion' in persona ? persona : createPersonaTemplate(persona)
   )
   const visual = activeMode.visualSettings
+  const windowBatch = visual.barrageGenerationMode === 'window_batch'
   const spec: CanonicalRuntimeSpec = {
     protocol_version: 3,
     audience_contract_version: 2,
@@ -159,20 +161,26 @@ export function compileCanonicalRuntimeSpec(
     },
     settings: {
       frame_bundle: {
-        frame_bundle_size: visual.frameBundleSize,
-        frame_window_ms: visual.frameWindowMs,
-        frame_selection_strategy: visual.frameSelectionStrategy,
+        frame_bundle_size: windowBatch ? 5 : visual.frameBundleSize,
+        frame_window_ms: windowBatch ? 30_000 : visual.frameWindowMs,
+        frame_selection_strategy: windowBatch
+          ? 'change_peaks'
+          : visual.frameSelectionStrategy,
         frame_max_dimension: visual.frameMaxDimension,
         frame_quality: Math.max(1, Math.min(100, Math.round(visual.frameQuality * 100))),
         frame_similarity_threshold: 0.9,
         frame_anchor_interval_ms: 5_000
       },
-      viewer_visual_input_mode: visual.viewerVisualInputMode,
+      barrage_generation_mode: visual.barrageGenerationMode,
+      window_batch_interval_ms: 5_000,
+      window_batch_context_window_ms: 30_000,
+      window_batch_max_frames: 5,
+      viewer_visual_input_mode: windowBatch ? 'direct_frames' : visual.viewerVisualInputMode,
       max_in_flight_viewer_requests: Math.min(6, activeMode.targetConcurrentViewers),
       viewer_request_ttl_ms: 30_000,
       viewer_queue_capacity: 64,
       observation_merge_window_ms: 1_000,
-      public_context_window_ms: 60_000,
+      public_context_window_ms: windowBatch ? 30_000 : 60_000,
       public_context_max_events: 48,
       replyable_event_window_ms: 30_000,
       max_replyable_events: 8,

@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 _COORDINATED_TURN_TIMEOUT_MS = 70_000
 _SCREEN_CHANGE_TRIGGER_THRESHOLD = 0.2
 _SCREEN_TRIGGER_COOLDOWN_MS = 10_000
+_WINDOW_BATCH_MODE_POLL_MS = 250
 
 
 class ObservationScheduler(Protocol):
@@ -131,6 +132,17 @@ class _CoordinatedVoiceTurn:
     schedule_task: asyncio.Task[None] | None = None
 
 
+@dataclass(slots=True)
+class _WindowBatchDelta:
+    event_ids: OrderedDict[str, None] = field(default_factory=OrderedDict)
+    frame_ids: OrderedDict[str, None] = field(default_factory=OrderedDict)
+    targets: set[tuple[str, str]] = field(default_factory=set)
+    user_context: dict[str, str] = field(default_factory=dict)
+
+    def has_trigger(self) -> bool:
+        return bool(self.event_ids or self.frame_ids)
+
+
 class IngestService:
     """Accept bounded media inputs and turn public inputs into observations."""
 
@@ -153,6 +165,11 @@ class IngestService:
         ambient_enabled: Callable[[str], Awaitable[bool]] | None = None,
         screen_trigger_settings: Callable[[str], Awaitable[tuple[float, int]]] | None = None,
         ambient_interval_ms: int = 30_000,
+        ambient_interval_provider: Callable[[str], Awaitable[int]] | None = None,
+        window_batch_schedule: (
+            Callable[[str], Awaitable[tuple[bool, int]]] | None
+        ) = None,
+        window_batch_mode_poll_ms: int = _WINDOW_BATCH_MODE_POLL_MS,
         transcript_publisher: TranscriptPublisher | None = None,
     ) -> None:
         if max_tracked_input_ids < 1:
@@ -169,6 +186,8 @@ class IngestService:
             )
         if ambient_interval_ms < 1:
             raise ValueError("ambient_interval_ms must be positive")
+        if window_batch_mode_poll_ms < 1:
+            raise ValueError("window_batch_mode_poll_ms must be positive")
         self._room_service = room_service
         self._context_builder = context_builder
         self._frame_store = frame_store
@@ -185,6 +204,9 @@ class IngestService:
         self._ambient_enabled = ambient_enabled
         self._screen_trigger_settings = screen_trigger_settings
         self._ambient_interval_ms = ambient_interval_ms
+        self._ambient_interval_provider = ambient_interval_provider
+        self._window_batch_schedule = window_batch_schedule
+        self._window_batch_mode_poll_ms = window_batch_mode_poll_ms
         self._transcript_publisher = transcript_publisher
         self._active_session_id: str | None = None
         self._seen_inputs: OrderedDict[str, _TrackedInput] = OrderedDict()
@@ -201,6 +223,10 @@ class IngestService:
         self._last_trigger_at_ms: int | None = None
         self._result_task: asyncio.Task[None] | None = None
         self._ambient_task: asyncio.Task[None] | None = None
+        self._window_batch_task: asyncio.Task[None] | None = None
+        self._window_batch_delta = _WindowBatchDelta()
+        self._window_batch_processed_event_ids: OrderedDict[str, None] = OrderedDict()
+        self._window_batch_processed_frame_ids: OrderedDict[str, None] = OrderedDict()
         self._lock = asyncio.Lock()
 
     async def start_session(self, session_id: str) -> None:
@@ -232,6 +258,11 @@ class IngestService:
             self._consume_asr_results(session_id),
             name=f"ingest-asr-results:{session_id}",
         )
+        if self._window_batch_schedule is not None:
+            self._window_batch_task = asyncio.create_task(
+                self._run_window_batch_timer(session_id),
+                name=f"ingest-window-batch:{session_id}",
+            )
 
     def set_voice_target_resolver(
         self,
@@ -275,6 +306,8 @@ class IngestService:
             )
             ambient_task = self._ambient_task
             self._ambient_task = None
+            window_batch_task = self._window_batch_task
+            self._window_batch_task = None
             self._active_session_id = None
             self._reset_tracking()
             result_task = self._result_task
@@ -294,6 +327,9 @@ class IngestService:
         if ambient_task is not None:
             ambient_task.cancel()
             await asyncio.gather(ambient_task, return_exceptions=True)
+        if window_batch_task is not None:
+            window_batch_task.cancel()
+            await asyncio.gather(window_batch_task, return_exceptions=True)
         try:
             await self._scheduler.cancel_session(session_id)
         finally:
@@ -796,6 +832,14 @@ class IngestService:
             text=text,
             payload=payload,
         )
+        window_batch_enabled, _ = await self._window_batch_settings(session_id)
+        if window_batch_enabled:
+            await self._accumulate_window_batch_delta(
+                session_id,
+                trigger_event_ids=(event.event_id,),
+                target_viewer_id=target_viewer_id,
+                target_persona_id=target_persona_id,
+            )
         await self._finish_final_transcript(
             session_id,
             segment=segment,
@@ -1184,6 +1228,16 @@ class IngestService:
     async def _restart_ambient_timer(self, session_id: str) -> None:
         if self._ambient_enabled is None:
             return
+        window_batch_enabled, _ = await self._window_batch_settings(session_id)
+        if window_batch_enabled:
+            async with self._lock:
+                if self._active_session_id != session_id:
+                    return
+                previous = self._ambient_task
+                self._ambient_task = None
+            if previous is not None:
+                previous.cancel()
+            return
         async with self._lock:
             if self._active_session_id != session_id:
                 return
@@ -1198,7 +1252,12 @@ class IngestService:
     async def _run_ambient_timer(self, session_id: str) -> None:
         try:
             while True:
-                await asyncio.sleep(self._ambient_interval_ms / 1_000)
+                interval_ms = self._ambient_interval_ms
+                if self._ambient_interval_provider is not None:
+                    interval_ms = await self._ambient_interval_provider(session_id)
+                    if interval_ms < 1:
+                        raise ValueError("ambient interval provider returned a non-positive value")
+                await asyncio.sleep(interval_ms / 1_000)
                 if not await self._is_active(session_id):
                     return
                 if self._ambient_enabled is None or not await self._ambient_enabled(session_id):
@@ -1209,6 +1268,65 @@ class IngestService:
                 )
         except asyncio.CancelledError:
             raise
+
+    async def _run_window_batch_timer(self, session_id: str) -> None:
+        try:
+            while True:
+                if not await self._is_active(session_id):
+                    return
+                enabled, interval_ms = await self._window_batch_settings(session_id)
+                if not enabled:
+                    await self._discard_window_batch_delta(session_id)
+                    await asyncio.sleep(self._window_batch_mode_poll_ms / 1_000)
+                    continue
+                await asyncio.sleep(interval_ms / 1_000)
+                if not await self._is_active(session_id):
+                    return
+                still_enabled, current_interval_ms = await self._window_batch_settings(
+                    session_id
+                )
+                if not still_enabled or current_interval_ms != interval_ms:
+                    continue
+                delta = await self._take_window_batch_delta(session_id)
+                user_context = dict(delta.user_context)
+                user_context["window_batch"] = "true"
+                if delta.has_trigger():
+                    user_context.pop("ambient", None)
+                else:
+                    user_context["ambient"] = "true"
+                target_viewer_id, target_persona_id = self._window_batch_target(delta)
+                try:
+                    await self._schedule_observation(
+                        session_id,
+                        trigger_event_ids=tuple(delta.event_ids),
+                        trigger_frame_ids=tuple(delta.frame_ids),
+                        target_viewer_id=target_viewer_id,
+                        target_persona_id=target_persona_id,
+                        user_context=user_context,
+                        window_batch_tick=True,
+                    )
+                except Exception:
+                    await self._restore_window_batch_delta(session_id, delta)
+                    logger.exception(
+                        "window batch tick could not schedule an observation",
+                        extra={"session_id": session_id},
+                    )
+        except asyncio.CancelledError:
+            raise
+
+    async def _window_batch_settings(self, session_id: str) -> tuple[bool, int]:
+        if self._window_batch_schedule is None:
+            return False, 5_000
+        enabled, interval_ms = await self._window_batch_schedule(session_id)
+        if not isinstance(enabled, bool):
+            raise ValueError("window batch schedule returned a non-boolean enabled flag")
+        if (
+            isinstance(interval_ms, bool)
+            or not isinstance(interval_ms, int)
+            or interval_ms < 1
+        ):
+            raise ValueError("window batch schedule returned a non-positive interval")
+        return enabled, interval_ms
 
     def partial_transcript_snapshot(
         self,
@@ -1254,10 +1372,25 @@ class IngestService:
         target_viewer_id: str | None = None,
         target_persona_id: str | None = None,
         user_context: dict[str, str] | None = None,
-    ) -> None:
+        window_batch_tick: bool = False,
+    ) -> bool:
         if not await self._session_tasks.accepts_results(session_id):
-            return
-        await self._record_trigger(session_id)
+            return False
+        window_batch_enabled, _ = await self._window_batch_settings(session_id)
+        if window_batch_tick and not window_batch_enabled:
+            return False
+        if window_batch_enabled and not window_batch_tick:
+            await self._accumulate_window_batch_delta(
+                session_id,
+                trigger_event_ids=trigger_event_ids,
+                trigger_frame_ids=trigger_frame_ids,
+                target_viewer_id=target_viewer_id,
+                target_persona_id=target_persona_id,
+                user_context=user_context,
+            )
+            return True
+        if not window_batch_tick:
+            await self._record_trigger(session_id)
         observation = await self._context_builder.build(
             session_id,
             user_context=user_context,
@@ -1267,6 +1400,7 @@ class IngestService:
             target_persona_id=target_persona_id,
         )
         await self._scheduler.submit(observation)
+        return True
 
     async def _schedule_screen_change_if_cold(
         self,
@@ -1275,7 +1409,15 @@ class IngestService:
         frame_id: str,
         change_score: float | None,
     ) -> None:
+        window_batch_enabled, _ = await self._window_batch_settings(session_id)
         change_threshold, cooldown_ms = await self._screen_trigger_policy(session_id)
+        if window_batch_enabled:
+            if change_score is not None and change_score >= change_threshold:
+                await self._accumulate_window_batch_delta(
+                    session_id,
+                    trigger_frame_ids=(frame_id,),
+                )
+            return
         if change_score is None or change_score < change_threshold:
             return
         if not await self._claim_screen_trigger(session_id, cooldown_ms=cooldown_ms):
@@ -1285,6 +1427,115 @@ class IngestService:
             trigger_frame_ids=(frame_id,),
         )
         await self._scheduler.submit(observation)
+
+    async def _accumulate_window_batch_delta(
+        self,
+        session_id: str,
+        *,
+        trigger_event_ids: tuple[str, ...] = (),
+        trigger_frame_ids: tuple[str, ...] = (),
+        target_viewer_id: str | None = None,
+        target_persona_id: str | None = None,
+        user_context: dict[str, str] | None = None,
+    ) -> None:
+        async with self._lock:
+            if self._active_session_id != session_id:
+                return
+            delta = self._window_batch_delta
+            for event_id in trigger_event_ids:
+                if event_id not in self._window_batch_processed_event_ids:
+                    delta.event_ids[event_id] = None
+            for frame_id in trigger_frame_ids:
+                if frame_id not in self._window_batch_processed_frame_ids:
+                    delta.frame_ids[frame_id] = None
+            if target_viewer_id is not None:
+                delta.targets.add(("viewer", target_viewer_id))
+            if target_persona_id is not None:
+                delta.targets.add(("persona", target_persona_id))
+            if user_context is not None:
+                delta.user_context.update(user_context)
+            self._trim_ordered_ids(delta.event_ids)
+            self._trim_ordered_ids(delta.frame_ids)
+
+    async def _take_window_batch_delta(self, session_id: str) -> _WindowBatchDelta:
+        async with self._lock:
+            if self._active_session_id != session_id:
+                return _WindowBatchDelta()
+            delta = self._window_batch_delta
+            self._window_batch_delta = _WindowBatchDelta()
+            for event_id in delta.event_ids:
+                self._remember_window_batch_id(
+                    self._window_batch_processed_event_ids,
+                    event_id,
+                )
+            for frame_id in delta.frame_ids:
+                self._remember_window_batch_id(
+                    self._window_batch_processed_frame_ids,
+                    frame_id,
+                )
+            return delta
+
+    async def _restore_window_batch_delta(
+        self,
+        session_id: str,
+        delta: _WindowBatchDelta,
+    ) -> None:
+        async with self._lock:
+            if self._active_session_id != session_id:
+                return
+            for event_id in delta.event_ids:
+                self._window_batch_processed_event_ids.pop(event_id, None)
+            for frame_id in delta.frame_ids:
+                self._window_batch_processed_frame_ids.pop(frame_id, None)
+            current = self._window_batch_delta
+            restored = _WindowBatchDelta(
+                event_ids=OrderedDict((*delta.event_ids.items(), *current.event_ids.items())),
+                frame_ids=OrderedDict((*delta.frame_ids.items(), *current.frame_ids.items())),
+                targets=delta.targets | current.targets,
+                user_context={**delta.user_context, **current.user_context},
+            )
+            self._trim_ordered_ids(restored.event_ids)
+            self._trim_ordered_ids(restored.frame_ids)
+            self._window_batch_delta = restored
+
+    async def _discard_window_batch_delta(self, session_id: str) -> None:
+        async with self._lock:
+            if self._active_session_id != session_id:
+                return
+            delta = self._window_batch_delta
+            self._window_batch_delta = _WindowBatchDelta()
+            for event_id in delta.event_ids:
+                self._remember_window_batch_id(
+                    self._window_batch_processed_event_ids,
+                    event_id,
+                )
+            for frame_id in delta.frame_ids:
+                self._remember_window_batch_id(
+                    self._window_batch_processed_frame_ids,
+                    frame_id,
+                )
+
+    @staticmethod
+    def _window_batch_target(
+        delta: _WindowBatchDelta,
+    ) -> tuple[str | None, str | None]:
+        if len(delta.targets) != 1:
+            return None, None
+        kind, target = next(iter(delta.targets))
+        return (target, None) if kind == "viewer" else (None, target)
+
+    def _remember_window_batch_id(
+        self,
+        ids: OrderedDict[str, None],
+        value: str,
+    ) -> None:
+        ids[value] = None
+        ids.move_to_end(value)
+        self._trim_ordered_ids(ids)
+
+    def _trim_ordered_ids(self, ids: OrderedDict[str, None]) -> None:
+        while len(ids) > self._max_tracked_input_ids:
+            ids.popitem(last=False)
 
     async def _screen_trigger_policy(self, session_id: str) -> tuple[float, int]:
         if self._screen_trigger_settings is None:
@@ -1630,3 +1881,6 @@ class IngestService:
         self._timestamp_floors.clear()
         self._pending_audio_ids.clear()
         self._last_trigger_at_ms = None
+        self._window_batch_delta = _WindowBatchDelta()
+        self._window_batch_processed_event_ids.clear()
+        self._window_batch_processed_frame_ids.clear()

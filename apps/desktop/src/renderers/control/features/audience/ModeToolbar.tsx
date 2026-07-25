@@ -31,6 +31,23 @@ function clampNumber(value: string, minimum: number, maximum: number): number {
     : minimum
 }
 
+export function visualSettingsForBarrageGenerationMode(
+  current: AudienceMode['visualSettings'],
+  barrageGenerationMode: AudienceMode['visualSettings']['barrageGenerationMode']
+): AudienceMode['visualSettings'] {
+  if (barrageGenerationMode === 'per_viewer') {
+    return { ...current, barrageGenerationMode }
+  }
+  return {
+    ...current,
+    barrageGenerationMode,
+    viewerVisualInputMode: 'direct_frames',
+    frameBundleSize: 5,
+    frameWindowMs: 30_000,
+    frameSelectionStrategy: 'change_peaks'
+  }
+}
+
 export function ModeToolbar({
   workspace,
   activeMode,
@@ -44,6 +61,7 @@ export function ModeToolbar({
   onResetMode,
   onDeleteMode
 }: ModeToolbarProps): React.JSX.Element {
+  const windowBatch = activeMode.visualSettings.barrageGenerationMode === 'window_batch'
   return (
     <header className={cx('aw-mode-toolbar')}>
       <div className={cx('aw-mode-main')}>
@@ -222,6 +240,26 @@ export function ModeToolbar({
           <div className={cx('aw-popover-section')}>
             <h4>行为策略</h4>
             <label>
+              <span>算法模式</span>
+              <SelectDropdown
+                ariaLabel="算法模式"
+                compact
+                value={activeMode.visualSettings.barrageGenerationMode}
+                options={[
+                  { value: 'per_viewer', label: '逐观众生成' },
+                  { value: 'window_batch', label: '30 秒窗口聚合' }
+                ]}
+                onChange={(barrageGenerationMode) =>
+                  onPatchMode({
+                    visualSettings: visualSettingsForBarrageGenerationMode(
+                      activeMode.visualSettings,
+                      barrageGenerationMode
+                    )
+                  })
+                }
+              />
+            </label>
+            <label>
               <span>冷场策略</span>
               <SelectDropdown
                 ariaLabel="冷场策略"
@@ -239,6 +277,7 @@ export function ModeToolbar({
               <SelectDropdown
                 ariaLabel="视觉输入"
                 compact
+                disabled={windowBatch}
                 value={activeMode.visualSettings.viewerVisualInputMode}
                 options={[
                   { value: 'text_only', label: '纯文本' },
@@ -263,6 +302,7 @@ export function ModeToolbar({
               <SelectDropdown
                 ariaLabel="帧选择策略"
                 compact
+                disabled={windowBatch}
                 value={activeMode.visualSettings.frameSelectionStrategy}
                 options={[
                   { value: 'change_peaks', label: '相邻去重' },
@@ -284,13 +324,18 @@ export function ModeToolbar({
               <input
                 type="number"
                 min={1}
-                max={15}
+                max={windowBatch ? 5 : 15}
+                disabled={windowBatch}
                 value={activeMode.visualSettings.frameBundleSize}
                 onChange={(event) =>
                   onPatchMode({
                     visualSettings: {
                       ...activeMode.visualSettings,
-                      frameBundleSize: clampNumber(event.target.value, 1, 15)
+                      frameBundleSize: clampNumber(
+                        event.target.value,
+                        1,
+                        windowBatch ? 5 : 15
+                      )
                     }
                   })
                 }
@@ -301,14 +346,19 @@ export function ModeToolbar({
               <input
                 type="number"
                 min={1}
-                max={300000}
+                max={windowBatch ? 30000 : 300000}
                 step={500}
+                disabled={windowBatch}
                 value={activeMode.visualSettings.frameWindowMs}
                 onChange={(event) =>
                   onPatchMode({
                     visualSettings: {
                       ...activeMode.visualSettings,
-                      frameWindowMs: clampNumber(event.target.value, 1, 300_000)
+                      frameWindowMs: clampNumber(
+                        event.target.value,
+                        1,
+                        windowBatch ? 30_000 : 300_000
+                      )
                     }
                   })
                 }

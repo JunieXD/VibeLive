@@ -210,6 +210,7 @@ function createMode(
 }
 
 export const DEFAULT_VISUAL_SETTINGS: AudienceVisualSettings = {
+  barrageGenerationMode: 'per_viewer',
   viewerVisualInputMode: 'direct_frames',
   frameBundleSize: 15,
   frameWindowMs: 120_000,

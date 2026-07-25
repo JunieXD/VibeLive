@@ -68,6 +68,7 @@ from advx_backend.application.viewer_runtime_coordinator import (
     ViewerRuntimeCoordinator,
 )
 from advx_backend.contracts.configuration import ProviderConfigurationRequest
+from advx_backend.contracts.viewer_runtime import BarrageGenerationMode
 from advx_backend.domain.barrage import BarragePolicy
 from advx_backend.infrastructure.logging import AiCallStore, TraceStore, configure_logging
 from advx_backend.infrastructure.persistence.sqlite import (
@@ -328,6 +329,25 @@ class BackendRuntime:
         )
         return mode is not None and mode.ambience.value == "continuous"
 
+    async def ambient_interval_ms(self, session_id: str) -> int:
+        try:
+            committed = await self.runtime_state.snapshot(session_id)
+        except KeyError:
+            return 30_000
+        settings = committed.spec.settings
+        return settings.ambient_tick_cooldown_ms
+
+    async def window_batch_schedule(self, session_id: str) -> tuple[bool, int]:
+        try:
+            committed = await self.runtime_state.snapshot(session_id)
+        except KeyError:
+            return False, 5_000
+        settings = committed.spec.settings
+        return (
+            settings.barrage_generation_mode is BarrageGenerationMode.WINDOW_BATCH,
+            settings.window_batch_interval_ms,
+        )
+
     async def screen_trigger_settings(self, session_id: str) -> tuple[float, int]:
         try:
             committed = await self.runtime_state.snapshot(session_id)
@@ -517,6 +537,8 @@ class BackendRuntime:
             ambient_enabled=self.ambient_enabled,
             screen_trigger_settings=self.screen_trigger_settings,
             transcript_publisher=self.realtime_broker,
+            ambient_interval_provider=self.ambient_interval_ms,
+            window_batch_schedule=self.window_batch_schedule,
         )
         self.session_resources.add_resource(viewer_runtime)
         self.session_resources.add_resource(coordinator)
