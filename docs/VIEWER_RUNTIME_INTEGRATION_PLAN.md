@@ -297,12 +297,12 @@ highlight_response_range = old_burst_limit
 
 | 模式 | Viewer 数 |
 | --- | ---: |
-| 热闹游戏房 | 24 |
-| 6657 玩机器风格 | 28 |
-| 新人友好 | 16 |
-| 温和陪伴 | 14 |
-| 竞技嘴硬局 | 24 |
-| 纯乐子冷场包 | 14 |
+| CSGO：热闹游戏房 | 24 |
+| CSGO：6657 玩机器风格 | 28 |
+| CSGO：新人友好 | 16 |
+| CSGO：温和陪伴 | 14 |
+| CSGO：竞技嘴硬局 | 24 |
+| CSGO：纯乐子冷场包 | 14 |
 
 迁移后，旧 workspace 的 `targetConcurrentViewers`、`personaIds` 和 `personaWeights` 使用既有最大余数法一次性换算为 `personaCounts`；保存后的 v4 workspace 只保留精确人数。总人数不再自动跟随 response range。
 

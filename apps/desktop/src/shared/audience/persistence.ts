@@ -16,6 +16,14 @@ const MAX_FRAME_WINDOW_MS = 30_000
 const BUILT_IN_MODE_MIGRATIONS = new Map([
   ['room-6657', { fromRevision: 1, toRevision: 2 }]
 ])
+const BUILT_IN_MODE_LEGACY_NAMES = new Map([
+  ['lively-game-room', '热闹游戏房'],
+  ['room-6657', '6657 玩机器风格'],
+  ['newcomer-friendly', '新人友好'],
+  ['gentle-company', '温和陪伴'],
+  ['competitive-banter', '竞技嘴硬局'],
+  ['just-for-laughs', '纯乐子冷场包']
+])
 
 export type AudienceWorkspaceParseResult =
   | {
@@ -264,20 +272,30 @@ function parseMode(
 
 function upgradeBuiltInModes(modes: readonly AudienceMode[]): AudienceMode[] {
   const currentBuiltIns = new Map(BUILT_IN_MODES.map((mode) => [mode.id, mode]))
-  return modes.map((mode) => {
+  const upgraded = modes.map((mode) => {
     const current = currentBuiltIns.get(mode.id)
     const migration = BUILT_IN_MODE_MIGRATIONS.get(mode.id)
     if (
-      !mode.builtIn ||
-      !current ||
-      !migration ||
-      mode.revision !== migration.fromRevision ||
-      current.revision !== migration.toRevision
+      mode.builtIn &&
+      current &&
+      migration &&
+      mode.revision === migration.fromRevision &&
+      current.revision === migration.toRevision
     ) {
-      return mode
+      return cloneAudienceMode(current)
     }
-    return cloneAudienceMode(current)
+    const legacyName = BUILT_IN_MODE_LEGACY_NAMES.get(mode.id)
+    return mode.builtIn && current && mode.name === legacyName
+      ? { ...mode, name: current.name }
+      : mode
   })
+  const knownModeIds = new Set(upgraded.map((mode) => mode.id))
+  return [
+    ...upgraded,
+    ...BUILT_IN_MODES
+      .filter((mode) => !knownModeIds.has(mode.id))
+      .map(cloneAudienceMode)
+  ]
 }
 
 function isLegacyVisualDefault(settings: AudienceVisualSettings): boolean {

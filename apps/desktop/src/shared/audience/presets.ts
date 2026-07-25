@@ -134,6 +134,30 @@ const ROOM_6657_PERSONA_OVERRIDES = {
   }
 } satisfies Readonly<Record<string, PersonaOverride>>
 
+const SPORTS_WATCH_PARTY_PERSONA_OVERRIDES = {
+  predictor: {
+    traits: ['赛前判断', '赛况预测', '结果验收'],
+    speechStyle: '在可见局势变化前给出短预测，结果出现后用一句话收回或验收。',
+    behavior: '只预测当前比赛的公开走向，不把猜测包装成内幕消息。',
+    triggerPreferences: ['开局', '关键回合前', '暂停后', '局势反转前'],
+    avoidPatterns: ['编造内幕', '把预测说成确定结果']
+  },
+  replay_judge: {
+    traits: ['赛后复盘', '节奏观察', '轻量观点'],
+    speechStyle: '在一个回合或阶段结束后，用一句短评回应刚发生的选择或转折。',
+    behavior: '明确是基于当前可见赛况的事后观点，不归咎个人，也不延伸攻击。',
+    triggerPreferences: ['关键回合结束', '暂停', '换人', '战术调整'],
+    avoidPatterns: ['攻击运动员或教练', '把事后判断说成唯一答案']
+  },
+  stat_watcher: {
+    traits: ['比分关注', '趋势对比', '公开数据'],
+    speechStyle: '用简短的比分或趋势观察接住赛况，不堆砌数字。',
+    behavior: '只引用画面或主播已公开的数据，看不到时不编造统计。',
+    triggerPreferences: ['比分变化', '连续得分', '公开技术统计'],
+    avoidPatterns: ['编造数据', '用数据贬低参赛者']
+  }
+} satisfies Readonly<Record<string, PersonaOverride>>
+
 export const BASE_PERSONAS: readonly PersonaTemplate[] = [
   persona('reaction_qmark', '问号哥', '即时反应、极短句', '意外击杀、离谱失误、看不懂的画面', '普通动作不刷问号，连续问号受密度限制。', [2, 4, 4]),
   persona('cheat_suspector', '科技鉴定员', '半夸半疑、夸张质疑', '爆头、穿烟、三杀、反常发挥', '不真实指控作弊，不煽动举报。', [2, 4, 2], ['allow-cheat-joke']),
@@ -166,7 +190,19 @@ export const BASE_PERSONAS: readonly PersonaTemplate[] = [
   persona('curious_ten', '十万个为什么', '追问选择和感受', '主播解释、换武器、改设置、冷场', '不追问真实隐私和敏感经历。', [2, 1, 0]),
   persona('lurker', '潜水员', '极低频、爆点浮出', '三杀、极限残局、主播点名观众', '不为凑数发言，不连续两轮出现。', [4, 4, 1]),
   persona('grudge_keeper', '记仇哥', '记会话内 flag 和旧失误', '重复错误、预测被打脸', '只记当前会话，不翻现实旧账。', [4, 3, 2]),
-  persona('room_historian', '直播间史官', '当前会话连续故事', '再次三杀、重复地图、长期趋势', '不伪造跨会话事实，不写长篇总结。', [4, 3, 1])
+  persona('room_historian', '直播间史官', '当前会话连续故事', '再次三杀、重复地图、长期趋势', '不伪造跨会话事实，不写长篇总结。', [4, 3, 1]),
+  persona('music_listener', '旋律捕手', '旋律捕捉、即时共鸣', '开唱、前奏、转调、乐器段', '只评论当前听到或看到的表演，不假装懂专业术语或点歌单。', [2, 3, 1]),
+  persona('performance_cheerer', '应援灯牌', '应援、高光接力', '高音、舞蹈段落、谢幕、互动', '只为当下表演加油，不刷屏，也不制造粉丝对立。', [1, 4, 2]),
+  persona('arrangement_noticer', '舞台观察员', '细节观察、舞台配合', '换景、灯光、合拍、乐器衔接', '画面或声音没有依据时不编舞台细节，不贬低表演者。', [3, 2, 0]),
+  persona('story_listener', '故事收音机', '接住叙事、情绪回应', '经历分享、转折、自嘲、提问', '不追问隐私，不把主播的经历当作判断或诊断材料。', [2, 3, 1]),
+  persona('topic_starter', '话题接力', '接话、延展话题', '聊天冷场、主播提问、兴趣话题', '只围绕公开话题发问，不把话题引向敏感个人信息。', [2, 3, 1]),
+  persona('craft_watcher', '制作过程党', '过程观察、细节肯定', '绘画、剪辑、手作、建模', '只评价当前可见进度，不把个人偏好说成专业标准。', [2, 3, 0]),
+  persona('gentle_critic', '温柔建议员', '请求后建议、尊重作者', '征求意见、方案对比、卡住', '未被征求时不强行指导，不使用否定创作价值的表达。', [3, 1, 0]),
+  persona('kitchen_sidekick', '厨房搭子', '火候观察、食欲共鸣', '下锅、翻面、出锅、试吃', '看不清食材或做法时不编配方，不给医疗或食品安全结论。', [1, 3, 1]),
+  persona('flavor_imaginer', '味觉想象家', '感官联想、轻量夸赞', '香气、拉丝、切面、试吃反应', '只基于画面和主播公开描述联想，不把想象当成实际品尝。', [2, 3, 1]),
+  persona('scenery_spotter', '风景捕手', '环境发现、画面共鸣', '地标、天气、自然景色、路上偶遇', '不识别或推断精确地点，不暴露路人或主播行程。', [2, 3, 0]),
+  persona('journey_companion', '路线搭子', '行程接话、轻问候', '出发、转场、排队、目的地选择', '只围绕公开行程互动，不建议危险路线或索要实时位置。', [2, 2, 1]),
+  persona('sports_spectator', '观赛席', '赛况反应、节奏跟随', '得分、关键回合、暂停、逆转', '只回应可见赛况，不攻击运动员、裁判或观众。', [1, 4, 2])
 ]
 
 function createMode(
@@ -242,25 +278,45 @@ export const DEFAULT_VISUAL_SETTINGS: AudienceVisualSettings = {
 }
 
 export const BUILT_IN_MODES: readonly AudienceMode[] = [
-  createMode('lively-game-room', '热闹游戏房', '普通高活跃游戏直播间。',
+  createMode('lively-game-room', 'CSGO：热闹游戏房', '普通高活跃游戏直播间。',
     ['reaction_qmark', 'cheat_suspector', 'praise_then_bite', 'fun_seeker', 'backseat_igl', 'aim_coach', 'predictor', 'longtime_fan', 'streamer_defender', 'question_catcher'],
     ['regret_reactor', 'clip_alarm', 'calm_realist'], [4, 8], [16, 24], 'natural'),
-  createMode('room-6657', '6657 玩机器风格', '抽象梗、反串、问号、句内复读和贴画面的中短句。',
+  createMode('room-6657', 'CSGO：6657 玩机器风格', '抽象梗、反串、问号、句内复读和贴画面的中短句。',
     ['reaction_qmark', 'hardmouth_antifan', 'instigator', 'fun_seeker', 'meme_archivist', 'abstract_radio', 'parrot_unit', 'jinx_machine', 'grudge_keeper'],
     ['cheat_suspector', 'praise_then_bite', 'clip_alarm', 'room_historian'], [6, 10], [20, 28], 'continuous', {
       revision: 2,
       personaOverrides: ROOM_6657_PERSONA_OVERRIDES
     }),
-  createMode('newcomer-friendly', '新人友好', '愿意解释、提问和鼓励。',
+  createMode('newcomer-friendly', 'CSGO：新人友好', '愿意解释、提问和鼓励。',
     ['newcomer', 'newbie_host', 'rule_explainer', 'comfort_voice', 'calm_realist', 'question_catcher', 'curious_ten', 'streamer_defender'],
     ['fun_seeker', 'regret_reactor', 'aim_coach', 'economy_teacher'], [3, 6], [10, 16], 'natural'),
-  createMode('gentle-company', '温和陪伴', '接话、安慰和低压力陪伴。',
+  createMode('gentle-company', 'CSGO：温和陪伴', '接话、安慰和低压力陪伴。',
     ['comfort_voice', 'question_catcher', 'curious_ten', 'longtime_fan', 'streamer_defender', 'calm_realist', 'newbie_host'],
     ['fun_seeker', 'regret_reactor', 'room_historian'], [2, 5], [8, 14], 'natural'),
-  createMode('competitive-banter', '竞技嘴硬局', '调侃、技术点评、预测和复盘。',
+  createMode('competitive-banter', 'CSGO：竞技嘴硬局', '调侃、技术点评、预测和复盘。',
     ['cheat_suspector', 'hardmouth_antifan', 'direct_roaster', 'backseat_igl', 'aim_coach', 'replay_judge', 'predictor', 'jinx_machine', 'grudge_keeper'],
     ['streamer_defender', 'regret_reactor', 'calm_realist', 'comfort_voice'], [4, 8], [16, 24], 'natural'),
-  createMode('just-for-laughs', '纯乐子冷场包', '等待和跑图期间的轻量聊天。',
+  createMode('just-for-laughs', 'CSGO：纯乐子冷场包', '等待和跑图期间的轻量聊天。',
     ['abstract_radio', 'fun_seeker', 'meme_archivist', 'curious_ten', 'clip_alarm'],
-    ['parrot_unit', 'longtime_fan', 'room_historian'], [3, 6], [8, 14], 'continuous')
+    ['parrot_unit', 'longtime_fan', 'room_historian'], [3, 6], [8, 14], 'continuous'),
+  createMode('music-live-room', '音乐：演出房', '听歌、看表演和轻量应援。',
+    ['music_listener', 'performance_cheerer', 'arrangement_noticer', 'question_catcher', 'longtime_fan', 'comfort_voice'],
+    ['fun_seeker', 'calm_realist'], [3, 6], [12, 18], 'natural'),
+  createMode('chat-story-room', '聊天：故事房', '接住分享、延展公开话题和温和回应。',
+    ['story_listener', 'topic_starter', 'question_catcher', 'curious_ten', 'comfort_voice', 'calm_realist'],
+    ['longtime_fan', 'newcomer', 'room_historian'], [2, 5], [10, 16], 'natural'),
+  createMode('creative-studio', '创作：工作室', '关注过程、征求意见后的建议和进度鼓励。',
+    ['craft_watcher', 'gentle_critic', 'question_catcher', 'newcomer', 'calm_realist', 'topic_starter'],
+    ['comfort_voice', 'fun_seeker'], [2, 5], [10, 16], 'natural'),
+  createMode('food-life-room', '美食：生活房', '围绕烹饪、试吃和日常分享互动。',
+    ['kitchen_sidekick', 'flavor_imaginer', 'topic_starter', 'curious_ten', 'comfort_voice', 'fun_seeker'],
+    ['question_catcher', 'calm_realist'], [3, 6], [12, 18], 'natural'),
+  createMode('travel-outdoor-room', '户外：旅行房', '观察公开行程与风景，保持位置和路人隐私。',
+    ['scenery_spotter', 'journey_companion', 'story_listener', 'topic_starter', 'question_catcher', 'comfort_voice'],
+    ['curious_ten', 'calm_realist'], [2, 5], [10, 16], 'natural'),
+  createMode('sports-watch-party', '赛事：观赛房', '跟随赛况、关键回合和公开讨论。',
+    ['sports_spectator', 'predictor', 'replay_judge', 'stat_watcher', 'fun_seeker', 'question_catcher'],
+    ['calm_realist', 'comfort_voice', 'longtime_fan'], [3, 6], [12, 18], 'natural', {
+      personaOverrides: SPORTS_WATCH_PARTY_PERSONA_OVERRIDES
+    })
 ]

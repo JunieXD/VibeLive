@@ -20,15 +20,46 @@ import {
 } from './index'
 
 describe('audience presets and modes', () => {
-  it('keeps the restored 32 stable personas and six built-in modes', () => {
-    expect(BASE_PERSONAS).toHaveLength(32)
-    expect(new Set(BASE_PERSONAS.map((persona) => persona.id)).size).toBe(32)
+  it('preserves the original game catalog and adds cross-scene personas and modes', () => {
+    expect(BASE_PERSONAS).toHaveLength(44)
+    expect(new Set(BASE_PERSONAS.map((persona) => persona.id)).size).toBe(44)
     expect(BASE_PERSONAS.map((persona) => persona.id)).toContain('reaction_qmark')
     expect(BASE_PERSONAS.map((persona) => persona.id)).toContain('instigator')
     expect(BASE_PERSONAS.find((persona) => persona.id === 'instigator')?.name).toBe('串子哥')
-    expect(BUILT_IN_MODES).toHaveLength(6)
-    expect(BUILT_IN_MODES.map(totalViewerCount))
+    expect(BASE_PERSONAS.slice(0, 32)).toHaveLength(32)
+    expect(BASE_PERSONAS.map((persona) => persona.id)).toEqual(expect.arrayContaining([
+      'music_listener',
+      'story_listener',
+      'craft_watcher',
+      'kitchen_sidekick',
+      'scenery_spotter',
+      'sports_spectator'
+    ]))
+    expect(BUILT_IN_MODES).toHaveLength(12)
+    expect(BUILT_IN_MODES.slice(0, 6).map(totalViewerCount))
       .toEqual([24, 28, 16, 14, 24, 14])
+    expect(BUILT_IN_MODES.slice(6).map((mode) => mode.id)).toEqual([
+      'music-live-room',
+      'chat-story-room',
+      'creative-studio',
+      'food-life-room',
+      'travel-outdoor-room',
+      'sports-watch-party'
+    ])
+    expect(BUILT_IN_MODES.map((mode) => mode.name)).toEqual([
+      'CSGO：热闹游戏房',
+      'CSGO：6657 玩机器风格',
+      'CSGO：新人友好',
+      'CSGO：温和陪伴',
+      'CSGO：竞技嘴硬局',
+      'CSGO：纯乐子冷场包',
+      '音乐：演出房',
+      '聊天：故事房',
+      '创作：工作室',
+      '美食：生活房',
+      '户外：旅行房',
+      '赛事：观赛房'
+    ])
     expect(BUILT_IN_MODES.every(
       (mode) => mode.visualSettings.barrageGenerationMode === 'per_viewer'
     )).toBe(true)
@@ -111,7 +142,7 @@ describe('audience presets and modes', () => {
     }
     expect(resetBuiltInMode(changed, 'room-6657').modes.find(
       (mode) => mode.id === 'room-6657'
-    )?.name).toBe('6657 玩机器风格')
+    )?.name).toBe('CSGO：6657 玩机器风格')
   })
 })
 
@@ -218,7 +249,7 @@ describe('workspace persistence', () => {
     expect(parsed.migratedFromVersion).toBe(1)
     expect(parsed.workspace.version).toBe(4)
     expect(parsed.workspace.modeState.modes.map(totalViewerCount))
-      .toEqual([24, 28, 16, 14, 24, 14])
+      .toEqual([24, 28, 16, 14, 24, 14, 18, 16, 16, 18, 16, 18])
     expect(parsed.workspace.modeState.modes[0].visualSettings).toMatchObject({
       barrageGenerationMode: 'per_viewer',
       viewerVisualInputMode: 'direct_frames',
@@ -247,8 +278,44 @@ describe('workspace persistence', () => {
       expect(parsed.migratedFromVersion).toBe(sourceVersion)
       expect(parsed.workspace.version).toBe(4)
       expect(parsed.workspace.modeState.modes.map(totalViewerCount))
-        .toEqual([24, 28, 16, 14, 24, 14])
+        .toEqual([24, 28, 16, 14, 24, 14, 18, 16, 16, 18, 16, 18])
     }
+  })
+
+  it('adds missing built-in modes to an existing workspace without changing its modes', () => {
+    const workspace = createInitialAudienceWorkspace()
+    const previousBuiltInModeIds = BUILT_IN_MODES.slice(0, 6).map((mode) => mode.id)
+    const previousBuiltInModeNames = [
+      '热闹游戏房',
+      '6657 玩机器风格',
+      '新人友好',
+      '温和陪伴',
+      '竞技嘴硬局',
+      '纯乐子冷场包'
+    ]
+    const persistedBeforeExpansion = {
+      ...workspace,
+      personas: workspace.personas.slice(0, 32),
+      modeState: {
+        ...workspace.modeState,
+        modes: workspace.modeState.modes.slice(0, 6).map((mode, index) => ({
+          ...mode,
+          name: previousBuiltInModeNames[index]
+        }))
+      }
+    }
+
+    const parsed = parseAudienceWorkspaceState(persistedBeforeExpansion)
+
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.workspace.personas).toHaveLength(44)
+    expect(parsed.workspace.modeState.modes.slice(0, 6).map((mode) => mode.id))
+      .toEqual(previousBuiltInModeIds)
+    expect(parsed.workspace.modeState.modes.slice(0, 6).map((mode) => mode.name))
+      .toEqual(BUILT_IN_MODES.slice(0, 6).map((mode) => mode.name))
+    expect(parsed.workspace.modeState.modes.map((mode) => mode.id))
+      .toEqual(BUILT_IN_MODES.map((mode) => mode.id))
   })
 
   it('extracts v1 local memes for one-time Shared Brain migration', () => {

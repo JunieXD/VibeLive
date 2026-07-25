@@ -61,7 +61,7 @@ describe('canonical desktop runtime spec', () => {
     expect(compiled.spec.personas[0].content_hash).not.toContain('sha256:')
     expect(compiled.spec.modes.map((mode) =>
       Object.values(mode.persona_counts).reduce((total, count) => total + count, 0)
-    )).toEqual([24, 28, 16, 14, 24, 14])
+    )).toEqual([24, 28, 16, 14, 24, 14, 18, 16, 16, 18, 16, 18])
     expect(compiled.configHash).toBe(
       createHash('sha256').update(compiled.canonicalJson).digest('hex')
     )

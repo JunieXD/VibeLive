@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "basePersonaCount": 32,
+  "basePersonaCount": 44,
   "basePersonaIds": [
     "reaction_qmark",
     "cheat_suspector",
@@ -33,7 +33,19 @@
     "curious_ten",
     "lurker",
     "grudge_keeper",
-    "room_historian"
+    "room_historian",
+    "music_listener",
+    "performance_cheerer",
+    "arrangement_noticer",
+    "story_listener",
+    "topic_starter",
+    "craft_watcher",
+    "gentle_critic",
+    "kitchen_sidekick",
+    "flavor_imaginer",
+    "scenery_spotter",
+    "journey_companion",
+    "sports_spectator"
   ],
   "builtInModeIds": [
     "lively-game-room",
@@ -41,6 +53,12 @@
     "newcomer-friendly",
     "gentle-company",
     "competitive-banter",
-    "just-for-laughs"
+    "just-for-laughs",
+    "music-live-room",
+    "chat-story-room",
+    "creative-studio",
+    "food-life-room",
+    "travel-outdoor-room",
+    "sports-watch-party"
   ]
 }

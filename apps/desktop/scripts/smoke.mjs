@@ -188,17 +188,17 @@ try {
   await page.getByRole('button', { name: /观众配置/ }).click()
   await page.getByRole('heading', { name: '观众配置', exact: true }).waitFor()
   const modeValues = await dropdownValues(page, '观众模式')
-  if (modeValues.length !== 6) {
-    throw new Error('Expected six built-in audience modes.')
+  if (modeValues.length !== 12) {
+    throw new Error('Expected the complete built-in audience mode catalog.')
   }
-  if ((await page.locator('[data-audience-persona-row]').count()) !== 32) {
-    throw new Error('Expected the complete 32-persona catalog.')
+  if ((await page.locator('[data-audience-persona-row]').count()) !== 44) {
+    throw new Error('Expected the complete 44-persona catalog.')
   }
   await selectDropdown(page, '观众模式', 'room-6657')
   await page.waitForFunction(
     () =>
       document.querySelector('[data-audience-mode-copy] strong')?.textContent ===
-      '6657 玩机器风格'
+      'CSGO：6657 玩机器风格'
   )
   const modeRanges = await page.locator('[data-audience-range] input').evaluateAll((inputs) =>
     inputs.map((input) => input.value)
