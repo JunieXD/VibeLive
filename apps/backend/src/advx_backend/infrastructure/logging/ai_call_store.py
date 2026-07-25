@@ -13,9 +13,11 @@ from advx_backend.contracts.debug import (
     AiCallListItem,
     AiCallQuery,
     AiCallQueryResponse,
+    AiCallRole,
     AiCallStatus,
     AiCallTimelineEvent,
     AiCallTrace,
+    ViewerOutputDelivery,
 )
 from advx_backend.infrastructure.logging.trace_store import assert_redacted_artifact
 
@@ -67,6 +69,53 @@ class AiCallStore:
                 self._persist()
                 return
             self._append(trace)
+
+    def record_viewer_output(
+        self,
+        generation_request_id: str,
+        delivery: ViewerOutputDelivery,
+        *,
+        stage: str,
+    ) -> None:
+        """Attach output-queue progress to the Viewer call that produced it."""
+
+        with self._lock:
+            matches = [
+                trace
+                for trace in self._items.values()
+                if (
+                    trace.role is AiCallRole.VIEWER
+                    and trace.generation_request_id == generation_request_id
+                )
+            ]
+            if not matches:
+                return
+            trace = max(matches, key=lambda item: (item.updated_at_ms, item.call_id))
+            at_ms = (
+                delivery.published_at_ms
+                or delivery.scheduled_at_ms
+                or delivery.ready_at_ms
+            )
+            detail = {
+                "ready_at_ms": delivery.ready_at_ms,
+                "scheduled_at_ms": delivery.scheduled_at_ms,
+                "published_at_ms": delivery.published_at_ms,
+                "queue_delay_ms": delivery.queue_delay_ms,
+                "event_count": delivery.event_count,
+                "published_event_count": delivery.published_event_count,
+                "interruption_reason": delivery.interruption_reason,
+            }
+            updated = trace.model_copy(
+                update={
+                    "updated_at_ms": max(trace.updated_at_ms, at_ms),
+                    "viewer_output_delivery": delivery,
+                    "timeline": [
+                        *trace.timeline[-255:],
+                        AiCallTimelineEvent(stage=stage, at_ms=at_ms, detail=detail),
+                    ],
+                }
+            )
+            self.upsert(updated)
 
     def query(self, query: AiCallQuery | None = None) -> AiCallQueryResponse:
         with self._lock:

@@ -72,6 +72,18 @@ class SideEffectTrace(DebugContractModel):
     meme_candidate: MemeCandidate | None = None
 
 
+class ViewerOutputDelivery(DebugContractModel):
+    """Timing and progress for one validated Viewer output batch."""
+
+    ready_at_ms: int = Field(ge=0)
+    scheduled_at_ms: int = Field(ge=0)
+    published_at_ms: int | None = Field(default=None, ge=0)
+    queue_delay_ms: int | None = Field(default=None, ge=0)
+    event_count: int = Field(ge=1, le=32)
+    published_event_count: int = Field(default=0, ge=0, le=32)
+    interruption_reason: str | None = Field(default=None, max_length=256)
+
+
 class ViewerRequestTrace(DebugContractModel):
     trace_kind: Literal["viewer_request"] = "viewer_request"
     trace_schema_version: Literal[1] = TRACE_SCHEMA_VERSION
@@ -97,6 +109,7 @@ class ViewerRequestTrace(DebugContractModel):
     retry_count: int = Field(default=0, ge=0, le=1)
     stale_or_cancel_reason: str | None = Field(default=None, max_length=256)
     side_effects: SideEffectTrace = Field(default_factory=SideEffectTrace)
+    output_delivery: ViewerOutputDelivery | None = None
 
     @field_validator("memory", mode="before")
     @classmethod
@@ -234,6 +247,7 @@ class AiCallTrace(DebugContractModel):
     )
     viewer_instance_id: str | None = Field(default=None, min_length=1, max_length=128)
     trigger_context: ViewerRequestTriggerContext | None = None
+    viewer_output_delivery: ViewerOutputDelivery | None = None
     utterance_id: str | None = Field(default=None, min_length=1, max_length=128)
     started_at_ms: int = Field(ge=0)
     updated_at_ms: int = Field(ge=0)

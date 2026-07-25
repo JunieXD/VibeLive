@@ -19,7 +19,11 @@ from advx_backend.application.viewer_trace import (
     build_observation_wave_trace,
     build_viewer_request_trace,
 )
-from advx_backend.contracts.debug import ObservationWaveStatus, TraceResponseStatus
+from advx_backend.contracts.debug import (
+    ObservationWaveStatus,
+    TraceResponseStatus,
+    ViewerOutputDelivery,
+)
 from advx_backend.contracts.viewer_runtime import (
     MAX_VIEWER_BARRAGE_TEXT_LENGTH,
     ViewerAction,
@@ -130,6 +134,7 @@ class _WorkItem:
     replacement: "_WorkItem | None" = None
     superseded_reason: str | None = None
     provider_task: asyncio.Task[object] | None = None
+    output_scheduled: bool = False
     ready: asyncio.Event = field(default_factory=asyncio.Event)
 
 
@@ -154,6 +159,7 @@ class _WindowBatchWork:
     ready: asyncio.Event = field(default_factory=asyncio.Event)
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
     finished: bool = False
+    output_delivery_detached: bool = False
 
 
 @dataclass(slots=True)
@@ -170,6 +176,29 @@ class _RuntimeLane:
     active: int = 0
     queued: int = 0
     eligible: deque[_WorkItem | _WindowBatchWork] = field(default_factory=deque)
+
+
+@dataclass(slots=True)
+class _OutputBatch:
+    item: _WorkItem
+    events: tuple[ViewerBarrageEvent, ...]
+    ready_at_ms: int
+    scheduled_at_ms: int
+    published_events: list[ViewerBarrageEvent] = field(default_factory=list)
+    published_at_ms: int | None = None
+    realtime_delivery_failed: bool = False
+    interruption_reason: str | None = None
+    finished: bool = False
+
+
+@dataclass(slots=True)
+class _OutputPaceState:
+    session_id: str
+    queue: deque[_OutputBatch] = field(default_factory=deque)
+    worker: asyncio.Task[None] | None = None
+    active: _OutputBatch | None = None
+    next_release_at_ms: int | None = None
+    stopped: bool = False
 
 
 @dataclass(slots=True)
@@ -242,6 +271,7 @@ class ViewerRuntime:
         self._lanes: dict[tuple[object, ...], _RuntimeLane] = {}
         self._mailboxes: dict[str, _ViewerMailbox] = {}
         self._window_batches: dict[int, _WindowBatchWork] = {}
+        self._output_states: dict[str, _OutputPaceState] = {}
         self._sequences: dict[str, int] = {}
         self._sequence_epochs: dict[str, int] = {}
         self._lock = asyncio.Lock()
@@ -269,6 +299,19 @@ class ViewerRuntime:
                 for mailbox in self._mailboxes.values()
                 if mailbox.task is not None
             ]
+            output_state = self._output_states.pop(session_id, None)
+            if output_state is not None:
+                output_state.stopped = True
+                for batch in tuple(output_state.queue):
+                    output_state.queue.remove(batch)
+                    self._cancel_queued_output_locked(
+                        batch,
+                        reason="session_stopped",
+                    )
+                if output_state.active is not None:
+                    output_state.active.interruption_reason = "session_stopped"
+                if output_state.worker is not None:
+                    tasks.append(output_state.worker)
             for work in self._window_batches.values():
                 work.superseded_reason = "session_stopped"
                 work.cancelled.set()
@@ -294,16 +337,18 @@ class ViewerRuntime:
                 }.values()
             )
             for item in pending:
-                self._record_trace(
-                    item,
-                    status=TraceResponseStatus.CANCELLED,
-                    accepted=False,
-                    reason="session_stopped",
-                    validation_codes=("cancelled",),
-                )
-                self._resolve(item, "cancelled")
+                if not item.output_scheduled:
+                    self._record_trace(
+                        item,
+                        status=TraceResponseStatus.CANCELLED,
+                        accepted=False,
+                        reason="session_stopped",
+                        validation_codes=("cancelled",),
+                    )
+                    self._resolve(item, "cancelled")
             self._mailboxes.clear()
             self._window_batches.clear()
+            self._output_states.clear()
             self._lanes.clear()
             self._sequences.clear()
             self._sequence_epochs.clear()
@@ -323,26 +368,42 @@ class ViewerRuntime:
 
         async with self._lock:
             mailbox = self._mailboxes.pop(viewer_instance_id, None)
-            if mailbox is None:
-                return
-            items = tuple(
-                {
-                    id(item): item
-                    for item in (mailbox.current, mailbox.pending)
-                    if item is not None
-                }.values()
+            items = (
+                ()
+                if mailbox is None
+                else tuple(
+                    {
+                        id(item): item
+                        for item in (mailbox.current, mailbox.pending)
+                        if item is not None
+                    }.values()
+                )
             )
             for item in items:
-                self._record_trace(
-                    item,
-                    status=TraceResponseStatus.CANCELLED,
-                    accepted=False,
-                    reason=reason,
-                    validation_codes=("cancelled",),
-                )
+                if not item.output_scheduled:
+                    self._record_trace(
+                        item,
+                        status=TraceResponseStatus.CANCELLED,
+                        accepted=False,
+                        reason=reason,
+                        validation_codes=("cancelled",),
+                    )
                 self._discard_item_locked(item)
-                self._resolve(item, "cancelled")
-            task = mailbox.task
+                if not item.output_scheduled:
+                    self._resolve(item, "cancelled")
+            for output_state in self._output_states.values():
+                for batch in tuple(output_state.queue):
+                    if batch.item.request.viewer_instance_id != viewer_instance_id:
+                        continue
+                    output_state.queue.remove(batch)
+                    self._cancel_queued_output_locked(batch, reason=reason)
+                if (
+                    output_state.active is not None
+                    and output_state.active.item.request.viewer_instance_id
+                    == viewer_instance_id
+                ):
+                    output_state.active.interruption_reason = reason
+            task = None if mailbox is None else mailbox.task
         if task is not None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -391,7 +452,7 @@ class ViewerRuntime:
             futures.append(future)
         if not futures:
             return ViewerDispatchSummary(selected=selected, stale=unmatched_stale)
-        results = await asyncio.gather(*futures)
+        results = await asyncio.shield(asyncio.gather(*futures))
         return ViewerDispatchSummary.combine(
             results,
             selected=selected,
@@ -447,6 +508,8 @@ class ViewerRuntime:
                 runtime=runtime,
             )
         except asyncio.CancelledError:
+            if work.output_delivery_detached:
+                raise
             async with self._lock:
                 work.superseded_reason = (
                     work.superseded_reason or "superseded_by_scheduler"
@@ -680,6 +743,7 @@ class ViewerRuntime:
             candidates[candidate.viewer_instance_id] = (item, candidate)
 
         outcomes: list[_DispatchResult] = []
+        scheduled_items: list[_WorkItem] = []
         for item in claimed:
             item.completed_at_ms = self._clock.now_ms()
             candidate_entry = candidates.get(item.request.viewer_instance_id)
@@ -698,6 +762,9 @@ class ViewerRuntime:
             else:
                 _, candidate = candidate_entry
                 outcome = await self._accept_window_batch_candidate(item, candidate)
+            if outcome == "scheduled":
+                scheduled_items.append(item)
+                continue
             outcomes.append(
                 _DispatchResult(
                     outcome=outcome,
@@ -707,6 +774,22 @@ class ViewerRuntime:
                     retry=item.retry_count,
                 )
             )
+        if scheduled_items:
+            work.output_delivery_detached = True
+            await self._finish_window_batch(work)
+            completed = await asyncio.shield(
+                asyncio.gather(*(item.future for item in scheduled_items))
+            )
+            for item, result in zip(scheduled_items, completed, strict=True):
+                outcomes.append(
+                    _DispatchResult(
+                        outcome=result.outcome,
+                        queued=int(work.was_queued),
+                        dispatched=1,
+                        completed=1,
+                        retry=item.retry_count,
+                    )
+                )
         return ViewerDispatchSummary.combine(
             outcomes,
             selected=selected,
@@ -1032,7 +1115,10 @@ class ViewerRuntime:
                 accepted=True,
             )
             return "silenced"
-        return await self._publish_barrage_batch(item, validation.events)
+        fenced = await self._final_fence_outcome(item)
+        if fenced is not None:
+            return fenced
+        return await self._schedule_output_batch(item, validation.events)
 
     def record_observation_trace(
         self,
@@ -1270,6 +1356,7 @@ class ViewerRuntime:
                     and active.request.audience_epoch == wave.audience_epoch
                     and active.priority <= priority
                     and active.wave_generation != generation
+                    and not active.output_scheduled
                 ):
                     active.superseded_reason = self._supersede_reason(
                         priority,
@@ -1297,7 +1384,8 @@ class ViewerRuntime:
                     if work.provider_dispatched_at_ms is not None:
                         # Let the batch provider call finish, but fence every stale candidate.
                         for item in work.items:
-                            item.superseded_reason = reason
+                            if not item.output_scheduled:
+                                item.superseded_reason = reason
                         continue
                     work.superseded_reason = reason
                     work.cancelled.set()
@@ -1354,7 +1442,8 @@ class ViewerRuntime:
                         validation_codes=("viewer_mailbox_failed",),
                     )
                     outcome = "failed"
-                self._resolve(current, outcome)
+                if outcome != "scheduled":
+                    self._resolve(current, outcome)
                 async with self._lock:
                     self._release_slot_locked(current)
                     mailbox = self._mailboxes.get(viewer_id)
@@ -1372,7 +1461,7 @@ class ViewerRuntime:
                             current.lane.eligible.append(current)
                             self._promote_locked(current.lane)
         except asyncio.CancelledError:
-            if current is not None:
+            if current is not None and not current.output_scheduled:
                 self._record_trace(
                     current,
                     status=TraceResponseStatus.CANCELLED,
@@ -1389,13 +1478,14 @@ class ViewerRuntime:
                     if mailbox.pending is not None:
                         pending = mailbox.pending
                         mailbox.pending = None
-                        self._record_trace(
-                            pending,
-                            status=TraceResponseStatus.CANCELLED,
-                            accepted=False,
-                            reason="session_stopped",
-                            validation_codes=("cancelled",),
-                        )
+                        if not pending.output_scheduled:
+                            self._record_trace(
+                                pending,
+                                status=TraceResponseStatus.CANCELLED,
+                                accepted=False,
+                                reason="session_stopped",
+                                validation_codes=("cancelled",),
+                            )
                         self._discard_item_locked(pending)
                         self._resolve(pending, "cancelled")
             raise
@@ -1514,96 +1604,216 @@ class ViewerRuntime:
                 accepted=True,
             )
             return "silenced"
-        return await self._publish_barrage_batch(item, validation.events)
+        fenced = await self._final_fence_outcome(item)
+        if fenced is not None:
+            return fenced
+        return await self._schedule_output_batch(item, validation.events)
 
-    async def _publish_barrage_batch(
+    async def _schedule_output_batch(
         self,
         item: _WorkItem,
         events: tuple[ViewerBarrageEvent, ...],
     ) -> str:
-        published_events: list[ViewerBarrageEvent] = []
-        delivery_failed = False
-        interruption: str | None = None
-
-        for index, event in enumerate(events):
-            if index == 0:
-                fenced = await self._final_fence_outcome(item)
-                if fenced is not None:
-                    return fenced
-            else:
-                try:
-                    await self._sleep(_BARRAGE_BATCH_INTERVAL_SECONDS)
-                except asyncio.CancelledError:
-                    if published_events:
-                        await self._commit_published_behavior(item, tuple(published_events))
-                    raise
-                if not await self._can_publish_next_batch_event(item):
-                    interruption = (
-                        "batch_delivery_expired"
-                        if self._expired(item.request)
-                        else "batch_delivery_stale"
-                    )
-                    break
-
-            published_event = event.model_copy(
-                update={"created_at_ms": self._clock.now_ms()}
+        ready_at_ms = item.completed_at_ms or self._clock.now_ms()
+        batch = _OutputBatch(
+            item=item,
+            events=events,
+            ready_at_ms=ready_at_ms,
+            scheduled_at_ms=self._clock.now_ms(),
+        )
+        async with self._lock:
+            if not self._output_item_is_current_locked(item):
+                batch.interruption_reason = "output_fence_rejected"
+                self._cancel_queued_output_locked(
+                    batch,
+                    reason=batch.interruption_reason,
+                )
+                return "cancelled"
+            state = self._output_states.setdefault(
+                item.request.session_id,
+                _OutputPaceState(session_id=item.request.session_id),
             )
-            outcome, event_delivery_failed = await self._commit_published_event(
-                item,
+            if state.stopped:
+                self._cancel_queued_output_locked(batch, reason="session_stopped")
+                return "cancelled"
+            item.output_scheduled = True
+            state.queue.append(batch)
+            if state.worker is None or state.worker.done():
+                state.worker = asyncio.create_task(
+                    self._run_output_worker(state),
+                    name=f"viewer-output:{item.request.session_id}",
+                )
+            self._record_output_delivery(batch, stage="output_scheduled")
+        return "scheduled"
+
+    async def _run_output_worker(self, state: _OutputPaceState) -> None:
+        worker = asyncio.current_task()
+        try:
+            while True:
+                async with self._lock:
+                    if state.stopped:
+                        return
+                    if not state.queue:
+                        if state.worker is worker:
+                            state.worker = None
+                        return
+                    batch = state.queue.popleft()
+                    state.active = batch
+                try:
+                    outcome = await self._deliver_output_batch(state, batch)
+                except asyncio.CancelledError:
+                    batch.interruption_reason = (
+                        batch.interruption_reason or "output_worker_cancelled"
+                    )
+                    await self._finish_output_batch(batch, outcome="cancelled")
+                    raise
+                except Exception:
+                    logger.exception(
+                        "Viewer output worker failed",
+                        extra={
+                            "session_id": batch.item.request.session_id,
+                            "generation_request_id": (
+                                batch.item.request.generation_request_id
+                            ),
+                        },
+                    )
+                    batch.interruption_reason = "output_worker_failed"
+                    await self._finish_output_batch(batch, outcome="failed")
+                else:
+                    await self._finish_output_batch(batch, outcome=outcome)
+                finally:
+                    async with self._lock:
+                        if state.active is batch:
+                            state.active = None
+        finally:
+            async with self._lock:
+                if state.worker is worker:
+                    state.worker = None
+
+    async def _deliver_output_batch(
+        self,
+        state: _OutputPaceState,
+        batch: _OutputBatch,
+    ) -> str:
+        for event in batch.events:
+            if not await self._wait_for_output_turn(state, batch):
+                return "cancelled"
+            published_event = event.model_copy(
+                update={
+                    "created_at_ms": self._clock.now_ms(),
+                    "expires_at_ms": UNBOUNDED_DEADLINE_AT_MS,
+                }
+            )
+            outcome, delivery_failed = await self._commit_output_event(
+                state,
+                batch,
                 published_event,
             )
             if outcome != "published":
-                if not published_events:
-                    if outcome == "stale":
-                        return self._finalize_after_provider(item, phase="publish_commit")
-                    self._record_trace(
-                        item,
-                        status=TraceResponseStatus.FAILED,
-                        accepted=False,
-                        reason="publish_side_effect_failed",
-                        validation_codes=("publish_side_effect_failed",),
+                batch.interruption_reason = (
+                    batch.interruption_reason
+                    or (
+                        "publish_side_effect_failed"
+                        if outcome == "failed"
+                        else "session_fence_rejected"
                     )
-                    return "failed"
-                interruption = f"batch_publish_{outcome}"
-                break
-            published_events.append(published_event)
-            delivery_failed = delivery_failed or event_delivery_failed
-
-        if not published_events:
-            return "silenced"
-
-        await self._commit_published_behavior(item, tuple(published_events))
-        if delivery_failed:
-            logger.warning(
-                "durable Viewer barrage could not be delivered in realtime",
-                extra={
-                    "session_id": item.request.session_id,
-                    "generation_request_id": item.request.generation_request_id,
-                },
+                )
+                return "failed" if outcome == "failed" else "cancelled"
+            if batch.published_at_ms is None:
+                batch.published_at_ms = published_event.created_at_ms
+            batch.published_events.append(published_event)
+            batch.realtime_delivery_failed = (
+                batch.realtime_delivery_failed or delivery_failed
             )
-        validation_codes = []
-        if interruption is not None:
-            validation_codes.append(interruption)
-        if delivery_failed:
-            validation_codes.append("realtime_delivery_failed")
-        self._record_trace(
-            item,
-            status=TraceResponseStatus.PUBLISHED,
-            accepted=True,
-            reason=interruption,
-            validation_codes=tuple(validation_codes),
-            published_barrage_ids=tuple(
-                barrage_id
-                for event in published_events
-                if isinstance((barrage_id := getattr(event, "barrage_id", None)), str)
-            ),
-        )
+            async with self._lock:
+                state.next_release_at_ms = (
+                    self._clock.now_ms()
+                    + int(_BARRAGE_BATCH_INTERVAL_SECONDS * 1_000)
+                )
+            self._record_output_delivery(batch, stage="output_published")
         return "published"
 
-    async def _can_publish_next_batch_event(self, item: _WorkItem) -> bool:
-        request = item.request
-        if self._expired(request) or not self._is_current(item):
-            return False
+    async def _wait_for_output_turn(
+        self,
+        state: _OutputPaceState,
+        batch: _OutputBatch,
+    ) -> bool:
+        async with self._lock:
+            if not self._output_batch_is_current_locked(state, batch):
+                return False
+            next_release_at_ms = state.next_release_at_ms
+            delay_ms = (
+                0
+                if next_release_at_ms is None
+                else max(0, next_release_at_ms - self._clock.now_ms())
+            )
+        if delay_ms:
+            await self._sleep(delay_ms / 1_000)
+        async with self._lock:
+            return self._output_batch_is_current_locked(state, batch)
+
+    async def _commit_output_event(
+        self,
+        state: _OutputPaceState,
+        batch: _OutputBatch,
+        event: ViewerBarrageEvent,
+    ) -> tuple[str, bool]:
+        if not await self._output_fence_accepts(state, batch):
+            return "cancelled", False
+
+        async def commit_once() -> str:
+            async with self._lock:
+                if not self._output_batch_is_current_locked(state, batch):
+                    return "cancelled"
+                try:
+                    await self._room_service.append_published_barrage(event)
+                except Exception:
+                    return "failed"
+                return "published"
+
+        async def commit_with_fence() -> str:
+            execute = getattr(self._session_fence, "execute_if_accepting", None)
+            if not callable(execute):
+                return await commit_once()
+            accepted, result = await execute(
+                room_id=batch.item.request.room_id,
+                session_id=batch.item.request.session_id,
+                audience_epoch=batch.item.request.audience_epoch,
+                viewer_instance_id=batch.item.request.viewer_instance_id,
+                viewer_sequence=batch.item.request.viewer_sequence,
+                presence_revision=batch.item.request.presence_revision,
+                moderation_revision=batch.item.request.moderation_revision,
+                behavior_revision=None,
+                operation=commit_once,
+            )
+            if not accepted or result is None:
+                return "cancelled"
+            return result
+
+        commit = asyncio.create_task(
+            commit_with_fence(),
+            name=f"viewer-effect:{batch.item.request.generation_request_id}",
+        )
+        try:
+            outcome = await asyncio.shield(commit)
+        except asyncio.CancelledError:
+            outcome = await commit
+        if outcome != "published":
+            return outcome, False
+        async with self._lock:
+            if not self._output_batch_is_current_locked(state, batch):
+                return "published", True
+        return "published", await self._deliver_realtime(batch.item, event)
+
+    async def _output_fence_accepts(
+        self,
+        state: _OutputPaceState,
+        batch: _OutputBatch,
+    ) -> bool:
+        async with self._lock:
+            if not self._output_batch_is_current_locked(state, batch):
+                return False
+        request = batch.item.request
         accepted = await self._session_fence.accepts(
             room_id=request.room_id,
             session_id=request.session_id,
@@ -1613,9 +1823,165 @@ class ViewerRuntime:
             presence_revision=request.presence_revision,
             moderation_revision=request.moderation_revision,
             behavior_revision=None,
-            deadline_at_ms=request.deadline_at_ms,
+            deadline_at_ms=UNBOUNDED_DEADLINE_AT_MS,
         )
-        return accepted and not self._expired(request) and self._is_current(item)
+        async with self._lock:
+            if not accepted and batch.interruption_reason is None:
+                batch.interruption_reason = "session_fence_rejected"
+            return accepted and self._output_batch_is_current_locked(state, batch)
+
+    async def _finish_output_batch(
+        self,
+        batch: _OutputBatch,
+        *,
+        outcome: str,
+    ) -> None:
+        if batch.finished:
+            return
+        published_events = tuple(batch.published_events)
+        if published_events:
+            if batch.interruption_reason != "session_stopped":
+                await self._commit_published_behavior(batch.item, published_events)
+            if batch.realtime_delivery_failed:
+                logger.warning(
+                    "durable Viewer barrage could not be delivered in realtime",
+                    extra={
+                        "session_id": batch.item.request.session_id,
+                        "generation_request_id": (
+                            batch.item.request.generation_request_id
+                        ),
+                    },
+                )
+            validation_codes = []
+            if batch.interruption_reason is not None:
+                validation_codes.append(batch.interruption_reason)
+            if batch.realtime_delivery_failed:
+                validation_codes.append("realtime_delivery_failed")
+            self._record_trace(
+                batch.item,
+                status=TraceResponseStatus.PUBLISHED,
+                accepted=True,
+                reason=batch.interruption_reason,
+                validation_codes=tuple(validation_codes),
+                published_barrage_ids=self._published_barrage_ids(published_events),
+                output_delivery=self._output_delivery(batch),
+            )
+            if batch.interruption_reason is not None:
+                self._record_output_delivery(batch, stage="output_interrupted")
+            self._resolve(batch.item, "published")
+        elif outcome == "failed":
+            self._record_trace(
+                batch.item,
+                status=TraceResponseStatus.FAILED,
+                accepted=False,
+                reason=batch.interruption_reason or "publish_side_effect_failed",
+                validation_codes=("publish_side_effect_failed",),
+                output_delivery=self._output_delivery(batch),
+            )
+            self._record_output_delivery(batch, stage="output_failed")
+            self._resolve(batch.item, "failed")
+        else:
+            self._record_trace(
+                batch.item,
+                status=TraceResponseStatus.CANCELLED,
+                accepted=False,
+                reason=batch.interruption_reason or "output_cancelled",
+                validation_codes=("cancelled",),
+                output_delivery=self._output_delivery(batch),
+            )
+            self._record_output_delivery(batch, stage="output_cancelled")
+            self._resolve(batch.item, "cancelled")
+        batch.finished = True
+
+    def _cancel_queued_output_locked(
+        self,
+        batch: _OutputBatch,
+        *,
+        reason: str,
+    ) -> None:
+        if batch.finished:
+            return
+        batch.interruption_reason = reason
+        batch.finished = True
+        self._record_trace(
+            batch.item,
+            status=TraceResponseStatus.CANCELLED,
+            accepted=False,
+            reason=reason,
+            validation_codes=("cancelled",),
+            output_delivery=self._output_delivery(batch),
+        )
+        self._record_output_delivery(batch, stage="output_cancelled")
+        self._resolve(batch.item, "cancelled")
+
+    def _output_batch_is_current_locked(
+        self,
+        state: _OutputPaceState,
+        batch: _OutputBatch,
+    ) -> bool:
+        return (
+            self._output_states.get(state.session_id) is state
+            and not state.stopped
+            and state.active is batch
+            and not batch.finished
+            and batch.interruption_reason is None
+            and self._output_item_is_current_locked(batch.item)
+        )
+
+    def _output_item_is_current_locked(self, item: _WorkItem) -> bool:
+        return (
+            item.generation == self._generation
+            and self._active_session_id == item.request.session_id
+            and item.superseded_reason is None
+            and item.viewer.lifecycle_state is ViewerLifecycleState.ACTIVE
+            and item.viewer.room_id == item.request.room_id
+            and item.viewer.session_id == item.request.session_id
+            and item.viewer.audience_epoch == item.request.audience_epoch
+        )
+
+    def _output_delivery(self, batch: _OutputBatch) -> ViewerOutputDelivery:
+        published_at_ms = batch.published_at_ms
+        return ViewerOutputDelivery(
+            ready_at_ms=batch.ready_at_ms,
+            scheduled_at_ms=batch.scheduled_at_ms,
+            published_at_ms=published_at_ms,
+            queue_delay_ms=(
+                None
+                if published_at_ms is None
+                else max(0, published_at_ms - batch.scheduled_at_ms)
+            ),
+            event_count=len(batch.events),
+            published_event_count=len(batch.published_events),
+            interruption_reason=batch.interruption_reason,
+        )
+
+    @staticmethod
+    def _published_barrage_ids(
+        events: tuple[ViewerBarrageEvent, ...],
+    ) -> tuple[str, ...]:
+        return tuple(event.barrage_id for event in events)
+
+    def _record_output_delivery(
+        self,
+        batch: _OutputBatch,
+        *,
+        stage: str,
+    ) -> None:
+        recorder = self._trace_recorder
+        record = getattr(recorder, "record_viewer_output", None)
+        if not callable(record):
+            return
+        try:
+            record(
+                batch.item.request.generation_request_id,
+                self._output_delivery(batch),
+                stage=stage,
+            )
+        except Exception as error:
+            logger.warning(
+                "viewer output delivery recording failed",
+                extra={"error_type": type(error).__name__},
+            )
 
     async def _record_behavior_published(
         self,
@@ -1680,53 +2046,6 @@ class ViewerRuntime:
             await asyncio.shield(behavior)
         except asyncio.CancelledError:
             await behavior
-
-    async def _commit_published_event(
-        self,
-        item: _WorkItem,
-        event: object,
-    ) -> tuple[str, bool]:
-        async def commit_once() -> str:
-            async with self._lock:
-                if self._expired(item.request) or not self._is_current(item):
-                    return "stale"
-                try:
-                    await self._room_service.append_published_barrage(event)
-                except Exception:
-                    return "failed"
-                return "published"
-
-        async def commit_with_fence() -> str:
-            execute = getattr(self._session_fence, "execute_if_accepting", None)
-            if not callable(execute):
-                return await commit_once()
-            accepted, result = await execute(
-                room_id=item.request.room_id,
-                session_id=item.request.session_id,
-                audience_epoch=item.request.audience_epoch,
-                viewer_instance_id=item.request.viewer_instance_id,
-                viewer_sequence=item.request.viewer_sequence,
-                presence_revision=item.request.presence_revision,
-                moderation_revision=item.request.moderation_revision,
-                behavior_revision=None,
-                operation=commit_once,
-            )
-            if not accepted or result is None:
-                return "stale"
-            return result
-
-        # The session fence is task-owned, so the durable write runs in its own task.
-        commit = asyncio.create_task(
-            commit_with_fence(),
-            name=f"viewer-effect:{item.request.generation_request_id}",
-        )
-        try:
-            outcome = await asyncio.shield(commit)
-        except asyncio.CancelledError:
-            outcome = await commit
-        if outcome != "published":
-            return outcome, False
-        return "published", await self._deliver_realtime(item, event)
 
     async def _commit_silence(self, item: _WorkItem) -> bool:
         async def commit_once() -> bool:
@@ -2003,6 +2322,7 @@ class ViewerRuntime:
         validation_codes: tuple[str, ...] = (),
         published_barrage_id: str | None = None,
         published_barrage_ids: tuple[str, ...] = (),
+        output_delivery: ViewerOutputDelivery | None = None,
     ) -> None:
         if item.traced:
             return
@@ -2028,6 +2348,7 @@ class ViewerRuntime:
                     stale_or_cancel_reason=reason,
                     published_barrage_id=published_barrage_id,
                     published_barrage_ids=published_barrage_ids,
+                    output_delivery=output_delivery,
                 )
             )
         except Exception as error:

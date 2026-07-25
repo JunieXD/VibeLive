@@ -12,6 +12,7 @@ from advx_backend.contracts.debug import (
     SideEffectTrace,
     TraceResponseStatus,
     ValidationTrace,
+    ViewerOutputDelivery,
     ViewerRequestTrace,
 )
 from advx_backend.contracts.viewer_runtime import ViewerGenerationRequest
@@ -42,6 +43,7 @@ def build_viewer_request_trace(
     stale_or_cancel_reason: str | None = None,
     published_barrage_id: str | None = None,
     published_barrage_ids: Sequence[str] = (),
+    output_delivery: ViewerOutputDelivery | None = None,
 ) -> ViewerRequestTrace:
     spec = getattr(runtime, "canonical_runtime_spec", runtime)
     config_hash = _config_hash(spec)
@@ -100,6 +102,7 @@ def build_viewer_request_trace(
             published_barrage_id=(published_ids[0] if published_ids else None),
             published_barrage_ids=published_ids,
         ),
+        output_delivery=output_delivery,
     )
 
 

@@ -18,6 +18,7 @@ from advx_backend.contracts.debug import (
     RuntimeAgentDebugSnapshot,
     TraceQuery,
     TraceQueryResponse,
+    ViewerOutputDelivery,
 )
 from advx_backend.contracts.protocol import TRACE_SCHEMA_VERSION
 from advx_backend.contracts.viewer_runtime import ViewerRuntimeTelemetry
@@ -71,6 +72,19 @@ class DebugService:
 
     def record_ai_call(self, trace: AiCallTrace) -> None:
         self._ai_call_store.upsert(trace)
+
+    def record_viewer_output(
+        self,
+        generation_request_id: str,
+        delivery: ViewerOutputDelivery,
+        *,
+        stage: str,
+    ) -> None:
+        self._ai_call_store.record_viewer_output(
+            generation_request_id,
+            delivery,
+            stage=stage,
+        )
 
     def query_ai_calls(
         self,

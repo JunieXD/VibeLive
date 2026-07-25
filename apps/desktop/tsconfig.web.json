@@ -12,7 +12,7 @@
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["vite/client"]
+    "types": ["vite/client", "node"]
   },
   "include": ["src/renderers/**/*.ts", "src/renderers/**/*.tsx"]
 }

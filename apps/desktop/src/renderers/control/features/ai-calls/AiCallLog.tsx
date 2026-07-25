@@ -31,6 +31,7 @@ import {
   formatJson,
   formatScreenChangeScore,
   formatTimestamp,
+  formatViewerOutputProgress,
   formatViewerSelectionReasons,
   formatViewerTriggerLabels,
   formatViewerTriggerReasons,
@@ -165,9 +166,9 @@ function ViewerTriggerContext({ trace }: { trace: AiCallTrace }): React.JSX.Elem
 
   const triggerReasons = formatViewerTriggerReasons(context)
   const selectionReasons = formatViewerSelectionReasons(context)
-  const hasScreenChangeScore = context.screen_change_score !== null && context.screen_change_score !== undefined
   const triggerEventIds = context.trigger_event_ids ?? []
   const triggerFrameIds = context.trigger_frame_ids ?? []
+  const hasScreenChangeScore = context.screen_change_score !== null && context.screen_change_score !== undefined
   const references = [
     { label: '触发事件', ids: triggerEventIds },
     { label: '触发画面', ids: triggerFrameIds }
@@ -215,6 +216,30 @@ function ViewerTriggerContext({ trace }: { trace: AiCallTrace }): React.JSX.Elem
           ))}
         </dl>
       )}
+    </section>
+  )
+}
+
+function ViewerOutputDelivery({ trace }: { trace: AiCallTrace }): React.JSX.Element | null {
+  if (trace.role !== 'viewer' || !trace.viewer_output_delivery) return null
+  const delivery = trace.viewer_output_delivery
+
+  return (
+    <section className="border-b border-[var(--border)]">
+      <h2 className="flex items-center gap-2 px-4 py-3 text-xs font-bold">
+        <ArrowUpFromLine size={15} className="text-[var(--ok)]" aria-hidden="true" />
+        出站发布
+      </h2>
+      <div className="grid grid-cols-4 border-y border-[var(--border)] max-[980px]:grid-cols-2">
+        <Metric label="模型就绪" value={formatTimestamp(delivery.ready_at_ms)} />
+        <Metric label="进入队列" value={formatTimestamp(delivery.scheduled_at_ms)} />
+        <Metric label="首条发布" value={formatTimestamp(delivery.published_at_ms)} />
+        <Metric label="排队时长" value={formatDuration(delivery.queue_delay_ms)} />
+      </div>
+      <p className="m-0 px-4 py-2.5 text-xs text-[var(--text-dim)]">
+        已发布 {formatViewerOutputProgress(delivery)}
+        {delivery.interruption_reason ? `；中断原因：${delivery.interruption_reason}` : ''}
+      </p>
     </section>
   )
 }
@@ -370,6 +395,7 @@ function CallDetail({ trace }: { trace: AiCallTrace }): React.JSX.Element {
       </div>
 
       <ViewerTriggerContext trace={trace} />
+      <ViewerOutputDelivery trace={trace} />
 
       {trace.error && (
         <section className="border-b border-[var(--danger-border)] bg-[var(--danger-soft)] px-4 py-3" role="alert">

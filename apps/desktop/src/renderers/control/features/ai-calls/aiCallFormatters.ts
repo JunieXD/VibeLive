@@ -2,6 +2,7 @@ import type { AiCallTrace } from '../../../../shared/backend-client'
 
 type ViewerTriggerContext = NonNullable<AiCallTrace['trigger_context']>
 type ViewerTrigger = ViewerTriggerContext['triggers'][number]
+type ViewerOutputDelivery = NonNullable<AiCallTrace['viewer_output_delivery']>
 
 const timestampFormatter = new Intl.DateTimeFormat('zh-CN', {
   month: '2-digit',
@@ -114,6 +115,10 @@ export function formatDuration(durationMs: number | null | undefined): string {
   if (durationMs === null || durationMs === undefined) return '—'
   if (durationMs < 1_000) return `${durationMs} ms`
   return `${(durationMs / 1_000).toFixed(durationMs < 10_000 ? 2 : 1)} s`
+}
+
+export function formatViewerOutputProgress(delivery: ViewerOutputDelivery): string {
+  return `${delivery.published_event_count}/${delivery.event_count} 条`
 }
 
 export function retainSelectedCallId<T extends { call_id: string }>(

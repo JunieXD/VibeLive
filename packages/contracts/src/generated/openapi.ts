@@ -1016,6 +1016,7 @@ export interface components {
             /** Viewer Instance Id */
             viewer_instance_id?: string | null;
             trigger_context?: components["schemas"]["ViewerRequestTriggerContext"] | null;
+            viewer_output_delivery?: components["schemas"]["ViewerOutputDelivery"] | null;
             /** Utterance Id */
             utterance_id?: string | null;
             /** Started At Ms */
@@ -2487,6 +2488,29 @@ export interface components {
          * @enum {string}
          */
         ViewerLifecycleState: "not_joined" | "active" | "left" | "kicked" | "ended" | "removed";
+        /**
+         * ViewerOutputDelivery
+         * @description Timing and progress for one validated Viewer output batch.
+         */
+        ViewerOutputDelivery: {
+            /** Ready At Ms */
+            ready_at_ms: number;
+            /** Scheduled At Ms */
+            scheduled_at_ms: number;
+            /** Published At Ms */
+            published_at_ms?: number | null;
+            /** Queue Delay Ms */
+            queue_delay_ms?: number | null;
+            /** Event Count */
+            event_count: number;
+            /**
+             * Published Event Count
+             * @default 0
+             */
+            published_event_count: number;
+            /** Interruption Reason */
+            interruption_reason?: string | null;
+        };
         /** ViewerPrivateState */
         ViewerPrivateState: {
             /**
@@ -2609,6 +2633,8 @@ export interface components {
              */
             stale_or_cancel_reason: string | null;
             side_effects?: components["schemas"]["SideEffectTrace"];
+            /** @default null */
+            output_delivery: components["schemas"]["ViewerOutputDelivery"] | null;
         };
         /**
          * ViewerRequestTriggerContext
