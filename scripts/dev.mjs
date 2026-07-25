@@ -103,13 +103,6 @@ function observeChild(child, label) {
 }
 
 function resolvePnpmCommand(arguments_) {
-  if (process.env.npm_execpath) {
-    return {
-      executable: process.execPath,
-      arguments: [process.env.npm_execpath, ...arguments_],
-      useShell: false
-    };
-  }
   return {
     executable: "pnpm",
     arguments: arguments_,
