@@ -129,6 +129,7 @@ function createBackendProcessController(): BackendProcessController {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     ADVX_BACKEND_URL: backendBaseUrl,
+    ADVX_BACKEND_FILE_LOGGING: "0",
     ADVX_LOCAL_TOKEN: localToken,
     ADVX_DATA_DIR: app.isPackaged
       ? join(app.getPath("userData"), "data")

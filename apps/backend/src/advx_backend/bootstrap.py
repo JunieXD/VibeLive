@@ -86,6 +86,7 @@ BACKEND_VERSION = "0.1.0"
 logger = logging.getLogger(__name__)
 LOCAL_TOKEN_ENV = "ADVX_LOCAL_TOKEN"
 DATA_DIRECTORY_ENV = "ADVX_DATA_DIR"
+FILE_LOGGING_ENV = "ADVX_BACKEND_FILE_LOGGING"
 MODEL_BASE_URL_ENV = "ADVX_MODEL_BASE_URL"
 MODEL_NAME_ENV = "ADVX_MODEL_NAME"
 MODEL_API_KEY_ENV = "ADVX_MODEL_API_KEY"
@@ -770,7 +771,13 @@ def build_runtime_from_environment() -> BackendRuntime:
         .expanduser()
         .resolve()
     )
-    configure_logging(log_directory=resolved_data_directory / "logs")
+    configure_logging(
+        log_directory=(
+            None
+            if os.environ.get(FILE_LOGGING_ENV) == "0"
+            else resolved_data_directory / "logs"
+        )
+    )
     runtime = build_runtime(
         local_token=os.environ.get(LOCAL_TOKEN_ENV),
         data_directory=resolved_data_directory,

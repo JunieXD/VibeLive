@@ -136,13 +136,19 @@ class TraceStore:
         self._max_items = max_items
         self._path = path
         self._items: deque[DebugTrace] = deque(maxlen=max_items)
+        self._writes_since_compaction = 0
         if path is not None:
             self._load()
 
     def append(self, trace: DebugTrace) -> None:
         assert_redacted_artifact(trace)
         self._items.append(trace)
-        self._persist()
+        if self._path is None:
+            return
+        if self._writes_since_compaction >= self._max_items * 4:
+            self._persist()
+            return
+        self._append(trace)
 
     def query(self, query: TraceQuery | None = None) -> TraceQueryResponse:
         query = query or TraceQuery()
@@ -183,11 +189,19 @@ class TraceStore:
             return
         loaded: deque[DebugTrace] = deque(maxlen=self._max_items)
         migrated = False
+        truncated_tail = False
         with self._path.open(encoding="utf-8") as handle:
-            for line in handle:
+            lines = handle.readlines()
+            for index, line in enumerate(lines):
                 if not line.strip():
                     continue
-                raw = json.loads(line)
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    if index == len(lines) - 1:
+                        truncated_tail = True
+                        break
+                    raise
                 assert_redacted_artifact(raw)
                 if raw.get("trace_kind") == "observation_wave":
                     raw, was_migrated = self._migrate_observation_wave_trace(raw)
@@ -197,8 +211,13 @@ class TraceStore:
                     raw, was_migrated = self._migrate_viewer_request_trace(raw)
                     migrated = migrated or was_migrated
                     loaded.append(ViewerRequestTrace.model_validate(raw))
+                self._writes_since_compaction += 1
         self._items = loaded
-        if migrated:
+        if (
+            migrated
+            or truncated_tail
+            or self._writes_since_compaction >= self._max_items * 4
+        ):
             self._persist()
 
     @staticmethod
@@ -264,6 +283,24 @@ class TraceStore:
         ]
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._atomic_write(self._path, "\n".join(lines) + ("\n" if lines else ""))
+        self._writes_since_compaction = 0
+
+    def _append(self, trace: DebugTrace) -> None:
+        assert self._path is not None
+        payload = trace.model_dump(mode="json")
+        assert_redacted_artifact(payload)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            handle.write("\n")
+        self._writes_since_compaction += 1
 
     @staticmethod
     def _matches(trace: DebugTrace, query: TraceQuery) -> bool:
