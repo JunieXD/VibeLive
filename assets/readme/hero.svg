@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="420" viewBox="0 0 1200 420"
+     role="img" aria-labelledby="title desc">
+  <title id="title">AI Audience 众声</title>
+  <desc id="desc">ADVX Live turns a shared screen, voice, and text into distinct reactions from a local AI audience.</desc>
+
+  <rect width="1200" height="420" rx="24" fill="#0b0d10"/>
+
+  <g opacity="0.38" stroke="#343941" stroke-width="1">
+    <path d="M48 78H668"/>
+    <path d="M48 342H668"/>
+    <path d="M688 48V372"/>
+  </g>
+
+  <g transform="translate(52 48)">
+    <text x="0" y="22"
+          fill="#98a2ad"
+          font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+          font-size="18" font-weight="600">ADVX LIVE · LOCAL AI AUDIENCE</text>
+
+    <text x="0" y="106"
+          fill="#f6f2e9"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="64" font-weight="760">AI Audience</text>
+    <text x="0" y="166"
+          fill="#57d6c7"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="54" font-weight="760">众声</text>
+
+    <text x="0" y="218"
+          fill="#f6c85f"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="28" font-weight="650">同一幕，众声不同。</text>
+
+    <text x="0" y="262"
+          fill="#c9d0d7"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="20">让画面、语音与文字，变成一群有身份、会接话、</text>
+    <text x="0" y="294"
+          fill="#c9d0d7"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="20">有不同观点的 AI 观众实时弹幕。</text>
+
+    <g transform="translate(0 326)">
+      <rect x="0" y="0" width="132" height="34" rx="17" fill="#182b29" stroke="#2f746d"/>
+      <text x="66" y="23" text-anchor="middle"
+            fill="#77e1d5"
+            font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+            font-size="18">SCREEN</text>
+      <rect x="144" y="0" width="116" height="34" rx="17" fill="#2c2415" stroke="#80662c"/>
+      <text x="202" y="23" text-anchor="middle"
+            fill="#f6c85f"
+            font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+            font-size="18">VOICE</text>
+      <rect x="272" y="0" width="100" height="34" rx="17" fill="#30201f" stroke="#8f4540"/>
+      <text x="322" y="23" text-anchor="middle"
+            fill="#ff7d72"
+            font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+            font-size="18">TEXT</text>
+    </g>
+  </g>
+
+  <g transform="translate(724 48)">
+    <rect width="428" height="324" rx="20" fill="#14171c" stroke="#343a43" stroke-width="2"/>
+
+    <circle cx="24" cy="24" r="5" fill="#ff6b5e"/>
+    <circle cx="42" cy="24" r="5" fill="#f6c85f"/>
+    <circle cx="60" cy="24" r="5" fill="#57d6c7"/>
+    <text x="82" y="31"
+          fill="#98a2ad"
+          font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+          font-size="18">ONE SHARED SCENE</text>
+
+    <g transform="translate(28 74)">
+      <rect width="182" height="132" rx="12" fill="#0b0d10" stroke="#59616c" stroke-width="2"/>
+      <rect x="14" y="16" width="154" height="82" rx="7" fill="#20252c"/>
+      <path d="M30 78L68 48L94 68L120 40L154 78Z" fill="#2e5f5a"/>
+      <circle cx="134" cy="36" r="10" fill="#f6c85f"/>
+      <path d="M70 116H112" stroke="#98a2ad" stroke-width="4" stroke-linecap="round"/>
+      <path d="M91 99V116" stroke="#98a2ad" stroke-width="4" stroke-linecap="round"/>
+      <text x="91" y="157" text-anchor="middle"
+            fill="#c9d0d7"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="18">近期画面 · 语音 · 对话</text>
+    </g>
+
+    <g fill="none" stroke="#505761" stroke-width="2">
+      <path d="M210 112C250 112 246 92 272 92"/>
+      <path d="M210 140C250 140 246 160 272 160"/>
+      <path d="M210 168C250 168 246 228 272 228"/>
+    </g>
+
+    <g transform="translate(268 68)">
+      <circle cx="24" cy="24" r="22" fill="#17312e" stroke="#57d6c7" stroke-width="2"/>
+      <text x="24" y="31" text-anchor="middle"
+            fill="#77e1d5"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="20" font-weight="700">问</text>
+      <rect x="58" y="5" width="110" height="38" rx="9" fill="#182b29"/>
+      <text x="113" y="30" text-anchor="middle"
+            fill="#d4f5f1"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="18">追问细节</text>
+
+      <circle cx="24" cy="92" r="22" fill="#302717" stroke="#f6c85f" stroke-width="2"/>
+      <text x="24" y="99" text-anchor="middle"
+            fill="#f6c85f"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="20" font-weight="700">感</text>
+      <rect x="58" y="73" width="110" height="38" rx="9" fill="#2c2415"/>
+      <text x="113" y="98" text-anchor="middle"
+            fill="#fff0c5"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="18">回应情绪</text>
+
+      <circle cx="24" cy="160" r="22" fill="#352120" stroke="#ff6b5e" stroke-width="2"/>
+      <text x="24" y="167" text-anchor="middle"
+            fill="#ff8e84"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="20" font-weight="700">拆</text>
+      <rect x="58" y="141" width="110" height="38" rx="9" fill="#30201f"/>
+      <text x="113" y="166" text-anchor="middle"
+            fill="#ffd4d0"
+            font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+            font-size="18">给出观点</text>
+    </g>
+
+    <g transform="translate(28 274)">
+      <path d="M0 0H372" stroke="#343a43"/>
+      <text x="0" y="26"
+            fill="#98a2ad"
+            font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+            font-size="18">DISTINCT VIEWERS · SHARED CONTEXT</text>
+    </g>
+  </g>
+</svg>

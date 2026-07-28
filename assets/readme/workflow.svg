@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="360" viewBox="0 0 1200 360"
+     role="img" aria-labelledby="title desc">
+  <title id="title">AI Audience live response loop</title>
+  <desc id="desc">Screen, microphone, system audio, and text become a contextual observation wave. Independent viewers react through a controllable desktop overlay, while public interaction can become local shared memory.</desc>
+
+  <rect width="1200" height="360" rx="22" fill="#f7f3ea"/>
+
+  <text x="56" y="54"
+        fill="#202328"
+        font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+        font-size="34" font-weight="760">一次反应，经过四个明确阶段</text>
+  <text x="56" y="86"
+        fill="#636a73"
+        font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+        font-size="18">CAPTURE → CONTEXT → VIEWERS → BARRAGE + MEMORY</text>
+
+  <g stroke="#bbb4a8" stroke-width="2" fill="none">
+    <path d="M278 192H344"/>
+    <path d="M558 192H624"/>
+    <path d="M838 192H904"/>
+  </g>
+  <g fill="#8d8579">
+    <path d="M344 192L332 185V199Z"/>
+    <path d="M624 192L612 185V199Z"/>
+    <path d="M904 192L892 185V199Z"/>
+  </g>
+
+  <g transform="translate(56 120)">
+    <rect width="222" height="166" rx="14" fill="#ffffff" stroke="#d3cdc3" stroke-width="2"/>
+    <text x="22" y="34"
+          fill="#57a99f"
+          font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+          font-size="18" font-weight="700">01 · CAPTURE</text>
+    <text x="22" y="72"
+          fill="#202328"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="24" font-weight="700">用户主动选择输入</text>
+    <text x="22" y="108"
+          fill="#636a73"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="19">画面 · 麦克风</text>
+    <text x="22" y="138"
+          fill="#636a73"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="19">系统声音 · 文字</text>
+  </g>
+
+  <g transform="translate(344 120)">
+    <rect width="214" height="166" rx="14" fill="#ffffff" stroke="#d3cdc3" stroke-width="2"/>
+    <text x="22" y="34"
+          fill="#b68b29"
+          font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+          font-size="18" font-weight="700">02 · CONTEXT</text>
+    <text x="22" y="72"
+          fill="#202328"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="24" font-weight="700">组成观察波次</text>
+    <text x="22" y="108"
+          fill="#636a73"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="19">时间、来源与近期</text>
+    <text x="22" y="138"
+          fill="#636a73"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="19">房间对话保持可追溯</text>
+  </g>
+
+  <g transform="translate(624 120)">
+    <rect width="214" height="166" rx="14" fill="#ffffff" stroke="#d3cdc3" stroke-width="2"/>
+    <text x="22" y="34"
+          fill="#d3564c"
+          font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+          font-size="18" font-weight="700">03 · VIEWERS</text>
+    <text x="22" y="72"
+          fill="#202328"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="24" font-weight="700">独立决定是否发言</text>
+    <text x="22" y="108"
+          fill="#636a73"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="19">身份 · 人格 · 冷却</text>
+    <text x="22" y="138"
+          fill="#636a73"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="19">短期状态 · 可合法沉默</text>
+  </g>
+
+  <g transform="translate(904 120)">
+    <rect width="240" height="166" rx="14" fill="#202328" stroke="#202328" stroke-width="2"/>
+    <text x="22" y="34"
+          fill="#77e1d5"
+          font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+          font-size="18" font-weight="700">04 · LIVE OUTPUT</text>
+    <text x="22" y="72"
+          fill="#f7f3ea"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="24" font-weight="700">弹幕进入桌面现场</text>
+    <text x="22" y="108"
+          fill="#c8c3ba"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="19">校验 · 时效 · 清屏</text>
+    <text x="22" y="138"
+          fill="#c8c3ba"
+          font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+          font-size="19">公开互动形成共享记忆</text>
+  </g>
+
+  <text x="56" y="326"
+        fill="#7b7368"
+        font-family="-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif"
+        font-size="18">概念流程图；具体运行状态、模型调用与证据可在应用和结构化调试接口中查看。</text>
+</svg>
